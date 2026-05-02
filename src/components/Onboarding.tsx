@@ -1,0 +1,882 @@
+﻿import { useState, useEffect } from 'react'
+import { useElectron } from '../hooks/useElectron'
+import { UserProfile } from '../agent/types'
+import { syncMemoryFromJira } from '../utils/memorySync'
+
+interface OnboardingProps {
+  onComplete: () => void
+}
+
+// Steps:
+// 1. Welcome + Connect to Atlassian via MCP OAuth
+// 2. Select projects to monitor
+// 3. AI Provider setup
+// 4. Workspace folder selection
+// 5. Communication style preferences + Complete
+type Step = 1 | 2 | 3 | 4 | 5
+
+// MCP connection states
+type MCPConnectionState = 'idle' | 'connecting' | 'oauth_pending' | 'connected' | 'error'
+
+interface JiraProject {
+  id: string
+  key: string
+  name: string
+  projectTypeKey: string
+  avatarUrls?: Record<string, string>
+}
+
+const ArrowIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+  </svg>
+)
+
+const CheckCircleIcon = () => (
+  <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+)
+
+const FolderIcon = () => (
+  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+  </svg>
+)
+
+export default function Onboarding({ onComplete }: OnboardingProps) {
+  const [step, setStep] = useState<Step>(1)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  
+  // MCP connection state
+  const [mcpState, setMCPState] = useState<MCPConnectionState>('idle')
+  const [mcpStatusMessage, setMCPStatusMessage] = useState<string>('')
+  
+  // Form states
+  const [aiForm, setAIForm] = useState({
+    provider: 'openai' as 'openai' | 'anthropic' | 'groq' | 'moonshot',
+    apiKey: '',
+  })
+  const [workspace, setWorkspace] = useState<string | null>(null)
+  const [allProjects, setAllProjects] = useState<JiraProject[]>([])
+  const [selectedProjectKeys, setSelectedProjectKeys] = useState<Set<string>>(new Set())
+  const [profile, setProfile] = useState<Partial<UserProfile>>({
+    style: 'balanced',
+    verbosity: 'balanced',
+    tone: 'balanced',
+    writingPatterns: {
+      commonPhrases: [],
+      taskFormat: '',
+      commentStyle: '',
+    },
+    focusProjects: [],
+    confirmAllJiraActions: true,
+  })
+  const [writingSample, setWritingSample] = useState('')
+
+  const { storage, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
+
+  // Check MCP status on mount
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const status = await mcp.status()
+        if (status.connected) {
+          setMCPState('connected')
+          // If already connected, fetch projects
+          const projectsResult = await mcp.getProjects()
+          if (projectsResult.success && projectsResult.data) {
+            setAllProjects(projectsResult.data as JiraProject[])
+          }
+        }
+      } catch {
+        // Ignore - not connected yet
+      }
+    }
+    checkStatus()
+  }, [])
+
+  // Handle Atlassian MCP connection (Step 1 -> Step 2)
+  const handleMCPConnect = async () => {
+    setIsLoading(true)
+    setError(null)
+    setMCPState('connecting')
+    setMCPStatusMessage('Starting connection to Atlassian...')
+
+    try {
+      // Start MCP connection - this will trigger OAuth flow
+      setMCPStatusMessage('A browser window will open for authentication...')
+      setMCPState('oauth_pending')
+      
+      const result = await mcp.connect()
+      
+      if (!result.success) {
+        setError(result.error || 'Failed to connect to Atlassian')
+        setMCPState('error')
+        return
+      }
+
+      setMCPState('connected')
+      setMCPStatusMessage('Connected! Fetching your projects...')
+
+      // Fetch projects via MCP
+      const projectsResult = await mcp.getProjects()
+      if (projectsResult.success && projectsResult.data) {
+        setAllProjects(projectsResult.data as JiraProject[])
+        setStep(2)
+      } else {
+        setError(projectsResult.error || 'Failed to fetch projects')
+        setMCPState('error')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connection failed')
+      setMCPState('error')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Retry MCP connection
+  const handleMCPRetry = () => {
+    setMCPState('idle')
+    setError(null)
+    setMCPStatusMessage('')
+  }
+
+  // Handle project selection (Step 2 -> Step 3)
+  const handleProjectsSelected = async () => {
+    if (selectedProjectKeys.size === 0) {
+      setError('Please select at least one project')
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const selectedProjects = allProjects.filter(p => selectedProjectKeys.has(p.key))
+      const projectKeys = selectedProjects.map(p => p.key)
+      
+      // Save monitored projects to metadata store
+      await jiraMetadataAPI.setMonitoredProjects(selectedProjects.map(p => ({
+        id: p.id,
+        key: p.key,
+        name: p.name,
+        projectTypeKey: p.projectTypeKey,
+        avatarUrl: p.avatarUrls?.['48x48']
+      })))
+
+      // Sync ALL metadata for selected projects via MCP (issue types, fields, AND users)
+      setMCPStatusMessage('Syncing project metadata (issue types, custom fields, team members)...')
+      const allMetadataResult = await mcp.syncAllMetadata(projectKeys)
+      
+      if (allMetadataResult.success && allMetadataResult.metadata) {
+        const syncedMetadata = allMetadataResult.metadata as {
+          projects: Record<string, {
+            project: JiraProject
+            issueTypes: Array<{ id: string; name: string; description?: string; subtask: boolean; hierarchyLevel?: number }>
+            fieldsByIssueType: Record<string, Array<{ fieldId: string; key: string; name: string; required: boolean; hasDefaultValue?: boolean; schema: { type: string; custom?: string }; allowedValues?: Array<{ id: string; value?: string; name?: string }> }>>
+          }>
+          users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>
+        }
+        
+        // Update project metadata in storage
+        for (const [projectKey, data] of Object.entries(syncedMetadata.projects)) {
+          await jiraMetadataAPI.updateProjectMetadata(projectKey, {
+            project: {
+              id: data.project.id,
+              key: data.project.key,
+              name: data.project.name,
+              projectTypeKey: data.project.projectTypeKey
+            },
+            issueTypes: data.issueTypes.map(it => ({
+              id: it.id,
+              name: it.name,
+              description: it.description,
+              subtask: it.subtask,
+              hierarchyLevel: it.hierarchyLevel || 0
+            })),
+            fieldsByIssueType: Object.fromEntries(
+              Object.entries(data.fieldsByIssueType).map(([issueTypeId, fields]) => [
+                issueTypeId,
+                fields.map(f => ({
+                  id: f.fieldId || f.key,
+                  key: f.key,
+                  name: f.name,
+                  type: f.schema?.type || 'string',
+                  custom: !!f.schema?.custom,
+                  required: f.required,
+                  hasDefaultValue: f.hasDefaultValue || false,
+                  schema: f.schema,
+                  allowedValues: f.allowedValues
+                }))
+              ])
+            )
+          })
+        }
+        
+        // Save users/team members
+        if (syncedMetadata.users && syncedMetadata.users.length > 0) {
+          await jiraMetadataAPI.setUsers(syncedMetadata.users)
+          setMCPStatusMessage(`Synced ${Object.keys(syncedMetadata.projects).length} project(s) and ${syncedMetadata.users.length} team member(s)`)
+        } else {
+          setMCPStatusMessage(`Synced ${Object.keys(syncedMetadata.projects).length} project(s)`)
+        }
+      } else {
+        // Fallback to basic sync if comprehensive sync fails
+        setMCPStatusMessage('Syncing project metadata...')
+        const metadataResult = await mcp.syncMetadata(projectKeys)
+        
+        if (metadataResult.success && metadataResult.data) {
+          const syncedData = metadataResult.data as Record<string, {
+            project: JiraProject
+            issueTypes: Array<{ id: string; name: string; description?: string; subtask: boolean }>
+            fieldsByIssueType: Record<string, Array<{ fieldId: string; key: string; name: string; required: boolean; schema: { type: string; custom?: string } }>>
+          }>
+          
+          for (const [projectKey, data] of Object.entries(syncedData)) {
+            await jiraMetadataAPI.updateProjectMetadata(projectKey, {
+              issueTypes: data.issueTypes.map(it => ({
+                id: it.id,
+                name: it.name,
+                description: it.description,
+                subtask: it.subtask
+              })),
+              customFields: Object.values(data.fieldsByIssueType).flat()
+                .filter((f, i, arr) => arr.findIndex(x => x.fieldId === f.fieldId) === i)
+                .filter(f => f.schema.custom)
+                .map(f => ({
+                  id: f.fieldId,
+                  key: f.key,
+                  name: f.name,
+                  type: f.schema.type,
+                  custom: f.schema.custom
+                }))
+            })
+          }
+        }
+      }
+
+      setProfile(prev => ({
+        ...prev,
+        focusProjects: selectedProjects.map(p => p.key)
+      }))
+
+      // Sync memory - learn user's writing style from their Jira issues
+      setMCPStatusMessage('Learning your writing style from existing issues...')
+      try {
+        // Cast to any to bypass strict type checking - the API shapes are compatible at runtime
+        await syncMemoryFromJira(mcp as Parameters<typeof syncMemoryFromJira>[0], jiraMetadataAPI as Parameters<typeof syncMemoryFromJira>[1], projectKeys)
+      } catch (memoryError) {
+        console.error('Failed to sync memory:', memoryError)
+        // Non-critical - continue with onboarding
+      }
+
+      // Small delay to show success message
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      setMCPStatusMessage('')
+      setStep(3)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save projects')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Handle AI provider setup (Step 3 -> Step 4)
+  const handleAISubmit = async () => {
+    if (!aiForm.apiKey) {
+      setError('Please enter your API key')
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      await storage.setSecure('aiConfig', JSON.stringify({
+        provider: aiForm.provider,
+        apiKey: aiForm.apiKey,
+      }))
+      setStep(4)
+    } catch (err) {
+      setError('Failed to save AI configuration')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Handle workspace selection
+  const handleWorkspaceSelect = async () => {
+    try {
+      const result = await file.selectWorkspace()
+      if (result.success && result.path) {
+        setWorkspace(result.path)
+      }
+    } catch (err) {
+      setError('Failed to select folder')
+    }
+  }
+
+  // Handle style preferences and complete onboarding
+  const handleStyleSubmit = async () => {
+    let nextProfile = { ...profile }
+    if (writingSample) {
+      const commonPhrases: string[] = []
+      const lowerSample = writingSample.toLowerCase()
+      if (lowerSample.includes('please')) commonPhrases.push('please')
+      if (lowerSample.includes('need to')) commonPhrases.push('need to')
+      if (lowerSample.includes('should')) commonPhrases.push('should')
+      
+      nextProfile = {
+        ...nextProfile,
+        writingPatterns: {
+          commonPhrases,
+          taskFormat: writingSample,
+          commentStyle: writingSample,
+        }
+      }
+      setProfile(nextProfile)
+    }
+
+    await handleComplete(nextProfile)
+  }
+
+  // Complete onboarding
+  const handleComplete = async (profileOverride: Partial<UserProfile> = profile) => {
+    setIsLoading(true)
+    
+    try {
+      const selectedProjects = allProjects.filter(p => selectedProjectKeys.has(p.key))
+      
+      const fullProfile: UserProfile = {
+        style: profileOverride.style || 'balanced',
+        verbosity: profileOverride.verbosity || 'balanced',
+        tone: profileOverride.tone || 'balanced',
+        writingPatterns: profileOverride.writingPatterns || {
+          commonPhrases: [],
+          taskFormat: '',
+          commentStyle: '',
+        },
+        focusProjects: selectedProjects.map(p => p.key),
+        confirmAllJiraActions: true,
+        onboardingCompleted: true,
+      }
+      
+      await storage.set('userProfile', fullProfile)
+      onComplete()
+    } catch (err) {
+      setError('Failed to save settings')
+      setIsLoading(false)
+    }
+  }
+
+  const toggleProject = (key: string) => {
+    const newSelected = new Set(selectedProjectKeys)
+    if (newSelected.has(key)) {
+      newSelected.delete(key)
+    } else {
+      newSelected.add(key)
+    }
+    setSelectedProjectKeys(newSelected)
+  }
+
+  const renderStep = () => {
+    switch (step) {
+      // Step 1: Welcome + Connect to Atlassian via MCP OAuth
+      case 1:
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <div className="text-center">
+              <div className="w-20 h-20 bg-gradient-to-br from-mirai-500 to-mirai-700 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
+                <span className="text-white text-3xl font-bold">M</span>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800">Welcome to Mirai!</h2>
+              <p className="text-gray-600 mt-2">
+                Your AI-powered project management assistant. Let's connect to your Atlassian workspace.
+              </p>
+            </div>
+
+            {/* MCP Connection Status */}
+            {mcpState === 'idle' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <svg className="w-6 h-6 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div>
+                    <p className="font-medium text-blue-800">Secure Atlassian Connection</p>
+                    <p className="text-sm text-blue-700 mt-1">
+                      Clicking the button below will open your browser to securely sign in with your Atlassian account. No API tokens needed!
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {mcpState === 'connecting' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
+                  <p className="text-blue-800">{mcpStatusMessage || 'Connecting...'}</p>
+                </div>
+              </div>
+            )}
+
+            {mcpState === 'oauth_pending' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <svg className="w-6 h-6 text-amber-600 mt-0.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  <div>
+                    <p className="font-medium text-amber-800">Waiting for authentication...</p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      Please complete the sign-in process in your browser. If a browser window didn't open, check if it was blocked by your popup blocker.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {mcpState === 'connected' && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <CheckCircleIcon />
+                  <p className="text-green-800 font-medium">{mcpStatusMessage || 'Connected to Atlassian!'}</p>
+                </div>
+              </div>
+            )}
+
+            {mcpState === 'error' && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <svg className="w-6 h-6 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="font-medium text-red-800">Connection failed</p>
+                    <p className="text-sm text-red-700 mt-1">{error}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {error && mcpState !== 'error' && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-red-700 text-sm">{error}</p>
+              </div>
+            )}
+
+            {mcpState === 'error' ? (
+              <button
+                onClick={handleMCPRetry}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gray-600 text-white rounded-xl hover:bg-gray-700 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Try Again
+              </button>
+            ) : (
+              <button
+                onClick={handleMCPConnect}
+                disabled={isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending'}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+              >
+                {isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending' ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                    {mcpState === 'oauth_pending' ? 'Waiting for browser...' : 'Connecting...'}
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    Connect to Atlassian
+                  </>
+                )}
+              </button>
+            )}
+
+            <p className="text-xs text-center text-gray-500">
+              Mirai uses the official Atlassian MCP server for secure access to your Jira data.
+            </p>
+          </div>
+        )
+
+      // Step 2: Project Selection
+      case 2:
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex items-center gap-3 text-green-600">
+              <CheckCircleIcon />
+              <span className="font-medium">Jira connected successfully!</span>
+            </div>
+
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800">Select Projects to Monitor</h2>
+              <p className="text-gray-600 mt-2">
+                Choose which Jira projects Mirai should help you manage. The AI will focus on these projects.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-600">
+                {selectedProjectKeys.size} of {allProjects.length} selected
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedProjectKeys(new Set(allProjects.map(p => p.key)))}
+                  className="text-mirai-600 hover:underline"
+                >
+                  Select all
+                </button>
+                <span className="text-gray-300">|</span>
+                <button
+                  onClick={() => setSelectedProjectKeys(new Set())}
+                  className="text-mirai-600 hover:underline"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto space-y-2 border border-gray-200 rounded-xl p-3">
+              {allProjects.map(project => (
+                <label
+                  key={project.id}
+                  className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
+                    selectedProjectKeys.has(project.key)
+                      ? 'border-mirai-500 bg-mirai-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedProjectKeys.has(project.key)}
+                    onChange={() => toggleProject(project.key)}
+                    className="sr-only"
+                  />
+                  <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center transition-colors ${
+                    selectedProjectKeys.has(project.key)
+                      ? 'border-mirai-500 bg-mirai-500'
+                      : 'border-gray-300'
+                  }`}>
+                    {selectedProjectKeys.has(project.key) && (
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
+                  {project.avatarUrls?.['24x24'] && (
+                    <img src={project.avatarUrls['24x24']} alt="" className="w-6 h-6 rounded mr-2" />
+                  )}
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{project.name}</div>
+                    <div className="text-xs text-gray-500">{project.key}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {error && (
+              <p className="text-red-500 text-sm">{error}</p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStep(1)}
+                className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleProjectsSelected}
+                disabled={isLoading || selectedProjectKeys.size === 0}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+              >
+                {isLoading ? 'Saving...' : 'Continue'}
+                <ArrowIcon />
+              </button>
+            </div>
+          </div>
+        )
+
+      // Step 3: AI Provider
+      case 3:
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex items-center gap-3 text-green-600">
+              <CheckCircleIcon />
+              <span className="font-medium">
+                {selectedProjectKeys.size} project{selectedProjectKeys.size !== 1 ? 's' : ''} selected
+              </span>
+            </div>
+
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800">Choose your AI provider</h2>
+              <p className="text-gray-600 mt-2">
+                Select which AI service you'd like to use for intelligent assistance.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Provider
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['openai', 'anthropic', 'groq'] as const).map((provider) => (
+                    <button
+                      key={provider}
+                      onClick={() => setAIForm({ ...aiForm, provider })}
+                      className={`px-4 py-3 rounded-xl border-2 transition-colors ${
+                        aiForm.provider === provider
+                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {provider === 'openai' && 'OpenAI'}
+                      {provider === 'anthropic' && 'Claude'}
+                      {provider === 'groq' && 'Groq'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  API Key
+                </label>
+                <input
+                  type="password"
+                  value={aiForm.apiKey}
+                  onChange={(e) => setAIForm({ ...aiForm, apiKey: e.target.value })}
+                  placeholder={`Your ${aiForm.provider} API key`}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {error && (
+              <p className="text-red-500 text-sm">{error}</p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStep(2)}
+                className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleAISubmit}
+                disabled={isLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+              >
+                {isLoading ? 'Saving...' : 'Continue'}
+                <ArrowIcon />
+              </button>
+            </div>
+          </div>
+        )
+
+      // Step 4: Workspace folder
+      case 4:
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex items-center gap-3 text-green-600">
+              <CheckCircleIcon />
+              <span className="font-medium">AI provider configured!</span>
+            </div>
+
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800">Select a workspace folder</h2>
+              <p className="text-gray-600 mt-2">
+                Choose a folder where I can read your project documents and create reports for you.
+              </p>
+            </div>
+
+            <div 
+              onClick={handleWorkspaceSelect}
+              className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-mirai-400 hover:bg-mirai-50/50 transition-colors"
+            >
+              <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center text-gray-400">
+                <FolderIcon />
+              </div>
+              {workspace ? (
+                <p className="text-mirai-600 font-medium">{workspace}</p>
+              ) : (
+                <>
+                  <p className="text-gray-600 font-medium">Click to select a folder</p>
+                  <p className="text-gray-400 text-sm mt-1">
+                    This is optional - you can set it later in Settings
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStep(3)}
+                className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setStep(5)}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 transition-colors"
+              >
+                {workspace ? 'Continue' : 'Skip for now'}
+                <ArrowIcon />
+              </button>
+            </div>
+          </div>
+        )
+
+      // Step 5: Communication style
+      case 5:
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800">How should I communicate?</h2>
+              <p className="text-gray-600 mt-2">
+                Tell me your preferences so I can adapt to your style.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Communication Style
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['technical', 'balanced', 'conversational'] as const).map((style) => (
+                    <button
+                      key={style}
+                      onClick={() => setProfile({ ...profile, style })}
+                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
+                        profile.style === style
+                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {style}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Response Length
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['concise', 'balanced', 'detailed'] as const).map((verbosity) => (
+                    <button
+                      key={verbosity}
+                      onClick={() => setProfile({ ...profile, verbosity })}
+                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
+                        profile.verbosity === verbosity
+                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {verbosity}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tone
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['formal', 'balanced', 'casual'] as const).map((tone) => (
+                    <button
+                      key={tone}
+                      onClick={() => setProfile({ ...profile, tone })}
+                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
+                        profile.tone === tone
+                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {tone}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Writing Sample (Optional)
+                </label>
+                <textarea
+                  value={writingSample}
+                  onChange={(e) => setWritingSample(e.target.value)}
+                  placeholder="Paste a sample of how you typically write Jira tasks or comments..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent h-24 resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStep(4)}
+                className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleStyleSubmit}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 transition-colors"
+              >
+                {isLoading ? 'Setting up...' : 'Complete Setup'}
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )
+      default:
+        return null
+    }
+  }
+
+  // Progress indicator
+  const renderProgress = () => {
+    return (
+      <div className="flex items-center justify-center gap-2 mb-8">
+        {[1, 2, 3, 4, 5].map((s) => (
+          <div
+            key={s}
+            className={`h-2 rounded-full transition-all ${
+              s === step 
+                ? 'w-8 bg-mirai-500' 
+                : s < step 
+                  ? 'w-2 bg-mirai-300' 
+                  : 'w-2 bg-gray-200'
+            }`}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 overflow-hidden">
+        {renderProgress()}
+        {renderStep()}
+      </div>
+    </div>
+  )
+}
+

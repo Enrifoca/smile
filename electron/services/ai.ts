@@ -1,0 +1,609 @@
+// AI Service - Runs in Electron main process to avoid CORS issues
+
+/**
+ * Robustly parse tool call arguments from a model response.
+ * LLMs (especially Groq/LLaMA) sometimes return slightly malformed JSON —
+ * unescaped newlines in string values, truncated output, trailing commas, etc.
+ */
+function safeParseToolArgs(raw: string): Record<string, unknown> {
+  if (!raw || raw.trim() === '') return {}
+
+  // 1. Try direct parse first
+  try {
+    return JSON.parse(raw)
+  } catch { /* continue */ }
+
+  // 2. Fix unescaped literal newlines/tabs inside string values
+  try {
+    const fixed = raw
+      .replace(/:\s*"([\s\S]*?)(?<!\\)"(?=\s*[,}])/g, (_match, val: string) => {
+        const escaped = val
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '\\r')
+          .replace(/\t/g, '\\t')
+        return `: "${escaped}"`
+      })
+    return JSON.parse(fixed)
+  } catch { /* continue */ }
+
+  // 3. Remove trailing commas before } or ]
+  try {
+    const fixed = raw.replace(/,\s*([}\]])/g, '$1')
+    return JSON.parse(fixed)
+  } catch { /* continue */ }
+
+  // 4. Extract the outermost JSON object with a greedy regex
+  try {
+    const match = raw.match(/\{[\s\S]*\}/)
+    if (match) return JSON.parse(match[0])
+  } catch { /* continue */ }
+
+  // 5. Last resort — try to rescue key fields by extracting each value individually
+  console.error('[AI] Could not parse tool args JSON. Raw (first 500):', raw.substring(0, 500))
+
+  const rescued: Record<string, unknown> = {}
+
+  // Generic field extractor for string values
+  const extractField = (field: string): string | undefined => {
+    const match = raw.match(new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`))
+    if (match) return match[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"')
+    return undefined
+  }
+
+  // Try to rescue common fields
+  for (const field of ['path', 'content', 'name', 'executionPlan', 'prompt', 'cronExpression', 'cronLabel',
+    'summary', 'description', 'projectKey', 'issueType', 'issueIdOrKey', 'jql']) {
+    const val = extractField(field)
+    if (val !== undefined) rescued[field] = val
+  }
+
+  if (Object.keys(rescued).length > 0) {
+    console.warn('[AI] Rescued partial tool args:', Object.keys(rescued))
+    return rescued
+  }
+
+  return {}
+}
+
+const MAX_RETRIES = 3
+
+/**
+ * Returns true for models that have native reasoning / chain-of-thought:
+ *  - Anthropic claude-3-7-* and later  → extended thinking API
+ *  - OpenAI o1 / o3 / o4 series        → reasoning_effort parameter
+ *  - Groq deepseek-r1*                 → naturally emits <think> tags
+ */
+function isReasoningModel(provider: string, model: string): boolean {
+  const m = model.toLowerCase()
+  if (provider === 'anthropic') return m.includes('claude-3-7') || m.includes('claude-4') || m.includes('claude-opus-4')
+  if (provider === 'openai') return m.startsWith('o1') || m.startsWith('o3') || m.startsWith('o4')
+  if (provider === 'groq') return m.includes('deepseek-r1') || m.includes('qwq')
+  return false
+}
+
+function parseRetryAfterMs(errorMessage: string): number {
+  const match = errorMessage.match(/try again in ([\d.]+)ms/i)
+  if (match) return Math.ceil(parseFloat(match[1]))
+  if (errorMessage.toLowerCase().includes('rate limit')) return 1000
+  return 0
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+interface AIConfig {
+  provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'
+  apiKey: string
+  model?: string
+}
+
+interface Message {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+interface ToolDefinition {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }
+}
+
+interface AIResponse {
+  content: string
+  toolCalls?: Array<{
+    id: string
+    name: string
+    arguments: Record<string, unknown>
+  }>
+}
+
+export class AIService {
+  private config: AIConfig
+
+  constructor(config: AIConfig) {
+    this.config = config
+  }
+
+  updateConfig(config: AIConfig) {
+    this.config = config
+  }
+
+  async chat(messages: Message[], tools?: ToolDefinition[]): Promise<AIResponse> {
+    const { provider, apiKey, model } = this.config
+
+    switch (provider) {
+      case 'openai':
+        return this.callOpenAI(apiKey, model || 'gpt-4o', messages, tools)
+      case 'anthropic':
+        return this.callAnthropic(apiKey, model || 'claude-3-5-sonnet-20241022', messages, tools)
+      case 'groq':
+        return this.callGroq(apiKey, model || 'llama-3.1-70b-versatile', messages, tools)
+      case 'moonshot':
+        // Moonshot AI (Kimi) — OpenAI-compatible API
+        return this.callOpenAICompat(
+          'https://api.moonshot.ai/v1/chat/completions',
+          apiKey,
+          model || 'kimi-k2.5',
+          messages,
+          tools
+        )
+      default:
+        throw new Error(`Unsupported AI provider: ${provider}`)
+    }
+  }
+
+  /**
+   * Streaming version of chat.
+   * Calls onToken for each text delta as it arrives, then resolves with the full AIResponse.
+   * Tool calls are accumulated from stream deltas and returned at the end.
+   * If the response is tool calls only (no text), onToken is never called.
+   */
+  async chatStream(
+    messages: Message[],
+    tools: ToolDefinition[] | undefined,
+    onToken: (token: string) => void
+  ): Promise<AIResponse> {
+    const { provider, apiKey, model } = this.config
+    switch (provider) {
+      case 'openai':
+        // o-series models don't support streaming tool calls well; use non-streaming
+        if (isReasoningModel('openai', model || '')) {
+          return this.callOpenAI(apiKey, model || 'o4-mini', messages, tools)
+        }
+        return this.streamOpenAI(apiKey, model || 'gpt-4o', messages, tools, onToken)
+      case 'groq':
+        return this.streamGroq(apiKey, model || 'llama-3.1-70b-versatile', messages, tools, onToken)
+      case 'moonshot':
+        return this.streamOpenAICompat(
+          'https://api.moonshot.ai/v1/chat/completions',
+          apiKey,
+          model || 'kimi-k2.5',
+          messages,
+          tools,
+          onToken
+        )
+      case 'anthropic':
+        return this.streamAnthropic(apiKey, model || 'claude-3-5-sonnet-20241022', messages, tools, onToken)
+      default:
+        throw new Error(`Unsupported AI provider: ${provider}`)
+    }
+  }
+
+  /** Shared SSE streaming logic for OpenAI-compatible APIs */
+  private async streamOpenAICompat(
+    url: string,
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools: ToolDefinition[] | undefined,
+    onToken: (token: string) => void
+  ): Promise<AIResponse> {
+    const body: Record<string, unknown> = { model, messages, max_tokens: 8000, stream: true }
+    if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'auto' }
+
+    let lastError: Error | null = null
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+
+        if (!response.ok) {
+          let errMsg = `API error: ${response.status}`
+          try {
+            const errData = await response.json() as { error?: { message?: string } }
+            errMsg = errData.error?.message || errMsg
+          } catch { /* ignore */ }
+          if (errMsg.toLowerCase().includes('rate limit') && attempt < MAX_RETRIES) {
+            const waitMs = parseRetryAfterMs(errMsg) || (1000 * (attempt + 1))
+            console.warn(`[AI/stream] Rate limit, retrying in ${waitMs}ms`)
+            await sleep(waitMs); lastError = new Error(errMsg); continue
+          }
+          throw new Error(errMsg)
+        }
+
+        // Parse SSE stream
+        const reader = response.body!.getReader()
+        const decoder = new TextDecoder()
+        let contentAccum = ''
+        // Tool call accumulators: index → { id, name, arguments }
+        const toolCallMap: Record<number, { id: string; name: string; arguments: string }> = {}
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? '' // keep incomplete last line
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6).trim()
+            if (data === '[DONE]') break
+            try {
+              const chunk = JSON.parse(data)
+              const delta = chunk.choices?.[0]?.delta
+              if (!delta) continue
+
+              // Text content
+              if (delta.content) {
+                contentAccum += delta.content
+                onToken(delta.content)
+              }
+
+              // Tool call deltas
+              if (delta.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index ?? 0
+                  if (!toolCallMap[idx]) toolCallMap[idx] = { id: '', name: '', arguments: '' }
+                  if (tc.id) toolCallMap[idx].id = tc.id
+                  if (tc.function?.name) toolCallMap[idx].name += tc.function.name
+                  if (tc.function?.arguments) toolCallMap[idx].arguments += tc.function.arguments
+                }
+              }
+            } catch { /* skip malformed chunk */ }
+          }
+        }
+
+        const toolCalls = Object.values(toolCallMap)
+          .filter(tc => tc.name)
+          .map(tc => ({ id: tc.id || `tc-${Date.now()}`, name: tc.name, arguments: safeParseToolArgs(tc.arguments) }))
+
+        return { content: contentAccum, toolCalls }
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e))
+        if (lastError.message.toLowerCase().includes('rate limit') && attempt < MAX_RETRIES) {
+          const waitMs = parseRetryAfterMs(lastError.message) || (1000 * (attempt + 1))
+          await sleep(waitMs); continue
+        }
+        throw lastError
+      }
+    }
+    throw lastError || new Error('Streaming failed after retries')
+  }
+
+  private streamOpenAI(apiKey: string, model: string, messages: Message[], tools: ToolDefinition[] | undefined, onToken: (t: string) => void) {
+    return this.streamOpenAICompat('https://api.openai.com/v1/chat/completions', apiKey, model, messages, tools, onToken)
+  }
+
+  private streamGroq(apiKey: string, model: string, messages: Message[], tools: ToolDefinition[] | undefined, onToken: (t: string) => void) {
+    return this.streamOpenAICompat('https://api.groq.com/openai/v1/chat/completions', apiKey, model, messages, tools, onToken)
+  }
+
+  /** Shared non-streaming logic for all OpenAI-compatible APIs */
+  private async callOpenAICompat(
+    url: string,
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[]
+  ): Promise<AIResponse> {
+    const body: Record<string, unknown> = { model, messages, max_tokens: 8000 }
+    if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'auto' }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error((error as { error?: { message?: string } }).error?.message || `API error: ${response.status}`)
+    }
+    const data = await response.json()
+    const choice = data.choices[0]
+    if (choice.finish_reason === 'length') console.warn('[AI] Response truncated due to max_tokens')
+    return {
+      content: choice.message.content || '',
+      toolCalls: choice.message.tool_calls?.map((tc: { id: string; function: { name: string; arguments: string } }) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: safeParseToolArgs(tc.function.arguments),
+      })) || [],
+    }
+  }
+
+  private async callOpenAI(
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[]
+  ): Promise<AIResponse> {
+    if (!isReasoningModel('openai', model)) {
+      return this.callOpenAICompat('https://api.openai.com/v1/chat/completions', apiKey, model, messages, tools)
+    }
+
+    // OpenAI o-series: reasoning_effort, max_completion_tokens, no temperature.
+    // o1 doesn't support system messages — convert them to user messages.
+    const isO1 = model.startsWith('o1')
+    const preparedMessages = isO1
+      ? messages.map(m => m.role === 'system' ? { ...m, role: 'user' as const } : m)
+      : messages
+
+    const body: Record<string, unknown> = {
+      model,
+      messages: preparedMessages,
+      max_completion_tokens: 16000,
+      reasoning_effort: 'high',
+    }
+    if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'auto' }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error((error as { error?: { message?: string } }).error?.message || `OpenAI API error: ${response.status}`)
+    }
+    const data = await response.json()
+    const choice = data.choices[0]
+    return {
+      content: choice.message.content || '',
+      toolCalls: choice.message.tool_calls?.map((tc: { id: string; function: { name: string; arguments: string } }) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: safeParseToolArgs(tc.function.arguments),
+      })) || [],
+    }
+  }
+
+  private buildAnthropicBody(
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[],
+    stream = false
+  ): { body: Record<string, unknown>; headers: Record<string, string> } {
+    const systemMessage = messages.find(m => m.role === 'system')?.content || ''
+    const chatMessages = messages.filter(m => m.role !== 'system')
+    const useExtendedThinking = isReasoningModel('anthropic', model)
+
+    const body: Record<string, unknown> = {
+      model,
+      // Extended thinking requires at least 16k max_tokens to give the model
+      // room to reason; use 8k for regular models to keep costs reasonable.
+      max_tokens: useExtendedThinking ? 16000 : 8000,
+      system: systemMessage,
+      messages: chatMessages,
+    }
+
+    if (stream) body.stream = true
+
+    if (useExtendedThinking) {
+      // budget_tokens: how many tokens the model may spend purely on reasoning
+      // before composing its response. 10k is a good default for complex tasks.
+      body.thinking = { type: 'enabled', budget_tokens: 10000 }
+    }
+
+    if (tools && tools.length > 0) {
+      body.tools = tools.map(t => ({
+        name: t.function.name,
+        description: t.function.description,
+        input_schema: t.function.parameters,
+      }))
+      body.tool_choice = { type: 'auto' }
+    }
+
+    const headers: Record<string, string> = {
+      'x-api-key': '',          // filled by caller
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    }
+    if (useExtendedThinking) {
+      // Required beta header for interleaved thinking (thinking + tool_use mixed)
+      headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14'
+    }
+
+    return { body, headers }
+  }
+
+  private async callAnthropic(
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[]
+  ): Promise<AIResponse> {
+    const { body, headers } = this.buildAnthropicBody(model, messages, tools)
+    headers['x-api-key'] = apiKey
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error((error as { error?: { message?: string } }).error?.message || `Anthropic API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    let content = ''
+    const toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }> = []
+
+    for (const block of (data.content as Array<{ type: string; text?: string; thinking?: string; id?: string; name?: string; input?: Record<string, unknown> }>)) {
+      if (block.type === 'thinking' && block.thinking) {
+        // Wrap native thinking tokens in <think> tags so the agent's streaming
+        // parser renders them as a collapsible "Thought for Xs" block.
+        content += `<think>${block.thinking}</think>`
+      } else if (block.type === 'text' && block.text) {
+        content += block.text
+      } else if (block.type === 'tool_use') {
+        toolCalls.push({ id: block.id!, name: block.name!, arguments: block.input! })
+      }
+    }
+
+    return { content, toolCalls }
+  }
+
+  /**
+   * Anthropic streaming using SSE.
+   * Handles extended thinking blocks (type:'thinking') and regular text/tool_use.
+   */
+  private async streamAnthropic(
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools: ToolDefinition[] | undefined,
+    onToken: (token: string) => void
+  ): Promise<AIResponse> {
+    const { body, headers } = this.buildAnthropicBody(model, messages, tools, true)
+    headers['x-api-key'] = apiKey
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error((error as { error?: { message?: string } }).error?.message || `Anthropic API error: ${response.status}`)
+    }
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let contentAccum = ''
+
+    // Track current content block type so we know how to route deltas
+    type BlockType = 'text' | 'thinking' | 'tool_use' | null
+    let currentBlockType: BlockType = null
+    const toolCallMap: Record<number, { id: string; name: string; input: string }> = {}
+    let currentToolIdx = -1
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6).trim()
+        if (raw === '[DONE]') break
+        let evt: Record<string, unknown>
+        try { evt = JSON.parse(raw) } catch { continue }
+
+        const type = evt.type as string
+
+        if (type === 'content_block_start') {
+          const blk = (evt.content_block as { type: string; id?: string; name?: string }) || {}
+          currentBlockType = blk.type as BlockType
+          if (blk.type === 'thinking') {
+            // Emit opening tag so the live parser shows "Thinking…"
+            onToken('<think>')
+            contentAccum += '<think>'
+          } else if (blk.type === 'tool_use') {
+            currentToolIdx++
+            toolCallMap[currentToolIdx] = { id: blk.id || '', name: blk.name || '', input: '' }
+          }
+        } else if (type === 'content_block_delta') {
+          const delta = (evt.delta as { type: string; text?: string; thinking?: string; partial_json?: string }) || {}
+          if (currentBlockType === 'thinking' && delta.thinking) {
+            onToken(delta.thinking)
+            contentAccum += delta.thinking
+          } else if (currentBlockType === 'text' && delta.text) {
+            onToken(delta.text)
+            contentAccum += delta.text
+          } else if (currentBlockType === 'tool_use' && delta.partial_json) {
+            if (toolCallMap[currentToolIdx]) toolCallMap[currentToolIdx].input += delta.partial_json
+          }
+        } else if (type === 'content_block_stop') {
+          if (currentBlockType === 'thinking') {
+            onToken('</think>')
+            contentAccum += '</think>'
+          }
+          currentBlockType = null
+        }
+      }
+    }
+
+    const toolCalls = Object.values(toolCallMap)
+      .filter(tc => tc.name)
+      .map(tc => ({
+        id: tc.id || `tc-${Date.now()}`,
+        name: tc.name,
+        arguments: safeParseToolArgs(tc.input),
+      }))
+
+    return { content: contentAccum, toolCalls }
+  }
+
+  private async callGroq(
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools?: ToolDefinition[]
+  ): Promise<AIResponse> {
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      max_tokens: 8000,
+    }
+
+    if (tools && tools.length > 0) {
+      body.tools = tools
+      body.tool_choice = 'auto'
+    }
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error?.message || `Groq API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const choice = data.choices[0]
+
+    if (choice.finish_reason === 'length') {
+      console.warn('[AI/Groq] Response truncated due to max_tokens limit')
+    }
+
+    return {
+      content: choice.message.content || '',
+      toolCalls: choice.message.tool_calls?.map((tc: { id: string; function: { name: string; arguments: string } }) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: safeParseToolArgs(tc.function.arguments),
+      })) || [],
+    }
+  }
+}
