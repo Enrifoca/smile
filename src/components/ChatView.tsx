@@ -514,6 +514,7 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
       switch (name) {
         case 'file_list':   return await file.list(args.path as string)
         case 'file_read':   return await file.read(args.path as string)
+        case 'file_read_ocr': return await file.readOcr(args.path as string)
         case 'file_write':  return await file.write(args.path as string, args.content as string)
         case 'file_mkdir':  return await file.mkdir(args.path as string)
         case 'file_search': return await file.search(args.pattern as string, args.directory as string | undefined)

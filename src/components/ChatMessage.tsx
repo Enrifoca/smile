@@ -40,7 +40,7 @@ function formatThinkingTime(ms: number): string {
 /** Compute the collapsed summary label from a list of tool entries */
 function summariseEntries(entries: ToolEntry[]): string {
   const count = (fn: (e: ToolEntry) => boolean) => entries.filter(fn).length
-  const fileReads   = count(e => ['file_read', 'file_list'].includes(e.tool))
+  const fileReads   = count(e => ['file_read', 'file_read_ocr', 'file_list'].includes(e.tool))
   const fileSearch  = count(e => e.tool === 'file_search')
   const jiraSearch  = count(e => e.tool === 'jira_search_issues')
   const jiraRead    = count(e => e.tool === 'jira_get_issue')

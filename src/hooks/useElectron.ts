@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import '../types/electron.d.ts'
+import { AIConfig, ModelProvider } from '../shared/modelCatalog'
 
 // Hook to access Electron API from renderer
 export function useElectron() {
@@ -21,6 +22,20 @@ export function useElectron() {
     
     setSecure: useCallback(async (key: string, value: string) => {
       return api.storage.setSecure(key, value)
+    }, []),
+  }
+
+  const models = {
+    getCatalog: useCallback(async () => {
+      return api.models.getCatalog()
+    }, []),
+
+    refresh: useCallback(async () => {
+      return api.models.refresh()
+    }, []),
+
+    refreshProvider: useCallback(async (provider: ModelProvider) => {
+      return api.models.refreshProvider(provider)
     }, []),
   }
 
@@ -92,6 +107,10 @@ export function useElectron() {
     read: useCallback(async (relativePath: string) => {
       return api.file.read(relativePath)
     }, []),
+
+    readOcr: useCallback(async (relativePath: string) => {
+      return api.file.readOcr(relativePath)
+    }, []),
     
     write: useCallback(async (relativePath: string, content: string) => {
       return api.file.write(relativePath, content)
@@ -135,15 +154,15 @@ export function useElectron() {
 
   // AI operations
   const ai = {
-    configure: useCallback(async (config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => {
+    configure: useCallback(async (config: AIConfig) => {
       return api.ai.configure(config)
     }, []),
 
-    configureReasoning: useCallback(async (config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => {
+    configureReasoning: useCallback(async (config: AIConfig) => {
       return api.ai.configureReasoning(config)
     }, []),
 
-    configurePlanner: useCallback(async (config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => {
+    configurePlanner: useCallback(async (config: AIConfig) => {
       return api.ai.configurePlanner(config)
     }, []),
 
@@ -362,6 +381,7 @@ export function useElectron() {
 
   return {
     storage,
+    models,
     jira,
     file,
     ai,
