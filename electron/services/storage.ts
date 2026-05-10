@@ -1,5 +1,6 @@
 import Store from 'electron-store'
 import { EncryptionService } from './encryption'
+import { ModelCatalog } from '../../src/shared/modelCatalog'
 
 interface JiraConfig {
   baseUrl: string
@@ -8,7 +9,13 @@ interface JiraConfig {
 }
 
 interface AIConfig {
-  provider: 'openai' | 'anthropic' | 'groq'
+  provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'
+  apiKey: string
+  model?: string
+}
+
+interface OCRConfig {
+  provider: 'mistral' | 'deepseek'
   apiKey: string
   model?: string
 }
@@ -99,10 +106,14 @@ interface StorageSchema {
   
   // Connection mode
   jiraConnectionMode: 'api' | 'mcp' | null
+
+  // Cached provider model lists
+  modelCatalog: ModelCatalog | null
   
   // Encrypted data (stored as encrypted strings)
   'encrypted:jiraConfig': string
   'encrypted:aiConfig': string
+  'encrypted:ocrConfig': string
 }
 
 const defaultUserProfile: UserProfile = {
@@ -140,8 +151,10 @@ export class StorageService {
           syncedProjects: []
         },
         jiraConnectionMode: null,
+        modelCatalog: null,
         'encrypted:jiraConfig': '',
-        'encrypted:aiConfig': ''
+        'encrypted:aiConfig': '',
+        'encrypted:ocrConfig': ''
       }
     })
   }
@@ -205,6 +218,25 @@ export class StorageService {
   async setAIConfig(config: AIConfig): Promise<void> {
     const encrypted = this.encryption.encrypt(JSON.stringify(config))
     this.store.set('encrypted:aiConfig', encrypted)
+  }
+
+  getModelCatalog(): ModelCatalog | null {
+    return this.store.get('modelCatalog') || null
+  }
+
+  setModelCatalog(catalog: ModelCatalog): void {
+    this.store.set('modelCatalog', catalog)
+  }
+
+  async getOCRConfig(): Promise<OCRConfig | null> {
+    const encrypted = this.store.get('encrypted:ocrConfig')
+    if (!encrypted) return null
+    try {
+      const decrypted = this.encryption.decrypt(encrypted)
+      return JSON.parse(decrypted) as OCRConfig
+    } catch {
+      return null
+    }
   }
 
   // Workspace

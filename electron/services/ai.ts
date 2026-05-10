@@ -1,4 +1,5 @@
 // AI Service - Runs in Electron main process to avoid CORS issues
+import { AIConfig, AIProvider, getDefaultModelId, isReasoningModelId } from '../../src/shared/modelCatalog'
 
 /**
  * Robustly parse tool call arguments from a model response.
@@ -74,11 +75,7 @@ const MAX_RETRIES = 3
  *  - Groq deepseek-r1*                 → naturally emits <think> tags
  */
 function isReasoningModel(provider: string, model: string): boolean {
-  const m = model.toLowerCase()
-  if (provider === 'anthropic') return m.includes('claude-3-7') || m.includes('claude-4') || m.includes('claude-opus-4')
-  if (provider === 'openai') return m.startsWith('o1') || m.startsWith('o3') || m.startsWith('o4')
-  if (provider === 'groq') return m.includes('deepseek-r1') || m.includes('qwq')
-  return false
+  return isReasoningModelId(provider as AIProvider, model)
 }
 
 function parseRetryAfterMs(errorMessage: string): number {
@@ -90,12 +87,6 @@ function parseRetryAfterMs(errorMessage: string): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-interface AIConfig {
-  provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'
-  apiKey: string
-  model?: string
 }
 
 interface Message {
@@ -137,17 +128,33 @@ export class AIService {
 
     switch (provider) {
       case 'openai':
-        return this.callOpenAI(apiKey, model || 'gpt-4o', messages, tools)
+        return this.callOpenAI(apiKey, model || getDefaultModelId('openai', 'chat'), messages, tools)
       case 'anthropic':
-        return this.callAnthropic(apiKey, model || 'claude-3-5-sonnet-20241022', messages, tools)
+        return this.callAnthropic(apiKey, model || getDefaultModelId('anthropic', 'chat'), messages, tools)
+      case 'mistral':
+        return this.callOpenAICompat(
+          'https://api.mistral.ai/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('mistral', 'chat'),
+          messages,
+          tools
+        )
       case 'groq':
-        return this.callGroq(apiKey, model || 'llama-3.1-70b-versatile', messages, tools)
+        return this.callGroq(apiKey, model || getDefaultModelId('groq', 'chat'), messages, tools)
       case 'moonshot':
         // Moonshot AI (Kimi) — OpenAI-compatible API
         return this.callOpenAICompat(
           'https://api.moonshot.ai/v1/chat/completions',
           apiKey,
-          model || 'kimi-k2.5',
+          model || getDefaultModelId('moonshot', 'chat'),
+          messages,
+          tools
+        )
+      case 'deepseek':
+        return this.callOpenAICompat(
+          'https://api.deepseek.com/chat/completions',
+          apiKey,
+          model || getDefaultModelId('deepseek', 'reasoning'),
           messages,
           tools
         )
@@ -172,22 +179,40 @@ export class AIService {
       case 'openai':
         // o-series models don't support streaming tool calls well; use non-streaming
         if (isReasoningModel('openai', model || '')) {
-          return this.callOpenAI(apiKey, model || 'o4-mini', messages, tools)
+          return this.callOpenAI(apiKey, model || getDefaultModelId('openai', 'reasoning'), messages, tools)
         }
-        return this.streamOpenAI(apiKey, model || 'gpt-4o', messages, tools, onToken)
+        return this.streamOpenAI(apiKey, model || getDefaultModelId('openai', 'chat'), messages, tools, onToken)
+      case 'mistral':
+        return this.streamOpenAICompat(
+          'https://api.mistral.ai/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('mistral', 'chat'),
+          messages,
+          tools,
+          onToken
+        )
       case 'groq':
-        return this.streamGroq(apiKey, model || 'llama-3.1-70b-versatile', messages, tools, onToken)
+        return this.streamGroq(apiKey, model || getDefaultModelId('groq', 'chat'), messages, tools, onToken)
       case 'moonshot':
         return this.streamOpenAICompat(
           'https://api.moonshot.ai/v1/chat/completions',
           apiKey,
-          model || 'kimi-k2.5',
+          model || getDefaultModelId('moonshot', 'chat'),
+          messages,
+          tools,
+          onToken
+        )
+      case 'deepseek':
+        return this.streamOpenAICompat(
+          'https://api.deepseek.com/chat/completions',
+          apiKey,
+          model || getDefaultModelId('deepseek', 'reasoning'),
           messages,
           tools,
           onToken
         )
       case 'anthropic':
-        return this.streamAnthropic(apiKey, model || 'claude-3-5-sonnet-20241022', messages, tools, onToken)
+        return this.streamAnthropic(apiKey, model || getDefaultModelId('anthropic', 'chat'), messages, tools, onToken)
       default:
         throw new Error(`Unsupported AI provider: ${provider}`)
     }

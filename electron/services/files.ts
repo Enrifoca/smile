@@ -1,6 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 import { lookup as getMimeType } from 'mime-types'
+import { OCRService } from './ocr'
 // pdf-parse, mammoth and adm-zip are marked external in vite.config.ts so they
 // are loaded at runtime from node_modules rather than bundled by Rollup.
 import { createRequire } from 'module'
@@ -8,6 +9,8 @@ const require = createRequire(import.meta.url)
 const pdfParse: (buffer: Buffer) => Promise<{ text: string; numpages: number }> = require('pdf-parse')
 const mammoth: { extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string; messages: unknown[] }> } = require('mammoth')
 const AdmZip: new (buffer: Buffer) => { readAsText: (name: string) => string } = require('adm-zip')
+
+const OCR_DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.pptx'])
 
 /**
  * Direct XML extraction fallback for .docx files.
@@ -57,9 +60,11 @@ export const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
 
 export class FileService {
   private workspacePath: string
+  private getOcrService?: () => OCRService | null
 
-  constructor(workspacePath: string) {
+  constructor(workspacePath: string, getOcrService?: () => OCRService | null) {
     this.workspacePath = workspacePath
+    this.getOcrService = getOcrService
   }
 
   /**
@@ -74,6 +79,58 @@ export class FileService {
     }
     
     return fullPath
+  }
+
+  private async extractPdfWithOcr(buffer: Buffer, pageCount: number): Promise<{ success: boolean; data?: string; error?: string }> {
+    const ocrService = this.getOcrService?.() || null
+    if (!ocrService) {
+      return { success: false, error: 'No extractable text found in this PDF. It is likely a scanned image. Configure an OCR model in Settings to read it.' }
+    }
+
+    try {
+      const text = (await ocrService.extractPdfText(buffer)).trim()
+      if (!text) {
+        return { success: false, error: 'OCR completed but did not return readable text.' }
+      }
+
+      const pageInfo = `[PDF OCR: ${pageCount} page${pageCount !== 1 ? 's' : ''}]\n\n`
+      return { success: true, data: pageInfo + text }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OCR failed'
+      return { success: false, error: `OCR failed: ${message}` }
+    }
+  }
+
+  async readFileWithOcr(relativePath: string): Promise<{ success: boolean; data?: string; error?: string }> {
+    try {
+      const ocrService = this.getOcrService?.() || null
+      if (!ocrService) {
+        return { success: false, error: 'OCR model not configured. Choose an OCR provider in Settings first.' }
+      }
+
+      const fullPath = this.validatePath(relativePath)
+      const stats = await fs.stat(fullPath)
+      const ext = path.extname(fullPath).toLowerCase()
+      const mimeType = getMimeType(fullPath) || ''
+      const isSupportedDocument = OCR_DOCUMENT_EXTENSIONS.has(ext)
+      const isSupportedImage = mimeType.startsWith('image/')
+
+      if (!isSupportedDocument && !isSupportedImage) {
+        return { success: false, error: 'OCR supports PDFs, Word/PowerPoint documents, and image files.' }
+      }
+
+      const maxSize = isSupportedImage ? 20 * 1024 * 1024 : 50 * 1024 * 1024
+      if (stats.size > maxSize) {
+        return { success: false, error: `File too large for OCR (${(stats.size / 1024 / 1024).toFixed(1)} MB, max ${isSupportedImage ? '20' : '50'} MB)` }
+      }
+
+      const buffer = await fs.readFile(fullPath)
+      const text = await ocrService.extractText(buffer, mimeType || 'application/octet-stream')
+      return { success: true, data: `[OCR: ${path.basename(fullPath)}]\n\n${text}` }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OCR failed'
+      return { success: false, error: message }
+    }
   }
 
   /**
@@ -139,7 +196,7 @@ export class FileService {
           const parsed = await pdfParse(buffer)
           const text = parsed.text.trim()
           if (!text) {
-            return { success: false, error: 'No extractable text found in this PDF. It is likely a scanned image — only OCR-capable tools can read it.' }
+            return this.extractPdfWithOcr(buffer, parsed.numpages)
           }
 
           // Quality check: estimate what fraction of characters are meaningful
@@ -159,6 +216,9 @@ export class FileService {
           const pageInfo = `[PDF: ${parsed.numpages} page${parsed.numpages !== 1 ? 's' : ''}]\n\n`
 
           if (printableRatio < 0.6) {
+            const ocrResult = await this.extractPdfWithOcr(buffer, parsed.numpages)
+            if (ocrResult.success) return ocrResult
+
             // Text is mostly non-printable — warn the agent clearly so it
             // doesn't waste iterations trying to interpret garbled content.
             const warning = `[WARNING: PDF text extraction quality is poor (${Math.round(printableRatio * 100)}% readable). `

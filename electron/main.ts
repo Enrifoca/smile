@@ -5,6 +5,9 @@ import { StorageService } from './services/storage'
 import { JiraService } from './services/jira'
 import { FileService } from './services/files'
 import { AIService } from './services/ai'
+import { OCRConfig, OCRService } from './services/ocr'
+import { ModelCatalogService } from './services/model-catalog'
+import { AIConfig, ModelProvider, getDefaultModelId } from '../src/shared/modelCatalog'
 import { getAtlassianMCPService, AtlassianMCPService } from './services/atlassian-mcp'
 import { getMemoryService, MemoryService } from './services/memory'
 import { getJiraAttachmentService, JiraAttachmentService, isJiraAttachmentConfigured } from './services/jira-attachment'
@@ -17,6 +20,7 @@ let fileService: FileService | null = null
 let aiService: AIService | null = null
 let mcpService: AtlassianMCPService | null = null
 let jiraAttachmentService: JiraAttachmentService | null = null
+let modelCatalogService: ModelCatalogService | null = null
 
 let mainWindow: BrowserWindow | null = null
 let mcpKeepAliveInterval: NodeJS.Timeout | null = null
@@ -27,6 +31,26 @@ let memoryService: MemoryService | null = null
 const MCP_KEEPALIVE_INTERVAL = 10 * 60 * 1000
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+
+function getConfiguredOcrService(): OCRService | null {
+  const configStr = storageService.getSecure('ocrConfig')
+  if (!configStr) return null
+
+  try {
+    const config = JSON.parse(configStr) as OCRConfig
+    if (!config.apiKey) return null
+    return new OCRService(config)
+  } catch {
+    return null
+  }
+}
+
+function withReasoningDefault(config: AIConfig): AIConfig {
+  return {
+    ...config,
+    model: config.model || getDefaultModelId(config.provider, 'reasoning'),
+  }
+}
 
 // Prevent multiple instances from opening (common in vite-plugin-electron dev mode
 // when both main.ts and preload.ts trigger their onstart callbacks simultaneously).
@@ -78,6 +102,7 @@ function createWindow() {
 async function initializeServices() {
   encryptionService = new EncryptionService()
   storageService = new StorageService(encryptionService)
+  modelCatalogService = new ModelCatalogService(storageService)
 
   // Initialize Jira if credentials exist
   const jiraConfig = await storageService.getJiraConfig()
@@ -88,11 +113,15 @@ async function initializeServices() {
   // Initialize File service if workspace is set
   const workspace = await storageService.getWorkspacePath()
   if (workspace) {
-    fileService = new FileService(workspace)
+    fileService = new FileService(workspace, getConfiguredOcrService)
     // Initialize memory service with workspace
     memoryService = getMemoryService()
     memoryService.setWorkspace(workspace)
   }
+
+  void modelCatalogService.refreshAll().catch(error => {
+    console.warn('[ModelCatalog] Startup refresh failed:', error instanceof Error ? error.message : error)
+  })
 }
 
 // Send MCP connection state to renderer
@@ -220,6 +249,30 @@ ipcMain.handle('storage:setSecure', async (_, key: string, value: string) => {
   return storageService.setSecure(key, value)
 })
 
+// Model catalog
+ipcMain.handle('models:getCatalog', async () => {
+  if (!modelCatalogService) return { success: false, error: 'Model catalog not initialized' }
+  return { success: true, data: modelCatalogService.getCatalog() }
+})
+
+ipcMain.handle('models:refresh', async () => {
+  if (!modelCatalogService) return { success: false, error: 'Model catalog not initialized' }
+  try {
+    return { success: true, data: await modelCatalogService.refreshAll() }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to refresh model catalog' }
+  }
+})
+
+ipcMain.handle('models:refreshProvider', async (_, provider: ModelProvider) => {
+  if (!modelCatalogService) return { success: false, error: 'Model catalog not initialized' }
+  try {
+    return { success: true, data: await modelCatalogService.refreshProviderFromStorage(provider) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to refresh provider models' }
+  }
+})
+
 // Jira
 ipcMain.handle('jira:configure', async (_, config: { baseUrl: string; email: string; apiToken: string }) => {
   await storageService.setJiraConfig(config)
@@ -292,7 +345,7 @@ ipcMain.handle('file:selectWorkspace', async () => {
   if (!result.canceled && result.filePaths.length > 0) {
     const workspacePath = result.filePaths[0]
     await storageService.setWorkspacePath(workspacePath)
-    fileService = new FileService(workspacePath)
+    fileService = new FileService(workspacePath, getConfiguredOcrService)
     return { success: true, path: workspacePath }
   }
   return { success: false }
@@ -310,6 +363,11 @@ ipcMain.handle('file:list', async (_, relativePath?: string) => {
 ipcMain.handle('file:read', async (_, relativePath: string) => {
   if (!fileService) return { success: false, error: 'Workspace not configured' }
   return fileService.readFile(relativePath)
+})
+
+ipcMain.handle('file:readOcr', async (_, relativePath: string) => {
+  if (!fileService) return { success: false, error: 'Workspace not configured' }
+  return fileService.readFileWithOcr(relativePath)
 })
 
 ipcMain.handle('file:write', async (_, relativePath: string, content: string) => {
@@ -414,20 +472,20 @@ ipcMain.handle('jiraAttachment:isConfigured', async () => {
 // AI Service
 let reasoningAiService: AIService | null = null
 
-ipcMain.handle('ai:configure', async (_, config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => {
+ipcMain.handle('ai:configure', async (_, config: AIConfig) => {
   aiService = new AIService(config)
   return { success: true }
 })
 
 // Reasoning model configuration (replaces the old "planner" concept)
-ipcMain.handle('ai:configureReasoning', async (_, config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => {
-  reasoningAiService = new AIService(config)
+ipcMain.handle('ai:configureReasoning', async (_, config: AIConfig) => {
+  reasoningAiService = new AIService(withReasoningDefault(config))
   return { success: true }
 })
 
 // Legacy alias — kept so old plannerConfig stored values still work on first load
-ipcMain.handle('ai:configurePlanner', async (_, config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => {
-  reasoningAiService = new AIService(config)
+ipcMain.handle('ai:configurePlanner', async (_, config: AIConfig) => {
+  reasoningAiService = new AIService(withReasoningDefault(config))
   return { success: true }
 })
 
@@ -436,7 +494,7 @@ ipcMain.handle('ai:chatReasoning', async (_, messages: Array<{ role: 'system' | 
     // Auto-load from storage on first use
     const cfgStr = storageService.getSecure('reasoningConfig') || storageService.getSecure('plannerConfig')
     if (cfgStr) {
-      try { reasoningAiService = new AIService(JSON.parse(cfgStr)) }
+      try { reasoningAiService = new AIService(withReasoningDefault(JSON.parse(cfgStr) as AIConfig)) }
       catch { return { success: false, error: 'Reasoning model not configured' } }
     } else {
       return { success: false, error: 'Reasoning model not configured' }
@@ -524,7 +582,7 @@ ipcMain.on('ai:reasoning:stream', async (event, messages: Array<{ role: 'system'
   if (!reasoningAiService) {
     const cfgStr = storageService.getSecure('reasoningConfig') || storageService.getSecure('plannerConfig')
     if (cfgStr) {
-      try { reasoningAiService = new AIService(JSON.parse(cfgStr)) }
+      try { reasoningAiService = new AIService(withReasoningDefault(JSON.parse(cfgStr) as AIConfig)) }
       catch { event.sender.send('ai:reasoning:stream:error', 'Reasoning model not configured'); return }
     } else {
       event.sender.send('ai:reasoning:stream:error', 'Reasoning model not configured'); return

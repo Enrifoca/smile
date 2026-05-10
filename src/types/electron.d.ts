@@ -1,4 +1,5 @@
 // Type definitions for the Electron API exposed via preload
+import { AIConfig, ModelCatalog, ModelProvider } from '../shared/modelCatalog'
 
 export interface JiraUser {
   accountId: string
@@ -14,6 +15,11 @@ export interface ElectronAPI {
     set: (key: string, value: unknown) => Promise<void>
     getSecure: (key: string) => Promise<string | null>
     setSecure: (key: string, value: string) => Promise<void>
+  }
+  models: {
+    getCatalog: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
+    refresh: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
+    refreshProvider: (provider: ModelProvider) => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
   }
   jira: {
     configure: (config: { baseUrl: string; email: string; apiToken: string }) => Promise<{ success: boolean }>
@@ -34,6 +40,7 @@ export interface ElectronAPI {
     getWorkspace: () => Promise<string | null>
     list: (relativePath?: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
     read: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    readOcr: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     write: (relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
     mkdir: (relativePath: string) => Promise<{ success: boolean; error?: string }>
     exists: (relativePath: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>
@@ -47,9 +54,9 @@ export interface ElectronAPI {
     isConfigured: () => Promise<{ configured: boolean }>
   }
   ai: {
-    configure: (config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
-    configureReasoning: (config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
-    configurePlanner: (config: { provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
+    configure: (config: AIConfig) => Promise<{ success: boolean }>
+    configureReasoning: (config: AIConfig) => Promise<{ success: boolean }>
+    configurePlanner: (config: AIConfig) => Promise<{ success: boolean }>
     plan: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => Promise<{ success: boolean; plan?: string; error?: string }>
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
       success: boolean

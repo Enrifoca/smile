@@ -87,6 +87,10 @@ export const fileReadSchema = z.object({
   path: z.string().describe('Relative path to the file'),
 })
 
+export const fileReadOcrSchema = z.object({
+  path: z.string().describe('Relative path to the PDF, DOCX, PPTX, or image file to read through the configured OCR model'),
+})
+
 export const fileWriteSchema = z.object({
   path: z.string().describe('Relative path for the file. Parent directories are created automatically if they do not exist.'),
   content: z.string().describe('Content to write'),
@@ -250,8 +254,15 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'file_read',
-    description: 'Read the contents of a file from the workspace. Supports plain text, markdown, CSV, HTML, JSON, PDF, and Word (.docx) files. PDFs and Word documents are automatically parsed and their text extracted.',
+    description: 'Read the contents of a file from the workspace. Supports plain text, markdown, CSV, HTML, JSON, PDF, and Word (.docx) files. PDFs and Word documents are parsed with normal text extraction. If a PDF/image/document is scanned, image-based, garbled, or the user explicitly asks for OCR, use file_read_ocr instead.',
     schema: fileReadSchema,
+    requiresConfirmation: false,
+    category: 'file-read',
+  },
+  {
+    name: 'file_read_ocr',
+    description: 'Read a difficult document with the configured OCR model. Use this for scanned/image-based PDFs, images, badly encoded or garbled PDFs, screenshots, or when normal file_read may have missed visual text. Supports PDFs, Word/PowerPoint documents, and image files. Use file_read first for normal text files; use OCR when document fidelity matters.',
+    schema: fileReadOcrSchema,
     requiresConfirmation: false,
     category: 'file-read',
   },
