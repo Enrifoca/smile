@@ -187,14 +187,33 @@ export class AtlassianMCPService extends EventEmitter {
       this.mcpProxy.stderr?.on('data', (data: Buffer) => {
         const text = data.toString()
         this.debugLog(`stderr: ${text}`)
-        
+        const lowerText = text.toLowerCase()
+
         // Check for OAuth flow indicators
-        if (text.includes('Opening browser') || text.includes('authorization')) {
+        if (
+          text.includes('Opening browser') ||
+          text.includes('Please authorize this client by visiting:') ||
+          text.includes('Browser opened automatically') ||
+          text.includes('Authentication required')
+        ) {
           this.emit('oauth-started')
           this.debugLog('OAuth flow detected - browser should open')
         }
-        if (text.includes('authenticated') || text.includes('token')) {
-          this.debugLog('Authentication appears successful')
+
+        // Avoid false positives: invalid/missing tokens are common during discovery.
+        const hasAuthSuccessSignal =
+          lowerText.includes('authentication successful') ||
+          lowerText.includes('authenticated successfully') ||
+          lowerText.includes('oauth callback received') ||
+          lowerText.includes('token saved')
+        const hasAuthFailureSignal =
+          lowerText.includes('invalid_token') ||
+          lowerText.includes('missing or invalid access token') ||
+          lowerText.includes('token result: not found') ||
+          lowerText.includes('unauthorized')
+
+        if (hasAuthSuccessSignal && !hasAuthFailureSignal) {
+          this.debugLog('OAuth token exchange completed')
         }
       })
 
@@ -216,11 +235,18 @@ export class AtlassianMCPService extends EventEmitter {
       const connectionResult = await this.waitForConnection()
       
       if (connectionResult.success) {
-        this.isConnected = true
-        this.debugLog('MCP connection established successfully')
-        
-        // Send initialize request to complete MCP handshake
+        this.debugLog('MCP proxy started; attempting initialize handshake')
         await this.initialize()
+        this.isConnected = true
+
+        const workspaceValidation = await this.ensureAccessibleWorkspace()
+        if (!workspaceValidation.success) {
+          this.debugLog(`Workspace validation failed: ${workspaceValidation.error}`)
+          this.disconnect()
+          return { success: false, error: workspaceValidation.error }
+        }
+
+        this.debugLog('MCP connection established successfully')
       }
       
       return connectionResult
@@ -502,6 +528,79 @@ export class AtlassianMCPService extends EventEmitter {
         success: false, 
         error: error instanceof Error ? error.message : 'Failed to list tools' 
       }
+    }
+  }
+
+  private extractAccessibleResources(data: unknown): AtlassianResource[] {
+    if (Array.isArray(data)) {
+      return data.filter((item): item is AtlassianResource => typeof item === 'object' && item !== null)
+    }
+
+    if (data && typeof data === 'object') {
+      const record = data as { values?: unknown[]; resources?: unknown[] }
+      const candidate = Array.isArray(record.values)
+        ? record.values
+        : Array.isArray(record.resources)
+          ? record.resources
+          : []
+      return candidate.filter((item): item is AtlassianResource => typeof item === 'object' && item !== null)
+    }
+
+    return []
+  }
+
+  private async ensureAccessibleWorkspace(): Promise<{ success: boolean; error?: string }> {
+    try {
+      this.debugLog('Validating accessible Atlassian workspaces...')
+      const result = await this.callTool('getAccessibleAtlassianResources', {})
+      const parsedResult = this.parseToolText(result)
+
+      if (parsedResult.isError) {
+        const rawError = parsedResult.error || 'Unable to verify accessible Atlassian workspaces.'
+        const normalizedError = rawError.toLowerCase()
+
+        if (
+          normalizedError.includes('requires access to a jira') ||
+          normalizedError.includes('confluence') ||
+          normalizedError.includes('create a site')
+        ) {
+          return {
+            success: false,
+            error: 'The authenticated Atlassian account has no accessible Jira/Confluence site. Create or join a site, then use Switch Account / Site.'
+          }
+        }
+
+        return { success: false, error: rawError }
+      }
+
+      const resources = this.extractAccessibleResources(parsedResult.data)
+      if (resources.length === 0) {
+        return {
+          success: false,
+          error: 'No Atlassian workspace is accessible for this account. Create or request access to at least one Jira/Confluence site, then reconnect.'
+        }
+      }
+
+      if (this.preferredSiteUrl) {
+        const preferredResource = resources.find(resource => this.normalizeSiteUrl(resource.url) === this.preferredSiteUrl)
+        if (!preferredResource) {
+          const availableSites = resources
+            .map(resource => resource.url || resource.name)
+            .filter(Boolean)
+            .join(', ')
+          return {
+            success: false,
+            error: `The connected Atlassian account cannot access ${this.preferredSiteUrl}. Available sites: ${availableSites || '(none)'}.`
+          }
+        }
+      }
+
+      this.debugLog(`Workspace validation succeeded with ${resources.length} accessible site(s)`)
+      return { success: true }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to verify accessible Atlassian workspaces.'
+      this.debugLog(`Workspace validation error: ${message}`)
+      return { success: false, error: message }
     }
   }
 
