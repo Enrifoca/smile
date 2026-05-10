@@ -2,22 +2,33 @@
 import { useElectron } from '../hooks/useElectron'
 import { UserProfile } from '../agent/types'
 import { syncMemoryFromJira } from '../utils/memorySync'
-import { AIProvider, AI_PROVIDER_LABELS, CHAT_PROVIDERS } from '../shared/modelCatalog'
+import {
+  AIProvider,
+  AI_PROVIDER_LABELS,
+  CHAT_PROVIDERS,
+  ModelCatalog,
+  ModelProvider,
+  ModelRole,
+  getBundledProviderRole,
+} from '../shared/modelCatalog'
 
 interface OnboardingProps {
   onComplete: () => void
 }
 
 // Steps:
-// 1. Welcome + Connect to Atlassian via MCP OAuth
-// 2. Select projects to monitor
-// 3. AI Provider setup
-// 4. Workspace folder selection
-// 5. Communication style preferences + Complete
-type Step = 1 | 2 | 3 | 4 | 5
+// 1. Jira REST API setup for uploads and site selection
+// 2. Connect to Atlassian via MCP OAuth
+// 3. Select projects to monitor
+// 4. AI Provider setup
+// 5. Workspace folder selection
+// 6. Communication style preferences + Complete
+type Step = 1 | 2 | 3 | 4 | 5 | 6
 
 // MCP connection states
 type MCPConnectionState = 'idle' | 'connecting' | 'oauth_pending' | 'connected' | 'error'
+
+const API_TOKEN_MASK = '********'
 
 interface JiraProject {
   id: string
@@ -55,13 +66,21 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [mcpStatusMessage, setMCPStatusMessage] = useState<string>('')
   
   // Form states
+  const [jiraApiForm, setJiraApiForm] = useState({
+    baseUrl: '',
+    email: '',
+    apiToken: '',
+  })
+  const [hasJiraApiConfig, setHasJiraApiConfig] = useState(false)
   const [aiForm, setAIForm] = useState({
     provider: 'openai' as AIProvider,
     apiKey: '',
+    model: '',
   })
   const [workspace, setWorkspace] = useState<string | null>(null)
   const [allProjects, setAllProjects] = useState<JiraProject[]>([])
   const [selectedProjectKeys, setSelectedProjectKeys] = useState<Set<string>>(new Set())
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null)
   const [profile, setProfile] = useState<Partial<UserProfile>>({
     style: 'balanced',
     verbosity: 'balanced',
@@ -76,12 +95,34 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   })
   const [writingSample, setWritingSample] = useState('')
 
-  const { storage, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
+  const { storage, models: modelCatalogAPI, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
 
-  // Check MCP status on mount
+  const normalizeJiraSiteUrl = (url: string) => url.trim().replace(/\/+$/, '')
+
+  // Check saved connection details on mount
   useEffect(() => {
-    const checkStatus = async () => {
+    const loadSetupState = async () => {
       try {
+        const jiraApiConfigStr = await storage.getSecure('jiraApiConfig')
+        if (jiraApiConfigStr) {
+          const jiraApiConfig = JSON.parse(jiraApiConfigStr) as {
+            baseUrl?: string
+            email?: string
+            apiToken?: string
+          }
+          setHasJiraApiConfig(!!jiraApiConfig.apiToken)
+          setJiraApiForm({
+            baseUrl: jiraApiConfig.baseUrl || '',
+            email: jiraApiConfig.email || '',
+            apiToken: jiraApiConfig.apiToken ? API_TOKEN_MASK : '',
+          })
+        }
+
+        const catalogResult = await modelCatalogAPI.getCatalog()
+        if (catalogResult.success && catalogResult.data) {
+          setModelCatalog(catalogResult.data)
+        }
+
         const status = await mcp.status()
         if (status.connected) {
           setMCPState('connected')
@@ -95,10 +136,49 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         // Ignore - not connected yet
       }
     }
-    checkStatus()
+    loadSetupState()
   }, [])
 
-  // Handle Atlassian MCP connection (Step 1 -> Step 2)
+  // Handle Jira REST API setup (Step 1 -> Step 2)
+  const handleJiraApiSubmit = async () => {
+    if (!jiraApiForm.baseUrl || !jiraApiForm.email || (!jiraApiForm.apiToken && !hasJiraApiConfig)) {
+      setError('Please enter your Jira site URL, email, and API token')
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      let apiToken = jiraApiForm.apiToken
+      if (apiToken === API_TOKEN_MASK) {
+        const existingConfig = await storage.getSecure('jiraApiConfig')
+        if (existingConfig) {
+          apiToken = (JSON.parse(existingConfig) as { apiToken?: string }).apiToken || ''
+        }
+      }
+
+      if (!apiToken) {
+        setError('Please enter your Jira API token')
+        return
+      }
+
+      await storage.setSecure('jiraApiConfig', JSON.stringify({
+        baseUrl: normalizeJiraSiteUrl(jiraApiForm.baseUrl),
+        email: jiraApiForm.email.trim(),
+        apiToken,
+      }))
+      setHasJiraApiConfig(true)
+      setJiraApiForm(prev => ({ ...prev, apiToken: API_TOKEN_MASK }))
+      setStep(2)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save Jira API configuration')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Handle Atlassian MCP connection (Step 2 -> Step 3)
   const handleMCPConnect = async () => {
     setIsLoading(true)
     setError(null)
@@ -125,7 +205,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       const projectsResult = await mcp.getProjects()
       if (projectsResult.success && projectsResult.data) {
         setAllProjects(projectsResult.data as JiraProject[])
-        setStep(2)
+        setStep(3)
       } else {
         setError(projectsResult.error || 'Failed to fetch projects')
         setMCPState('error')
@@ -145,7 +225,31 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     setMCPStatusMessage('')
   }
 
-  // Handle project selection (Step 2 -> Step 3)
+  const handleMCPContinue = async () => {
+    if (allProjects.length > 0) {
+      setStep(3)
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+    setMCPStatusMessage('Fetching your projects...')
+    try {
+      const projectsResult = await mcp.getProjects()
+      if (projectsResult.success && projectsResult.data) {
+        setAllProjects(projectsResult.data as JiraProject[])
+        setStep(3)
+      } else {
+        setError(projectsResult.error || 'Failed to fetch projects')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch projects')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Handle project selection (Step 3 -> Step 4)
   const handleProjectsSelected = async () => {
     if (selectedProjectKeys.size === 0) {
       setError('Please select at least one project')
@@ -277,7 +381,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       // Small delay to show success message
       await new Promise(resolve => setTimeout(resolve, 1000))
       setMCPStatusMessage('')
-      setStep(3)
+      setStep(4)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save projects')
     } finally {
@@ -285,7 +389,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     }
   }
 
-  // Handle AI provider setup (Step 3 -> Step 4)
+  // Handle AI provider setup (Step 4 -> Step 5)
   const handleAISubmit = async () => {
     if (!aiForm.apiKey) {
       setError('Please enter your API key')
@@ -299,8 +403,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       await storage.setSecure('aiConfig', JSON.stringify({
         provider: aiForm.provider,
         apiKey: aiForm.apiKey,
+        model: aiForm.model || undefined,
       }))
-      setStep(4)
+      setStep(5)
     } catch (err) {
       setError('Failed to save AI configuration')
     } finally {
@@ -373,6 +478,33 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     }
   }
 
+  const handleSkipOnboarding = async () => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const skippedProfile: UserProfile = {
+        style: 'balanced',
+        verbosity: 'balanced',
+        tone: 'balanced',
+        writingPatterns: {
+          commonPhrases: [],
+          taskFormat: '',
+          commentStyle: '',
+        },
+        focusProjects: [],
+        confirmAllJiraActions: true,
+        onboardingCompleted: true,
+      }
+
+      await storage.set('userProfile', skippedProfile)
+      onComplete()
+    } catch {
+      setError('Failed to skip onboarding')
+      setIsLoading(false)
+    }
+  }
+
   const toggleProject = (key: string) => {
     const newSelected = new Set(selectedProjectKeys)
     if (newSelected.has(key)) {
@@ -383,9 +515,16 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     setSelectedProjectKeys(newSelected)
   }
 
+  const getCatalogModels = (provider: ModelProvider, role: ModelRole, selectedModel?: string) => {
+    const roleCatalog = modelCatalog?.[provider]?.[role] || getBundledProviderRole(provider, role)
+    const ids = roleCatalog.models.map(model => model.id)
+    if (selectedModel && !ids.includes(selectedModel)) return [selectedModel, ...ids]
+    return ids
+  }
+
   const renderStep = () => {
     switch (step) {
-      // Step 1: Welcome + Connect to Atlassian via MCP OAuth
+      // Step 1: Jira REST API setup
       case 1:
         return (
           <div className="space-y-6 animate-fade-in">
@@ -393,9 +532,91 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <div className="w-20 h-20 bg-gradient-to-br from-mirai-500 to-mirai-700 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
                 <span className="text-white text-3xl font-bold">M</span>
               </div>
-              <h2 className="text-2xl font-bold text-gray-800">Welcome to Mirai!</h2>
+              <h2 className="text-2xl font-bold text-gray-800">Connect your Jira site</h2>
               <p className="text-gray-600 mt-2">
-                Your AI-powered project management assistant. Let's connect to your Atlassian workspace.
+                Start with the Jira API details Mirai needs for uploads and to match MCP to the right Atlassian site.
+              </p>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-sm text-amber-800">
+                Atlassian MCP handles Jira reading and updates through OAuth. The REST API token is used for attachment uploads and helps Mirai choose the correct Jira cloud site.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Jira Site URL
+                </label>
+                <input
+                  type="text"
+                  value={jiraApiForm.baseUrl}
+                  onChange={(e) => setJiraApiForm({ ...jiraApiForm, baseUrl: e.target.value })}
+                  placeholder="https://your-domain.atlassian.net"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Atlassian Email
+                </label>
+                <input
+                  type="email"
+                  value={jiraApiForm.email}
+                  onChange={(e) => setJiraApiForm({ ...jiraApiForm, email: e.target.value })}
+                  placeholder="your-email@example.com"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Jira API Token
+                </label>
+                <input
+                  type="password"
+                  value={jiraApiForm.apiToken}
+                  onChange={(e) => setJiraApiForm({ ...jiraApiForm, apiToken: e.target.value })}
+                  onFocus={() => jiraApiForm.apiToken === API_TOKEN_MASK && setJiraApiForm({ ...jiraApiForm, apiToken: '' })}
+                  placeholder="Your Jira API token"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Create one in <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" className="text-mirai-600 hover:underline">Atlassian Account Settings</a>.
+                </p>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-red-700 text-sm">{error}</p>
+              </div>
+            )}
+
+            <button
+              onClick={handleJiraApiSubmit}
+              disabled={isLoading || !jiraApiForm.baseUrl || !jiraApiForm.email || (!jiraApiForm.apiToken && !hasJiraApiConfig)}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+            >
+              {isLoading ? 'Saving...' : 'Continue to Atlassian MCP'}
+              <ArrowIcon />
+            </button>
+          </div>
+        )
+
+      // Step 2: Welcome + Connect to Atlassian via MCP OAuth
+      case 2:
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <div className="text-center">
+              <div className="w-20 h-20 bg-gradient-to-br from-mirai-500 to-mirai-700 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
+                <span className="text-white text-3xl font-bold">M</span>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800">Connect Atlassian MCP</h2>
+              <p className="text-gray-600 mt-2">
+                Sign in with Atlassian so Mirai can read, create, and update Jira issues securely.
               </p>
             </div>
 
@@ -409,7 +630,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   <div>
                     <p className="font-medium text-blue-800">Secure Atlassian Connection</p>
                     <p className="text-sm text-blue-700 mt-1">
-                      Clicking the button below will open your browser to securely sign in with your Atlassian account. No API tokens needed!
+                      Clicking the button below opens your browser for Atlassian OAuth. Your Jira API token is only used locally for REST features like attachments.
                     </p>
                   </div>
                 </div>
@@ -471,37 +692,55 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               </div>
             )}
 
-            {mcpState === 'error' ? (
+            <div className="flex gap-3">
               <button
-                onClick={handleMCPRetry}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gray-600 text-white rounded-xl hover:bg-gray-700 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Try Again
-              </button>
-            ) : (
-              <button
-                onClick={handleMCPConnect}
+                onClick={() => setStep(1)}
                 disabled={isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending'}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+                className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 disabled:opacity-50 transition-colors"
               >
-                {isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending' ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                    {mcpState === 'oauth_pending' ? 'Waiting for browser...' : 'Connecting...'}
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    Connect to Atlassian
-                  </>
-                )}
+                Back
               </button>
-            )}
+              {mcpState === 'error' ? (
+                <button
+                  onClick={handleMCPRetry}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gray-600 text-white rounded-xl hover:bg-gray-700 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Try Again
+                </button>
+              ) : mcpState === 'connected' ? (
+                <button
+                  onClick={handleMCPContinue}
+                  disabled={isLoading}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+                >
+                  {isLoading ? 'Loading...' : 'Continue'}
+                  <ArrowIcon />
+                </button>
+              ) : (
+                <button
+                  onClick={handleMCPConnect}
+                  disabled={isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending'}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+                >
+                  {isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending' ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                      {mcpState === 'oauth_pending' ? 'Waiting for browser...' : 'Connecting...'}
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                      Connect to Atlassian
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
 
             <p className="text-xs text-center text-gray-500">
               Mirai uses the official Atlassian MCP server for secure access to your Jira data.
@@ -509,8 +748,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )
 
-      // Step 2: Project Selection
-      case 2:
+      // Step 3: Project Selection
+      case 3:
         return (
           <div className="space-y-6 animate-fade-in">
             <div className="flex items-center gap-3 text-green-600">
@@ -590,7 +829,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
             <div className="flex gap-3">
               <button
-                onClick={() => setStep(1)}
+                onClick={() => setStep(2)}
                 className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Back
@@ -607,8 +846,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )
 
-      // Step 3: AI Provider
-      case 3:
+      // Step 4: AI Provider
+      case 4:
         return (
           <div className="space-y-6 animate-fade-in">
             <div className="flex items-center gap-3 text-green-600">
@@ -634,7 +873,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   {CHAT_PROVIDERS.map((provider) => (
                     <button
                       key={provider}
-                      onClick={() => setAIForm({ ...aiForm, provider })}
+                      onClick={() => setAIForm({ ...aiForm, provider, model: '' })}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors ${
                         aiForm.provider === provider
                           ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
@@ -659,6 +898,22 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
                 />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Model
+                </label>
+                <select
+                  value={aiForm.model}
+                  onChange={(e) => setAIForm({ ...aiForm, model: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                >
+                  <option value="">Default for provider</option>
+                  {getCatalogModels(aiForm.provider, 'chat', aiForm.model).map(model => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {error && (
@@ -667,14 +922,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
             <div className="flex gap-3">
               <button
-                onClick={() => setStep(2)}
+                onClick={() => setStep(3)}
                 className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Back
               </button>
               <button
                 onClick={handleAISubmit}
-                disabled={isLoading}
+                disabled={isLoading || !aiForm.apiKey}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
               >
                 {isLoading ? 'Saving...' : 'Continue'}
@@ -684,8 +939,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )
 
-      // Step 4: Workspace folder
-      case 4:
+      // Step 5: Workspace folder
+      case 5:
         return (
           <div className="space-y-6 animate-fade-in">
             <div className="flex items-center gap-3 text-green-600">
@@ -721,13 +976,13 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
             <div className="flex gap-3">
               <button
-                onClick={() => setStep(3)}
+                onClick={() => setStep(4)}
                 className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Back
               </button>
               <button
-                onClick={() => setStep(5)}
+                onClick={() => setStep(6)}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 transition-colors"
               >
                 {workspace ? 'Continue' : 'Skip for now'}
@@ -737,8 +992,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )
 
-      // Step 5: Communication style
-      case 5:
+      // Step 6: Communication style
+      case 6:
         return (
           <div className="space-y-6 animate-fade-in">
             <div>
@@ -827,7 +1082,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
             <div className="flex gap-3">
               <button
-                onClick={() => setStep(4)}
+                onClick={() => setStep(5)}
                 className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Back
@@ -853,7 +1108,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const renderProgress = () => {
     return (
       <div className="flex items-center justify-center gap-2 mb-8">
-        {[1, 2, 3, 4, 5].map((s) => (
+        {[1, 2, 3, 4, 5, 6].map((s) => (
           <div
             key={s}
             className={`h-2 rounded-full transition-all ${
@@ -871,9 +1126,18 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8 overflow-hidden">
         {renderProgress()}
         {renderStep()}
+        <div className="mt-6 pt-4 border-t border-gray-100 text-center">
+          <button
+            onClick={handleSkipOnboarding}
+            disabled={isLoading}
+            className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 transition-colors"
+          >
+            Skip onboarding and configure later in Settings
+          </button>
+        </div>
       </div>
     </div>
   )
