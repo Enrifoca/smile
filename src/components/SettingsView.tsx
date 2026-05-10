@@ -1,11 +1,20 @@
 import { useState, useEffect } from 'react'
 import { useElectron } from '../hooks/useElectron'
-
-interface AIConfig {
-  provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'
-  apiKey: string
-  model?: string
-}
+import {
+  AIConfig,
+  AIProvider,
+  AI_PROVIDER_LABELS,
+  CHAT_PROVIDERS,
+  ModelCatalog,
+  ModelProvider,
+  ModelRole,
+  OCRConfig,
+  OCRProvider,
+  OCR_PROVIDER_LABELS,
+  OCR_PROVIDERS,
+  REASONING_PROVIDERS,
+  getBundledProviderRole,
+} from '../shared/modelCatalog'
 
 interface JiraProject {
   id: string
@@ -61,7 +70,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
 
   // Reasoning model
   const [reasoningForm, setReasoningForm] = useState({
-    provider: 'anthropic' as 'openai' | 'anthropic' | 'groq' | 'moonshot',
+    provider: 'anthropic' as AIProvider,
     apiKey: '',
     model: '',
     useSameKey: true,
@@ -69,6 +78,16 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   const [reasoningConfigured, setReasoningConfigured] = useState(false)
   const [savingReasoning, setSavingReasoning] = useState(false)
   const [reasoningSaveStatus, setReasoningSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
+
+  // OCR model
+  const [ocrForm, setOcrForm] = useState({
+    provider: 'mistral' as OCRProvider,
+    apiKey: '',
+    model: '',
+  })
+  const [ocrConfigured, setOcrConfigured] = useState(false)
+  const [savingOcr, setSavingOcr] = useState(false)
+  const [ocrSaveStatus, setOcrSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
   // MCP state
   const [mcpConnected, setMcpConnected] = useState(false)
@@ -84,7 +103,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   
   // Form state
   const [aiForm, setAIForm] = useState({
-    provider: 'openai' as 'openai' | 'anthropic' | 'groq' | 'moonshot',
+    provider: 'openai' as AIProvider,
     apiKey: '',
     model: '',
   })
@@ -97,7 +116,11 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   })
   const [hasJiraApiToken, setHasJiraApiToken] = useState(false)
 
-  const { storage, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null)
+  const [refreshingModels, setRefreshingModels] = useState(false)
+  const [modelRefreshStatus, setModelRefreshStatus] = useState<'idle' | 'success' | 'error'>('idle')
+
+  const { storage, models: modelCatalogAPI, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
 
   const normalizeJiraSiteUrl = (url: string) => url.trim().replace(/\/+$/, '').toLowerCase()
 
@@ -114,8 +137,36 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     loadSettings()
   }, [])
 
+  const loadModelCatalog = async (refresh = false) => {
+    setRefreshingModels(refresh)
+    try {
+      const result = refresh
+        ? await modelCatalogAPI.refresh()
+        : await modelCatalogAPI.getCatalog()
+
+      if (result.success && result.data) {
+        setModelCatalog(result.data)
+        setModelRefreshStatus(refresh ? 'success' : 'idle')
+        if (refresh) setTimeout(() => setModelRefreshStatus('idle'), 3000)
+      } else if (refresh) {
+        setModelRefreshStatus('error')
+        setTimeout(() => setModelRefreshStatus('idle'), 3000)
+      }
+    } catch (error) {
+      console.error('Failed to load model catalog:', error)
+      if (refresh) {
+        setModelRefreshStatus('error')
+        setTimeout(() => setModelRefreshStatus('idle'), 3000)
+      }
+    } finally {
+      setRefreshingModels(false)
+    }
+  }
+
   const loadSettings = async () => {
     try {
+      await loadModelCatalog()
+
       // Check MCP connection status
       const mcpStatus = await mcp.status()
       setMcpConnected(mcpStatus.connected)
@@ -158,6 +209,18 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
           apiKey: '••••••••',
           model: rc.model || '',
           useSameKey: false,
+        })
+      }
+
+      // Load OCR model config
+      const ocrConfigStr = await storage.getSecure('ocrConfig')
+      if (ocrConfigStr) {
+        const oc = JSON.parse(ocrConfigStr) as OCRConfig
+        setOcrConfigured(true)
+        setOcrForm({
+          provider: oc.provider || 'mistral',
+          apiKey: '••••••••',
+          model: oc.model || '',
         })
       }
 
@@ -303,6 +366,8 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
 
       await storage.setSecure('aiConfig', JSON.stringify(config))
       setAIConfig(config)
+      const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
+      if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
     } catch (error) {
       console.error('Failed to save AI config:', error)
     } finally {
@@ -315,7 +380,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     try {
       let apiKey = reasoningForm.apiKey
 
-      if (reasoningForm.useSameKey) {
+      if (canUseSameReasoningKey && reasoningForm.useSameKey) {
         const chatConfigStr = await storage.getSecure('aiConfig')
         if (chatConfigStr) apiKey = JSON.parse(chatConfigStr).apiKey
       } else if (apiKey === '••••••••') {
@@ -332,6 +397,8 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
 
       const config = { provider: reasoningForm.provider, apiKey, model: reasoningForm.model || undefined }
       await storage.setSecure('reasoningConfig', JSON.stringify(config))
+      const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
+      if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
       setReasoningConfigured(true)
       setReasoningSaveStatus('success')
       setTimeout(() => setReasoningSaveStatus('idle'), 3000)
@@ -340,6 +407,46 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
       setTimeout(() => setReasoningSaveStatus('idle'), 3000)
     } finally {
       setSavingReasoning(false)
+    }
+  }
+
+  const saveOcrConfig = async () => {
+    setSavingOcr(true)
+    setOcrSaveStatus('idle')
+
+    try {
+      let apiKey = ocrForm.apiKey
+
+      if (apiKey === '••••••••') {
+        const existing = await storage.getSecure('ocrConfig')
+        if (existing) apiKey = (JSON.parse(existing) as OCRConfig).apiKey
+      }
+
+      if (!apiKey) {
+        setOcrSaveStatus('error')
+        setTimeout(() => setOcrSaveStatus('idle'), 3000)
+        return
+      }
+
+      const config: OCRConfig = {
+        provider: ocrForm.provider,
+        apiKey,
+        model: ocrForm.model || undefined,
+      }
+
+      await storage.setSecure('ocrConfig', JSON.stringify(config))
+      const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
+      if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
+      setOcrConfigured(true)
+      setOcrForm(prev => ({ ...prev, apiKey: '••••••••' }))
+      setOcrSaveStatus('success')
+      setTimeout(() => setOcrSaveStatus('idle'), 3000)
+    } catch (error) {
+      console.error('Failed to save OCR config:', error)
+      setOcrSaveStatus('error')
+      setTimeout(() => setOcrSaveStatus('idle'), 3000)
+    } finally {
+      setSavingOcr(false)
     }
   }
 
@@ -473,71 +580,22 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     }
   }
 
-  const getModelOptions = (provider: string, mode: 'chat' | 'reasoning' = 'chat') => {
-    switch (provider) {
-      case 'openai':
-        if (mode === 'reasoning') return [
-          'o4-mini',           // Fast reasoning — recommended
-          'o3',                // Strongest reasoning
-          'o3-mini',           // Balanced reasoning
-          'o1',                // Original reasoning model
-          'gpt-4o',            // Works well with prompt-based thinking
-        ]
-        return [
-          'gpt-4o',
-          'gpt-4o-mini',
-          'gpt-4-turbo',
-          'gpt-3.5-turbo',
-        ]
-      case 'anthropic':
-        if (mode === 'reasoning') return [
-          'claude-3-7-sonnet-20250219',  // Extended thinking — recommended
-          'claude-opus-4-5',             // Most capable
-          'claude-sonnet-4-5',
-          'claude-3-5-sonnet-20241022',  // Works with prompt-based thinking
-        ]
-        return [
-          'claude-opus-4-5',
-          'claude-sonnet-4-5',
-          'claude-3-7-sonnet-20250219',
-          'claude-3-5-sonnet-20241022',
-          'claude-3-5-haiku-20241022',
-          'claude-3-opus-20240229',
-          'claude-3-haiku-20240307',
-        ]
-      case 'groq':
-        if (mode === 'reasoning') return [
-          'qwen/qwen3-32b',                          // Thinking-capable, 400 t/s — recommended
-          'moonshotai/kimi-k2-instruct-0905',        // Strong reasoning, 262k ctx
-          'deepseek-r1-distill-llama-70b',           // Native <think> reasoning
-          'llama-3.3-70b-versatile',
-        ]
-        return [
-          'openai/gpt-oss-120b',
-          'openai/gpt-oss-20b',
-          'llama-3.3-70b-versatile',
-          'llama-3.1-8b-instant',
-          'groq/compound',
-          'groq/compound-mini',
-          'moonshotai/kimi-k2-instruct-0905',
-          'qwen/qwen3-32b',
-          'meta-llama/llama-4-scout-17b-16e-instruct',
-          'openai/gpt-oss-safeguard-20b',
-          'whisper-large-v3',
-          'whisper-large-v3-turbo',
-        ]
-      case 'moonshot':
-        return [
-          'kimi-k2.5',
-          'kimi-k2-0905-preview',
-          'moonshot-v1-128k',
-          'moonshot-v1-32k',
-          'moonshot-v1-8k',
-        ]
-      default:
-        return []
-    }
+  const getCatalogModels = (provider: ModelProvider, role: ModelRole, selectedModel?: string) => {
+    const roleCatalog = modelCatalog?.[provider]?.[role] || getBundledProviderRole(provider, role)
+    const ids = roleCatalog.models.map(model => model.id)
+    if (selectedModel && !ids.includes(selectedModel)) return [selectedModel, ...ids]
+    return ids
   }
+
+  const getCatalogStatus = (provider: ModelProvider, role: ModelRole) => {
+    const roleCatalog = modelCatalog?.[provider]?.[role]
+    if (!roleCatalog) return 'Using bundled defaults'
+    if (roleCatalog.error) return 'Refresh failed, using cached/default models'
+    if (roleCatalog.lastFetchedAt) return `Updated ${new Date(roleCatalog.lastFetchedAt).toLocaleString()}`
+    return 'Using bundled defaults'
+  }
+
+  const canUseSameReasoningKey = !!aiConfig && aiConfig.provider === reasoningForm.provider
 
   return (
     <div className="h-full overflow-y-auto">
@@ -878,7 +936,30 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
 
           {/* AI Configuration */}
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">AI Provider</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-800">AI Provider</h2>
+              <div className="flex items-center gap-3">
+                {modelRefreshStatus === 'success' && <span className="text-sm text-green-600">Models refreshed</span>}
+                {modelRefreshStatus === 'error' && <span className="text-sm text-red-600">Refresh failed</span>}
+                <button
+                  onClick={() => loadModelCatalog(true)}
+                  disabled={refreshingModels}
+                  className="btn btn-secondary flex items-center gap-2"
+                >
+                  {refreshingModels ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-600 border-t-transparent"></div>
+                      Refreshing...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshIcon />
+                      Refresh Models
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
 
             <div className="space-y-4">
               <div>
@@ -889,15 +970,14 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   value={aiForm.provider}
                   onChange={(e) => setAIForm({ 
                     ...aiForm, 
-                    provider: e.target.value as 'openai' | 'anthropic' | 'groq' | 'moonshot',
+                    provider: e.target.value as AIProvider,
                     model: '' 
                   })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic (Claude)</option>
-                  <option value="groq">Groq</option>
-                  <option value="moonshot">Moonshot AI (Kimi)</option>
+                  {CHAT_PROVIDERS.map(provider => (
+                    <option key={provider} value={provider}>{AI_PROVIDER_LABELS[provider]}</option>
+                  ))}
                 </select>
               </div>
 
@@ -925,10 +1005,11 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="">Default</option>
-                  {getModelOptions(aiForm.provider, 'chat').map(model => (
+                  {getCatalogModels(aiForm.provider, 'chat', aiForm.model).map(model => (
                     <option key={model} value={model}>{model}</option>
                   ))}
                 </select>
+                <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(aiForm.provider, 'chat')}</p>
               </div>
 
               <button
@@ -970,13 +1051,20 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
                 <select
                   value={reasoningForm.provider}
-                  onChange={e => setReasoningForm({ ...reasoningForm, provider: e.target.value as 'openai' | 'anthropic' | 'groq' | 'moonshot', model: '' })}
+                  onChange={e => {
+                    const provider = e.target.value as AIProvider
+                    setReasoningForm({
+                      ...reasoningForm,
+                      provider,
+                      model: '',
+                      useSameKey: aiConfig?.provider === provider ? reasoningForm.useSameKey : false,
+                    })
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic (Claude)</option>
-                  <option value="groq">Groq</option>
-                  <option value="moonshot">Moonshot AI (Kimi)</option>
+                  {REASONING_PROVIDERS.map(provider => (
+                    <option key={provider} value={provider}>{AI_PROVIDER_LABELS[provider]}</option>
+                  ))}
                 </select>
               </div>
 
@@ -984,13 +1072,19 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={reasoningForm.useSameKey}
+                    checked={canUseSameReasoningKey && reasoningForm.useSameKey}
+                    disabled={!canUseSameReasoningKey}
                     onChange={e => setReasoningForm({ ...reasoningForm, useSameKey: e.target.checked, apiKey: '' })}
                     className="rounded"
                   />
                   Use same API key as main model
                 </label>
-                {!reasoningForm.useSameKey && (
+                {!canUseSameReasoningKey && (
+                  <p className="text-xs text-gray-500 mb-2">
+                    Choose the same provider as your main model to reuse its key.
+                  </p>
+                )}
+                {(!canUseSameReasoningKey || !reasoningForm.useSameKey) && (
                   <input
                     type="password"
                     value={reasoningForm.apiKey}
@@ -1010,16 +1104,17 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="">Default for provider</option>
-                  {getModelOptions(reasoningForm.provider, 'reasoning').map(m => (
+                  {getCatalogModels(reasoningForm.provider, 'reasoning', reasoningForm.model).map(m => (
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
+                <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(reasoningForm.provider, 'reasoning')}</p>
               </div>
 
               <div className="flex items-center gap-3">
                 <button
                   onClick={saveReasoningConfig}
-                  disabled={savingReasoning || (!reasoningForm.useSameKey && !reasoningForm.apiKey)}
+                  disabled={savingReasoning || ((!canUseSameReasoningKey || !reasoningForm.useSameKey) && !reasoningForm.apiKey)}
                   className="btn btn-primary"
                 >
                   {savingReasoning ? 'Saving…' : 'Save Reasoning Model'}
@@ -1030,25 +1125,81 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
             </div>
           </section>
 
-          {/* OCR Model — coming soon */}
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 opacity-60">
+          {/* OCR Model */}
+          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-1">
               <div>
                 <h2 className="text-lg font-semibold text-gray-800">OCR Model</h2>
-                <p className="text-xs text-gray-400 font-normal mt-0.5">Coming soon</p>
+                <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
               </div>
-              <span className="text-xs font-medium text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full">
-                Not available yet
-              </span>
+              {ocrConfigured && (
+                <span className="flex items-center gap-1.5 text-sm font-medium text-green-600">
+                  <CheckIcon /> Active
+                </span>
+              )}
             </div>
-            <p className="text-sm text-gray-400 mb-3">
-              A specialist model for reading scanned PDFs and image-based documents. Will use Mistral AI's OCR API to extract text from files that have no readable text layer.
+            <p className="text-sm text-gray-500 mb-5">
+              A specialist model for scanned PDFs and image-based documents. When configured, Mirai will automatically use OCR if normal PDF text extraction returns nothing or unreadable text.
             </p>
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-              Planned for a future release
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-5">
+              <p className="text-xs text-amber-800">
+                <strong>Provider notes:</strong> Mistral uses the official OCR API. DeepSeek uses the DeepSeek-OCR model through DeepInfra, so use a DeepInfra API token for that option.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+                <select
+                  value={ocrForm.provider}
+                  onChange={e => setOcrForm({ ...ocrForm, provider: e.target.value as OCRProvider, model: '' })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  {OCR_PROVIDERS.map(provider => (
+                    <option key={provider} value={provider}>{OCR_PROVIDER_LABELS[provider]}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                <input
+                  type="password"
+                  value={ocrForm.apiKey}
+                  onChange={e => setOcrForm({ ...ocrForm, apiKey: e.target.value })}
+                  onFocus={() => ocrForm.apiKey === '••••••••' && setOcrForm({ ...ocrForm, apiKey: '' })}
+                  placeholder={ocrForm.provider === 'mistral' ? 'Your Mistral API key' : 'Your DeepInfra API token'}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                <select
+                  value={ocrForm.model}
+                  onChange={e => setOcrForm({ ...ocrForm, model: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Default for provider</option>
+                  {getCatalogModels(ocrForm.provider, 'ocr', ocrForm.model).map(model => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(ocrForm.provider, 'ocr')}</p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={saveOcrConfig}
+                  disabled={savingOcr || !ocrForm.apiKey}
+                  className="btn btn-primary"
+                >
+                  {savingOcr ? 'Saving…' : 'Save OCR Model'}
+                </button>
+                {ocrSaveStatus === 'success' && <span className="text-sm text-green-600">Saved!</span>}
+                {ocrSaveStatus === 'error' && <span className="text-sm text-red-600">Failed — check API key.</span>}
+              </div>
             </div>
           </section>
 

@@ -62,7 +62,7 @@ export interface UserProfile {
 }
 
 export interface AIConfig {
-  provider: 'openai' | 'anthropic' | 'groq' | 'moonshot'
+  provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'
   apiKey: string
   model?: string
 }
@@ -130,6 +130,10 @@ export const TOOL_DEFINITIONS = {
   },
   file_read: {
     description: 'Read contents of a file',
+    requiresConfirmation: false,
+  },
+  file_read_ocr: {
+    description: 'Read difficult documents with OCR',
     requiresConfirmation: false,
   },
   file_write: {

@@ -146,6 +146,10 @@ function getToolEntry(name: string, args: Record<string, unknown>): ToolEntry {
       const verb = fnLower.endsWith('.pdf') ? 'Parsed PDF' : fnLower.endsWith('.docx') ? 'Read Word doc' : 'Read'
       return { tool: name, label: `${verb} ${fname}`, group: 'file' }
     }
+    case 'file_read_ocr': {
+      const fname = str(args.path).split(/[\\/]/).pop() || str(args.path)
+      return { tool: name, label: `OCR read ${fname}`, group: 'file' }
+    }
     case 'file_list': {
       const p = str(args.path) || '.'
       return { tool: name, label: `Browsed ${p === '.' ? 'workspace' : (p.split(/[\\/]/).pop() || p) + '/'}`, group: 'file' }
@@ -435,6 +439,21 @@ export class Agent {
 
       if (
         !wasStreamed &&
+        /^\[tool_result:/i.test(strippedContent) &&
+        iterations < (hasLimit ? maxIterations : iterations + 1)
+      ) {
+        console.log('[Agent] Raw tool result echoed — nudging model to use the result')
+        this.conversationHistory.push({
+          id: uuidv4(),
+          role: 'user',
+          content: '[SYSTEM] You repeated a raw tool result. Do not show tool_result blocks to the user. Use the tool result as source material and complete the user request. If the user asked for an action and the required information is present, call the appropriate tool now.',
+          timestamp: new Date().toISOString(),
+        })
+        continue
+      }
+
+      if (
+        !wasStreamed &&
         strippedContent &&
         !this.actionFirstNudgedThisTurn &&
         this.shouldNudgeActionFirst(strippedContent)
@@ -647,6 +666,11 @@ export class Agent {
           if (responseStarted) {
             const finalContent = responseContent.trim() || response.content?.trim() || ''
             if (finalContent) {
+              if (/^\[tool_result:/i.test(finalContent)) {
+                this.config.onUpdateMessage!(responseMsgId, '', false)
+                response.content = finalContent
+                return { response, wasStreamed: false }
+              }
               this.config.onUpdateMessage!(responseMsgId, finalContent, false)
               this.conversationHistory.push({ id: responseMsgId, role: 'assistant', content: finalContent, timestamp: new Date().toISOString() })
               return { response, wasStreamed: true }
@@ -718,10 +742,12 @@ export class Agent {
   private updateScratchpadAfterTool(toolName: string, args: Record<string, unknown>, formattedResult: string): void {
     const str = (v: unknown) => (v as string) || ''
     let note = ''
-    if (toolName === 'file_read') {
+    if (toolName === 'file_read' || toolName === 'file_read_ocr') {
       const fname = str(args.path).split(/[\\/]/).pop() || str(args.path)
       const lines = formattedResult.split('\n').length
-      note = `✓ Read: ${fname} (${lines} lines of content available in context)`
+      note = toolName === 'file_read_ocr'
+        ? `✓ OCR read: ${fname} (${lines} lines of content available in context)`
+        : `✓ Read: ${fname} (${lines} lines of content available in context)`
     } else if (toolName === 'file_search') {
       const pattern = str(args.pattern || args.name)
       const matchCount = (formattedResult.match(/\n/g) || []).length + 1
@@ -888,6 +914,37 @@ export class Agent {
         const parsed = JSON.parse(raw)
         const projects: Array<Record<string, unknown>> = parsed.values ?? (Array.isArray(parsed) ? parsed : [])
         return projects.map(p => `- ${p.key}: ${p.name}`).join('\n') || 'No projects found.'
+      } catch { /* fall through */ }
+    }
+
+    // --- Files: compact, explicit search/list results ---
+    if (toolName === 'file_search' || toolName === 'file_list') {
+      try {
+        const parsed = JSON.parse(raw)
+        const files: Array<Record<string, unknown>> = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed.files)
+            ? parsed.files
+            : []
+
+        if (files.length === 0) {
+          return toolName === 'file_search'
+            ? 'No files found for this search.'
+            : 'No files found in this folder.'
+        }
+
+        const lines = files.slice(0, 80).map(file => {
+          const name = String(file.name || file.path || '(unnamed)')
+          const filePath = String(file.path || name)
+          const suffix = file.isDirectory ? '/' : ''
+          return `- ${filePath}${suffix}`
+        })
+
+        const shown = files.length > lines.length
+          ? `\n...and ${files.length - lines.length} more`
+          : ''
+
+        return `${files.length} file(s):\n${lines.join('\n')}${shown}`
       } catch { /* fall through */ }
     }
 

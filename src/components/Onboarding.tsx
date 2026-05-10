@@ -2,6 +2,7 @@
 import { useElectron } from '../hooks/useElectron'
 import { UserProfile } from '../agent/types'
 import { syncMemoryFromJira } from '../utils/memorySync'
+import { AIProvider, AI_PROVIDER_LABELS, CHAT_PROVIDERS } from '../shared/modelCatalog'
 
 interface OnboardingProps {
   onComplete: () => void
@@ -55,7 +56,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   
   // Form states
   const [aiForm, setAIForm] = useState({
-    provider: 'openai' as 'openai' | 'anthropic' | 'groq' | 'moonshot',
+    provider: 'openai' as AIProvider,
     apiKey: '',
   })
   const [workspace, setWorkspace] = useState<string | null>(null)
@@ -630,7 +631,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   Provider
                 </label>
                 <div className="grid grid-cols-3 gap-3">
-                  {(['openai', 'anthropic', 'groq'] as const).map((provider) => (
+                  {CHAT_PROVIDERS.map((provider) => (
                     <button
                       key={provider}
                       onClick={() => setAIForm({ ...aiForm, provider })}
@@ -640,9 +641,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
-                      {provider === 'openai' && 'OpenAI'}
-                      {provider === 'anthropic' && 'Claude'}
-                      {provider === 'groq' && 'Groq'}
+                      {AI_PROVIDER_LABELS[provider]}
                     </button>
                   ))}
                 </div>
