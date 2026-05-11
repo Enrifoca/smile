@@ -10,7 +10,8 @@
     "build:mac": "tsc && vite build && electron-builder --mac",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pdf:memory-flow": "node scripts/generate-mirai-memory-and-agent-loop-flow-pdf.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^0.0.55",
