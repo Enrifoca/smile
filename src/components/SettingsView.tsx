@@ -273,7 +273,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   }
 
   const handleMCPSwitchAccount = async () => {
-    if (!confirm('Reconnect Atlassian? This will clear Mirai\'s cached Atlassian login and open the browser so you can choose the right account.')) return
+    if (!confirm('Reconnect Atlassian? This will clear smile:D\'s cached Atlassian login and open the browser so you can choose the right account.')) return
     await handleMCPConnect()
   }
 
@@ -653,7 +653,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                       <div>
                         <p className="font-medium text-green-800">Connected to Atlassian</p>
                         <p className="text-sm text-green-700 mt-1">
-                          Mirai can access your Jira projects securely via OAuth.
+                          This connector can access your Jira projects securely via OAuth.
                         </p>
                       </div>
                     </div>
@@ -678,7 +678,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
               ) : (
                 <>
                   <p className="text-sm text-gray-600">
-                    Connect your Atlassian account to allow Mirai to access your Jira projects. 
+                    Connect your Atlassian account to allow this connector to access your Jira projects.
                     This uses secure OAuth authentication - no API tokens needed.
                   </p>
                   
@@ -700,7 +700,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-800">Monitored Projects</h2>
-                <p className="text-sm text-gray-500">Projects that Mirai will focus on</p>
+                <p className="text-sm text-gray-500">Projects this connector will expose to the agent</p>
               </div>
               {mcpConnected && (
                 <button
@@ -729,7 +729,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
               </p>
             ) : monitoredProjects.length === 0 ? (
               <p className="text-sm text-gray-500 italic">
-                No projects selected. Click "Select Projects" to choose which Jira projects Mirai should monitor.
+                No projects selected. Click "Select Projects" to choose which Jira projects this connector should expose.
               </p>
             ) : (
               <div className="space-y-2">
@@ -757,7 +757,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   <div className="p-4 border-b border-gray-200">
                     <h3 className="text-lg font-semibold text-gray-800">Select Projects to Monitor</h3>
                     <p className="text-sm text-gray-500 mt-1">
-                      Choose which Jira projects Mirai should focus on
+                      Choose which Jira projects this connector should expose
                     </p>
                   </div>
                   
@@ -769,14 +769,14 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                       <div className="flex gap-2">
                         <button
                           onClick={() => setSelectedProjectKeys(new Set(allProjects.map(p => p.key)))}
-                          className="text-mirai-600 hover:underline"
+                          className="text-neutral-700 hover:underline"
                         >
                           Select all
                         </button>
                         <span className="text-gray-300">|</span>
                         <button
                           onClick={() => setSelectedProjectKeys(new Set())}
-                          className="text-mirai-600 hover:underline"
+                          className="text-neutral-700 hover:underline"
                         >
                           Clear
                         </button>
@@ -789,7 +789,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                           key={project.id}
                           className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
                             selectedProjectKeys.has(project.key)
-                              ? 'border-mirai-500 bg-mirai-50'
+                              ? 'border-neutral-500 bg-neutral-50'
                               : 'border-gray-200 hover:border-gray-300'
                           }`}
                         >
@@ -801,7 +801,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                           />
                           <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center transition-colors ${
                             selectedProjectKeys.has(project.key)
-                              ? 'border-mirai-500 bg-mirai-500'
+                              ? 'border-neutral-500 bg-neutral-950'
                               : 'border-gray-300'
                           }`}>
                             {selectedProjectKeys.has(project.key) && (
@@ -904,7 +904,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Get your token from <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" className="text-mirai-600 hover:underline">Atlassian Account Settings</a>
+                  Get your token from <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" className="text-neutral-700 hover:underline">Atlassian Account Settings</a>
                 </p>
               </div>
 
@@ -1038,7 +1038,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
               )}
             </div>
             <p className="text-sm text-gray-500 mb-2">
-              A dedicated model for complex, multi-step tasks. When configured, it takes over automatically whenever the agent needs to plan deeply — like analysing documents, creating multiple Jira issues, or reasoning through ambiguous requests.
+              A dedicated model for complex, multi-step tasks. When configured, it takes over automatically whenever the agent needs to plan deeply, such as analyzing documents, creating multiple connector records, or reasoning through ambiguous requests.
             </p>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-5">
               <p className="text-xs text-blue-800">
@@ -1139,7 +1139,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
               )}
             </div>
             <p className="text-sm text-gray-500 mb-5">
-              A specialist model for scanned PDFs and image-based documents. When configured, Mirai will automatically use OCR if normal PDF text extraction returns nothing or unreadable text.
+              A specialist model for scanned PDFs and image-based documents. When configured, the agent will automatically use OCR if normal PDF text extraction returns nothing or unreadable text.
             </p>
 
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-5">
@@ -1208,7 +1208,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Workspace Folder</h2>
             
             <p className="text-sm text-gray-600 mb-4">
-              This is the folder where Mirai can read project documents and create reports.
+              This is the folder where the agent can read documents and create outputs.
             </p>
 
             <div className="flex items-center gap-4">
@@ -1248,7 +1248,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     saveMaxIterations(val)
                   }}
                   disabled={savingMaxIter}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-mirai-300"
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-neutral-300"
                 >
                   <option value={5}>5</option>
                   <option value={10}>10 (default)</option>
@@ -1312,7 +1312,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
           {/* About */}
           <section className="text-center py-4">
             <p className="text-sm text-gray-500">
-              Mirai v0.1.0 - AI Project Management Assistant
+              smile:D v0.1.0 - White-label desktop agent framework
             </p>
             <p className="text-xs text-gray-400 mt-1">
               All data is stored locally on your machine

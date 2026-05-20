@@ -2,7 +2,7 @@
  * Memory Service
  * 
  * Handles reading/writing memory files (.md) in the user's workspace.
- * Memories are stored in .mirai/memories/ folder.
+ * Memories are stored in .smile/memories/ folder.
  */
 
 import * as fs from 'fs'
@@ -47,17 +47,17 @@ interface MemoryStore {
   version: number
 }
 
-const DEFAULT_USER_MARKDOWN = `# Mirai User Memory
+const DEFAULT_USER_MARKDOWN = `# smile:D User Memory
 
 ## Standing Instructions
-- Use the normal Jira Task issue type by default.
-- Do not use Tech Task unless the project supports it and the user explicitly asks.
+- Add durable instructions that should shape every agent response.
+- Keep domain-specific rules here only when they apply across sessions.
 
 ## Lexicon & Style
 - Match the user's direct, product-focused tone.
 
-## Project Conventions
-- Add stable project rules here when they should always affect Mirai's behavior.
+## Workspace Conventions
+- Add stable workspace rules here when they should always affect the agent's behavior.
 `
 
 const DEFAULT_MEMORY: MemoryStore = {
@@ -88,7 +88,7 @@ export class MemoryService {
    */
   private getMemoriesDir(): string | null {
     if (!this.workspacePath) return null
-    return path.join(this.workspacePath, '.mirai', 'memories')
+    return path.join(this.workspacePath, '.smile', 'memories')
   }
 
   /**
@@ -263,7 +263,7 @@ export class MemoryService {
    */
   async getMemories(): Promise<MemoryStore> {
     // Memory is a context-control surface. Always load from disk so manual edits
-    // in .mirai/memories/user.md are reflected before the next agent response.
+    // in .smile/memories/user.md are reflected before the next agent response.
     return this.loadMemories()
   }
 
@@ -473,13 +473,13 @@ export class MemoryService {
       for (const note of parsed.vocabularyNotes) addUnique(lexicon, note)
     }
 
-    const lines = ['# Mirai User Memory', '']
+    const lines = ['# smile:D User Memory', '']
     lines.push('## Standing Instructions')
     if (standing.length > 0) {
       for (const item of standing) lines.push(`- ${item}`)
     } else {
-      lines.push('- Use the normal Jira Task issue type by default.')
-      lines.push('- Do not use Tech Task unless the project supports it and the user explicitly asks.')
+      lines.push('- Add durable instructions that should shape every agent response.')
+      lines.push('- Keep domain-specific rules here only when they apply across sessions.')
     }
 
     lines.push('', '## Lexicon & Style')
@@ -489,8 +489,8 @@ export class MemoryService {
       lines.push("- Match the user's direct, product-focused tone.")
     }
 
-    lines.push('', '## Project Conventions')
-    lines.push("- Add stable project rules here when they should always affect Mirai's behavior.")
+    lines.push('', '## Workspace Conventions')
+    lines.push("- Add stable workspace rules here when they should always affect the agent's behavior.")
     lines.push('')
     return lines.join('\n')
   }

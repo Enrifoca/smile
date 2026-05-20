@@ -8,8 +8,8 @@ interface Chat {
 }
 
 interface SidebarProps {
-  currentView: 'chat' | 'memories' | 'settings'
-  onNavigate: (view: 'chat' | 'memories' | 'settings') => void
+  currentView: 'chat' | 'memories' | 'connectors' | 'settings'
+  onNavigate: (view: 'chat' | 'memories' | 'connectors' | 'settings') => void
   onSelectChat: (chatId: string) => void
   onNewChat: () => void
   currentChatId: string | null
@@ -29,12 +29,6 @@ const SettingsIcon = () => (
   </svg>
 )
 
-const PlusIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-  </svg>
-)
-
 const ChevronIcon = ({ open }: { open: boolean }) => (
   <svg 
     className={`w-4 h-4 transition-transform ${open ? 'rotate-90' : ''}`} 
@@ -49,6 +43,12 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
 const MemoriesIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+  </svg>
+)
+
+const ConnectorsIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.5 13.5l3-3m-6 1.5l-1.5 1.5a3 3 0 104.243 4.243l1.5-1.5m4.5-4.5l1.5-1.5A3 3 0 1013.5 6l-1.5 1.5" />
   </svg>
 )
 
@@ -102,29 +102,24 @@ export default function Sidebar({
   }, {} as Record<string, Chat[]>)
 
   return (
-    <aside className="w-64 bg-gray-100 border-r border-gray-200 flex flex-col h-full">
+    <aside className="w-56 bg-white border-r-2 border-neutral-950 flex flex-col h-full">
       {/* Drag region for macOS */}
-      <div className="h-8 drag-region" />
-
-      {/* Logo */}
-      <div className="px-4 py-3 border-b border-gray-200">
-        <h1 className="text-xl font-bold text-mirai-700">Mirai</h1>
-        <p className="text-xs text-gray-500">PM Assistant</p>
+      <div className="h-7 drag-region border-b-2 border-neutral-950 px-4 text-sm font-medium leading-7">
+        smile:D
       </div>
 
       {/* New Chat Button */}
-      <div className="p-3">
+      <div className="p-4">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-mirai-600 text-white rounded-lg hover:bg-mirai-700 transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 border-2 border-neutral-950 rounded-lg hover:bg-neutral-950 hover:text-white transition-colors"
         >
-          <PlusIcon />
           <span>New Chat</span>
         </button>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
+      <nav className="flex-1 overflow-y-auto px-4 py-2 space-y-1">
         {/* Agent Memory */}
         <button
           onClick={() => onNavigate('memories')}
@@ -132,6 +127,14 @@ export default function Sidebar({
         >
           <MemoriesIcon />
           <span>Agent Memory</span>
+        </button>
+
+        <button
+          onClick={() => onNavigate('connectors')}
+          className={`sidebar-item w-full ${currentView === 'connectors' ? 'active' : ''}`}
+        >
+          <ConnectorsIcon />
+          <span>Connectors</span>
         </button>
 
         {/* Chat History Accordion */}
@@ -156,7 +159,7 @@ export default function Sidebar({
                       onClick={() => onSelectChat(chat.id)}
                       className={`w-full text-left px-3 py-1.5 text-sm rounded-lg truncate ${
                         currentChatId === chat.id
-                          ? 'bg-mirai-100 text-mirai-700'
+                          ? 'bg-neutral-100 text-neutral-950'
                           : 'text-gray-600 hover:bg-gray-200'
                       }`}
                     >
@@ -174,7 +177,7 @@ export default function Sidebar({
       </nav>
 
       {/* Settings */}
-      <div className="p-3 border-t border-gray-200">
+      <div className="p-4">
         <button
           onClick={() => onNavigate('settings')}
           className={`sidebar-item w-full ${currentView === 'settings' ? 'active' : ''}`}

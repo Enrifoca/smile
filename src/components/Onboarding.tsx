@@ -91,7 +91,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       commentStyle: '',
     },
     focusProjects: [],
-    confirmAllJiraActions: true,
+    confirmAllConnectorActions: true,
   })
   const [writingSample, setWritingSample] = useState('')
 
@@ -466,7 +466,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           commentStyle: '',
         },
         focusProjects: selectedProjects.map(p => p.key),
-        confirmAllJiraActions: true,
+        confirmAllConnectorActions: true,
         onboardingCompleted: true,
       }
       
@@ -493,7 +493,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           commentStyle: '',
         },
         focusProjects: [],
-        confirmAllJiraActions: true,
+        confirmAllConnectorActions: true,
         onboardingCompleted: true,
       }
 
@@ -529,18 +529,18 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         return (
           <div className="space-y-6 animate-fade-in">
             <div className="text-center">
-              <div className="w-20 h-20 bg-gradient-to-br from-mirai-500 to-mirai-700 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
+              <div className="w-20 h-20 bg-gradient-to-br from-neutral-700 to-neutral-950 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
                 <span className="text-white text-3xl font-bold">M</span>
               </div>
               <h2 className="text-2xl font-bold text-gray-800">Connect your Jira site</h2>
               <p className="text-gray-600 mt-2">
-                Start with the Jira API details Mirai needs for uploads and to match MCP to the right Atlassian site.
+                Start with the Jira API details this example connector needs for uploads and site matching.
               </p>
             </div>
 
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="text-sm text-amber-800">
-                Atlassian MCP handles Jira reading and updates through OAuth. The REST API token is used for attachment uploads and helps Mirai choose the correct Jira cloud site.
+                Atlassian MCP handles Jira reading and updates through OAuth. The REST API token is used for attachment uploads and site selection.
               </p>
             </div>
 
@@ -554,7 +554,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   value={jiraApiForm.baseUrl}
                   onChange={(e) => setJiraApiForm({ ...jiraApiForm, baseUrl: e.target.value })}
                   placeholder="https://your-domain.atlassian.net"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
                 />
               </div>
 
@@ -567,7 +567,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   value={jiraApiForm.email}
                   onChange={(e) => setJiraApiForm({ ...jiraApiForm, email: e.target.value })}
                   placeholder="your-email@example.com"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
                 />
               </div>
 
@@ -581,10 +581,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   onChange={(e) => setJiraApiForm({ ...jiraApiForm, apiToken: e.target.value })}
                   onFocus={() => jiraApiForm.apiToken === API_TOKEN_MASK && setJiraApiForm({ ...jiraApiForm, apiToken: '' })}
                   placeholder="Your Jira API token"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Create one in <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" className="text-mirai-600 hover:underline">Atlassian Account Settings</a>.
+                  Create one in <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" className="text-neutral-700 hover:underline">Atlassian Account Settings</a>.
                 </p>
               </div>
             </div>
@@ -598,7 +598,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             <button
               onClick={handleJiraApiSubmit}
               disabled={isLoading || !jiraApiForm.baseUrl || !jiraApiForm.email || (!jiraApiForm.apiToken && !hasJiraApiConfig)}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 disabled:opacity-50 transition-colors"
             >
               {isLoading ? 'Saving...' : 'Continue to Atlassian MCP'}
               <ArrowIcon />
@@ -611,12 +611,12 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         return (
           <div className="space-y-6 animate-fade-in">
             <div className="text-center">
-              <div className="w-20 h-20 bg-gradient-to-br from-mirai-500 to-mirai-700 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
+              <div className="w-20 h-20 bg-gradient-to-br from-neutral-700 to-neutral-950 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
                 <span className="text-white text-3xl font-bold">M</span>
               </div>
               <h2 className="text-2xl font-bold text-gray-800">Connect Atlassian MCP</h2>
               <p className="text-gray-600 mt-2">
-                Sign in with Atlassian so Mirai can read, create, and update Jira issues securely.
+                Sign in with Atlassian so the connector can read, create, and update Jira issues securely.
               </p>
             </div>
 
@@ -714,7 +714,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 <button
                   onClick={handleMCPContinue}
                   disabled={isLoading}
-                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 disabled:opacity-50 transition-colors"
                 >
                   {isLoading ? 'Loading...' : 'Continue'}
                   <ArrowIcon />
@@ -723,7 +723,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 <button
                   onClick={handleMCPConnect}
                   disabled={isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending'}
-                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 disabled:opacity-50 transition-colors"
                 >
                   {isLoading || mcpState === 'connecting' || mcpState === 'oauth_pending' ? (
                     <>
@@ -743,7 +743,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             </div>
 
             <p className="text-xs text-center text-gray-500">
-              Mirai uses the official Atlassian MCP server for secure access to your Jira data.
+              This example connector uses the official Atlassian MCP server for secure access to Jira data.
             </p>
           </div>
         )
@@ -760,7 +760,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             <div>
               <h2 className="text-2xl font-bold text-gray-800">Select Projects to Monitor</h2>
               <p className="text-gray-600 mt-2">
-                Choose which Jira projects Mirai should help you manage. The AI will focus on these projects.
+                Choose which Jira projects this connector should expose to the agent.
               </p>
             </div>
 
@@ -771,14 +771,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <div className="flex gap-2">
                 <button
                   onClick={() => setSelectedProjectKeys(new Set(allProjects.map(p => p.key)))}
-                  className="text-mirai-600 hover:underline"
+                  className="text-neutral-700 hover:underline"
                 >
                   Select all
                 </button>
                 <span className="text-gray-300">|</span>
                 <button
                   onClick={() => setSelectedProjectKeys(new Set())}
-                  className="text-mirai-600 hover:underline"
+                  className="text-neutral-700 hover:underline"
                 >
                   Clear
                 </button>
@@ -791,7 +791,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   key={project.id}
                   className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
                     selectedProjectKeys.has(project.key)
-                      ? 'border-mirai-500 bg-mirai-50'
+                      ? 'border-neutral-500 bg-neutral-50'
                       : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
@@ -803,7 +803,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   />
                   <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center transition-colors ${
                     selectedProjectKeys.has(project.key)
-                      ? 'border-mirai-500 bg-mirai-500'
+                      ? 'border-neutral-500 bg-neutral-950'
                       : 'border-gray-300'
                   }`}>
                     {selectedProjectKeys.has(project.key) && (
@@ -837,7 +837,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <button
                 onClick={handleProjectsSelected}
                 disabled={isLoading || selectedProjectKeys.size === 0}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 disabled:opacity-50 transition-colors"
               >
                 {isLoading ? 'Saving...' : 'Continue'}
                 <ArrowIcon />
@@ -876,7 +876,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                       onClick={() => setAIForm({ ...aiForm, provider, model: '' })}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors ${
                         aiForm.provider === provider
-                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
@@ -895,7 +895,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   value={aiForm.apiKey}
                   onChange={(e) => setAIForm({ ...aiForm, apiKey: e.target.value })}
                   placeholder={`Your ${aiForm.provider} API key`}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
                 />
               </div>
 
@@ -906,7 +906,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 <select
                   value={aiForm.model}
                   onChange={(e) => setAIForm({ ...aiForm, model: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
                 >
                   <option value="">Default for provider</option>
                   {getCatalogModels(aiForm.provider, 'chat', aiForm.model).map(model => (
@@ -930,7 +930,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <button
                 onClick={handleAISubmit}
                 disabled={isLoading || !aiForm.apiKey}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 disabled:opacity-50 transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 disabled:opacity-50 transition-colors"
               >
                 {isLoading ? 'Saving...' : 'Continue'}
                 <ArrowIcon />
@@ -957,13 +957,13 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
             <div 
               onClick={handleWorkspaceSelect}
-              className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-mirai-400 hover:bg-mirai-50/50 transition-colors"
+              className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-neutral-400 hover:bg-neutral-50/50 transition-colors"
             >
               <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center text-gray-400">
                 <FolderIcon />
               </div>
               {workspace ? (
-                <p className="text-mirai-600 font-medium">{workspace}</p>
+                <p className="text-neutral-700 font-medium">{workspace}</p>
               ) : (
                 <>
                   <p className="text-gray-600 font-medium">Click to select a folder</p>
@@ -983,7 +983,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               </button>
               <button
                 onClick={() => setStep(6)}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 transition-colors"
               >
                 {workspace ? 'Continue' : 'Skip for now'}
                 <ArrowIcon />
@@ -1015,7 +1015,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                       onClick={() => setProfile({ ...profile, style })}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
                         profile.style === style
-                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
@@ -1036,7 +1036,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                       onClick={() => setProfile({ ...profile, verbosity })}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
                         profile.verbosity === verbosity
-                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
@@ -1057,7 +1057,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                       onClick={() => setProfile({ ...profile, tone })}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
                         profile.tone === tone
-                          ? 'border-mirai-500 bg-mirai-50 text-mirai-700'
+                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
@@ -1075,7 +1075,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   value={writingSample}
                   onChange={(e) => setWritingSample(e.target.value)}
                   placeholder="Paste a sample of how you typically write Jira tasks or comments..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mirai-500 focus:border-transparent h-24 resize-none"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent h-24 resize-none"
                 />
               </div>
             </div>
@@ -1089,7 +1089,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               </button>
               <button
                 onClick={handleStyleSubmit}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-mirai-600 text-white rounded-xl hover:bg-mirai-700 transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 transition-colors"
               >
                 {isLoading ? 'Setting up...' : 'Complete Setup'}
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1113,9 +1113,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             key={s}
             className={`h-2 rounded-full transition-all ${
               s === step 
-                ? 'w-8 bg-mirai-500' 
+                ? 'w-8 bg-neutral-950'
                 : s < step 
-                  ? 'w-2 bg-mirai-300' 
+                  ? 'w-2 bg-neutral-300'
                   : 'w-2 bg-gray-200'
             }`}
           />

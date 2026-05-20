@@ -42,9 +42,8 @@ function summariseEntries(entries: ToolEntry[]): string {
   const count = (fn: (e: ToolEntry) => boolean) => entries.filter(fn).length
   const fileReads   = count(e => ['file_read', 'file_read_ocr', 'file_list'].includes(e.tool))
   const fileSearch  = count(e => e.tool === 'file_search')
-  const jiraSearch  = count(e => e.tool === 'jira_search_issues')
-  const jiraRead    = count(e => e.tool === 'jira_get_issue')
-  const jiraWrite   = count(e => ['jira_create_issue','jira_update_issue','jira_add_comment','jira_transition_issue','jira_upload_attachment'].includes(e.tool))
+  const connectorReads = count(e => e.group !== 'file' && e.group !== 'memory' && !e.tool.includes('create') && !e.tool.includes('update') && !e.tool.includes('comment') && !e.tool.includes('transition') && !e.tool.includes('upload'))
+  const connectorWrites = count(e => e.group !== 'file' && e.group !== 'memory' && (e.tool.includes('create') || e.tool.includes('update') || e.tool.includes('comment') || e.tool.includes('transition') || e.tool.includes('upload')))
   const fileWrite   = count(e => ['file_write','file_mkdir'].includes(e.tool))
   const memRead     = count(e => e.tool === 'memory_read')
   const memWrite    = count(e => e.tool === 'memory_update')
@@ -57,13 +56,8 @@ function summariseEntries(entries: ToolEntry[]): string {
     if (fileSearch > 0) pieces.push(`${fileSearch} search${fileSearch > 1 ? 'es' : ''}`)
     parts.push(`Explored ${pieces.join(', ')}`)
   }
-  if (jiraSearch > 0 || jiraRead > 0) {
-    const pieces: string[] = []
-    if (jiraSearch > 0) pieces.push(`${jiraSearch} search${jiraSearch > 1 ? 'es' : ''}`)
-    if (jiraRead > 0)   pieces.push(`${jiraRead} issue${jiraRead > 1 ? 's' : ''} read`)
-    parts.push(`Searched Jira · ${pieces.join(', ')}`)
-  }
-  if (jiraWrite > 0) parts.push(`${jiraWrite} Jira update${jiraWrite > 1 ? 's' : ''}`)
+  if (connectorReads > 0) parts.push(`${connectorReads} connector read${connectorReads > 1 ? 's' : ''}`)
+  if (connectorWrites > 0) parts.push(`${connectorWrites} connector update${connectorWrites > 1 ? 's' : ''}`)
   if (fileWrite > 0) parts.push(`${fileWrite} file${fileWrite > 1 ? 's' : ''} written`)
   if (memRead > 0)   parts.push('Checked memory')
   if (memWrite > 0)  parts.push('Memory updated')
@@ -228,7 +222,7 @@ export default function ChatMessage({ message, onApproveAction, onRejectAction, 
             line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             line = line.replace(/\*(.*?)\*/g, '<em>$1</em>')
             line = line.replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>')
-            line = line.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" class="text-mirai-600 hover:underline" target="_blank">$1</a>')
+            line = line.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" class="text-neutral-700 hover:underline" target="_blank">$1</a>')
             if (line.startsWith('- ') || line.startsWith('• ')) {
               return (
                 <div key={j} className="flex items-start gap-2">
@@ -259,7 +253,7 @@ export default function ChatMessage({ message, onApproveAction, onRejectAction, 
 
   return (
     <div className={`flex gap-3 animate-slide-in ${isUser ? 'flex-row-reverse' : ''}`}>
-      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isUser ? 'bg-mirai-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
+      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isUser ? 'bg-neutral-950 text-white' : 'bg-gray-200 text-gray-600'}`}>
         {isUser ? <UserIcon /> : <BotIcon />}
       </div>
       <div className={`max-w-[80%] ${isUser ? 'text-right' : ''}`}>

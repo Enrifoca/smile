@@ -31,11 +31,11 @@ import * as crypto from 'crypto'
 const MCP_SERVER_URL = 'https://mcp.atlassian.com/v1/mcp'
 const MCP_SERVER_HASH = crypto.createHash('md5').update(MCP_SERVER_URL).digest('hex')
 
-// Keep Mirai auth isolated from other mcp-remote clients so switching accounts
-// can clear Mirai's OAuth state without touching unrelated tools.
-const MCP_AUTH_DIR = path.join(os.homedir(), '.mirai-mcp-auth')
+// Keep smile:D auth isolated from other mcp-remote clients so switching accounts
+// can clear this connector's OAuth state without touching unrelated tools.
+const MCP_AUTH_DIR = path.join(os.homedir(), '.smile-mcp-auth')
 const LEGACY_MCP_AUTH_DIR = path.join(os.homedir(), '.mcp-auth')
-const DEBUG_LOG_FILE = path.join(MCP_AUTH_DIR, 'mirai_mcp_debug.log')
+const DEBUG_LOG_FILE = path.join(MCP_AUTH_DIR, 'smile_mcp_debug.log')
 
 interface MCPToolCall {
   name: string
@@ -120,7 +120,7 @@ export class AtlassianMCPService extends EventEmitter {
    */
   async connect(options: { forceReauth?: boolean } = {}): Promise<{ success: boolean; error?: string }> {
     if (options.forceReauth) {
-      this.debugLog('Force reauth requested; clearing Mirai MCP auth cache')
+      this.debugLog('Force reauth requested; clearing smile:D MCP auth cache')
       this.clearAuthCache()
     }
 
@@ -315,7 +315,7 @@ export class AtlassianMCPService extends EventEmitter {
           protocolVersion: '2024-11-05',
           capabilities: {},
           clientInfo: {
-            name: 'Mirai',
+            name: 'smile:D',
             version: '0.1.0'
           }
         }

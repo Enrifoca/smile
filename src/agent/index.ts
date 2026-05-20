@@ -1,236 +1,25 @@
 import { v4 as uuidv4 } from 'uuid'
-import { Message, PendingAction, UserProfile, ToolEntry } from './types'
-import { getSystemPrompt, getActionConfirmationPrompt } from './prompts'
-import { toolDefinitions, requiresConfirmation } from './tools'
-import { JiraMetadataStore } from '../types/jira'
-import { MemoryStore } from '../types/memory'
+import { Message, PendingAction, ToolEntry } from './types'
+import { AIResponse, AgentConfig } from './config'
+import { getSystemPrompt } from './prompts'
+import { toolDefinitions } from './tools'
+import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
+import { shouldNudgeActionFirst } from './actionGuards'
+import { zodToJsonSchema } from './jsonSchema'
+import { formatScratchpadNote, getCoreScratchpadNote } from './scratchpad'
+import { getCoreToolEntry } from './toolEntries'
+import { formatCoreToolResultForAI } from './toolResults'
 
 // Re-export types and utilities
 export * from './types'
 export * from './tools'
 export * from './prompts'
 
-// ─── Zod → JSON Schema ────────────────────────────────────────────────────────
-// Recursive converter that correctly handles ZodObject, ZodArray<ZodObject>,
-// ZodOptional, ZodDefault, ZodEnum, and primitive types.
-// The previous inline version hardcoded `items: { type: 'string' }` for every
-// array, which broke the jira_batch_create_issues schema (array of objects).
-
-type ZodDef = {
-  typeName?: string
-  description?: string
-  innerType?: { _def?: ZodDef; shape?: Record<string, unknown> }
-  type?: { _def?: ZodDef; shape?: Record<string, unknown> }
-  shape?: Record<string, unknown>
-  values?: Record<string, unknown>
-  checks?: Array<{ kind: string }>
-}
-
-function zodFieldToJsonSchema(field: unknown): Record<string, unknown> {
-  const f = field as { _def?: ZodDef; shape?: Record<string, unknown>; isOptional?: () => boolean }
-  let def: ZodDef = f._def || {}
-  let typeName = def.typeName || 'ZodString'
-  let description = def.description || ''
-  let isOptionalField = false
-
-  // Unwrap ZodOptional / ZodDefault / ZodNullable wrappers
-  while (
-    typeName === 'ZodOptional' ||
-    typeName === 'ZodDefault' ||
-    typeName === 'ZodNullable'
-  ) {
-    isOptionalField = true
-    const inner = def.innerType
-    if (!inner) break
-    def = inner._def || {}
-    typeName = def.typeName || 'ZodString'
-    if (!description && def.description) description = def.description
-  }
-
-  const result: Record<string, unknown> = {}
-  if (description) result.description = description
-
-  if (typeName === 'ZodString') {
-    result.type = 'string'
-  } else if (typeName === 'ZodNumber') {
-    result.type = 'number'
-  } else if (typeName === 'ZodBoolean') {
-    result.type = 'boolean'
-  } else if (typeName === 'ZodEnum') {
-    result.type = 'string'
-    result.enum = Object.values(def.values || {})
-  } else if (typeName === 'ZodArray') {
-    result.type = 'array'
-    const itemDef = def.type?._def
-    const itemTypeName = itemDef?.typeName || 'ZodString'
-    if (itemTypeName === 'ZodObject') {
-      // Array of objects — recursively build the items schema
-      result.items = zodObjectToJsonSchema(def.type as { _def?: ZodDef; shape?: Record<string, unknown> })
-    } else if (itemTypeName === 'ZodNumber') {
-      result.items = { type: 'number' }
-    } else {
-      result.items = { type: 'string' }
-    }
-  } else if (typeName === 'ZodObject') {
-    return zodObjectToJsonSchema(f as { _def?: ZodDef; shape?: Record<string, unknown> })
-  } else {
-    result.type = 'string'
-  }
-
-  void isOptionalField // tracked by the caller
-  return result
-}
-
-function zodObjectToJsonSchema(obj: { _def?: ZodDef; shape?: Record<string, unknown> }): Record<string, unknown> {
-  const shape: Record<string, unknown> = obj.shape || (obj._def as { shape?: () => Record<string, unknown> })?.shape?.() || {}
-  const properties: Record<string, unknown> = {}
-  const required: string[] = []
-
-  for (const [key, value] of Object.entries(shape)) {
-    const fieldDef = value as { _def?: ZodDef; isOptional?: () => boolean }
-    const typeName = fieldDef._def?.typeName || 'ZodString'
-    const isOpt = typeName === 'ZodOptional' || typeName === 'ZodDefault' || typeName === 'ZodNullable'
-    properties[key] = zodFieldToJsonSchema(value)
-    if (!isOpt) required.push(key)
-  }
-
-  return {
-    type: 'object',
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-  }
-}
-// ──────────────────────────────────────────────────────────────────────────────
-
-/** Map a tool call to a human-readable ToolEntry for the summary block */
-function getToolEntry(name: string, args: Record<string, unknown>): ToolEntry {
-  const str = (v: unknown) => (v as string) || ''
-  switch (name) {
-    case 'jira_search_issues': {
-      const jql = str(args.jql).toLowerCase()
-      let label = 'Searched Jira'
-      if (jql.includes('reporter = currentuser()')) label = 'Searched your created issues'
-      else if (jql.includes('assignee = currentuser()')) label = 'Searched your assigned issues'
-      else {
-        const m = str(args.jql).match(/project\s*(?:=|in)\s*["']?([A-Z][A-Z0-9_-]+)["']?/i)
-        if (m) label = `Searched ${m[1].toUpperCase()}`
-      }
-      if (args.maxResults) label += ` · top ${args.maxResults}`
-      return { tool: name, label, group: 'jira' }
-    }
-    case 'jira_get_issue':
-      return { tool: name, label: `Read ${str(args.issueIdOrKey || args.issueKey) || 'issue'}`, group: 'jira' }
-    case 'jira_get_projects':
-      return { tool: name, label: 'Loaded projects', group: 'jira' }
-    case 'jira_get_issue_types':
-      return { tool: name, label: `Loaded issue types for ${str(args.projectIdOrKey || args.projectKey)}`, group: 'jira' }
-    case 'jira_get_transitions':
-      return { tool: name, label: `Checked transitions for ${str(args.issueIdOrKey || args.issueKey)}`, group: 'jira' }
-    case 'jira_lookup_user':
-      return { tool: name, label: `Looked up "${str(args.searchString || args.query)}"`, group: 'jira' }
-    case 'jira_create_issue': {
-      const s = str(args.summary).slice(0, 45)
-      return { tool: name, label: `Created ${str(args.issueTypeName || args.issueType)}: ${s}`, group: 'jira' }
-    }
-    case 'jira_update_issue':
-      return { tool: name, label: `Updated ${str(args.issueIdOrKey || args.issueKey)}`, group: 'jira' }
-    case 'jira_add_comment':
-      return { tool: name, label: `Commented on ${str(args.issueIdOrKey || args.issueKey)}`, group: 'jira' }
-    case 'jira_transition_issue':
-      return { tool: name, label: `Moved ${str(args.issueIdOrKey || args.issueKey)} to new status`, group: 'jira' }
-    case 'jira_upload_attachment':
-      return { tool: name, label: `Attached file to ${str(args.issueIdOrKey || args.issueKey)}`, group: 'jira' }
-    case 'file_read': {
-      const fname = str(args.path).split(/[\\/]/).pop() || str(args.path)
-      const fnLower = fname.toLowerCase()
-      const verb = fnLower.endsWith('.pdf') ? 'Parsed PDF' : fnLower.endsWith('.docx') ? 'Read Word doc' : 'Read'
-      return { tool: name, label: `${verb} ${fname}`, group: 'file' }
-    }
-    case 'file_read_ocr': {
-      const fname = str(args.path).split(/[\\/]/).pop() || str(args.path)
-      return { tool: name, label: `OCR read ${fname}`, group: 'file' }
-    }
-    case 'file_list': {
-      const p = str(args.path) || '.'
-      return { tool: name, label: `Browsed ${p === '.' ? 'workspace' : (p.split(/[\\/]/).pop() || p) + '/'}`, group: 'file' }
-    }
-    case 'file_write': {
-      const fname = str(args.path).split(/[\\/]/).pop() || str(args.path)
-      const ext = fname.split('.').pop()?.toLowerCase()
-      const verb = ext === 'html' ? 'Generated' : ext === 'csv' ? 'Exported' : 'Wrote'
-      return { tool: name, label: `${verb} ${fname}`, group: 'file' }
-    }
-    case 'file_search':
-      return { tool: name, label: `Searched for "${str(args.pattern)}"`, group: 'file' }
-    case 'file_mkdir':
-      return { tool: name, label: `Created folder ${str(args.path).split(/[\\/]/).pop() || str(args.path)}/`, group: 'file' }
-    case 'memory_read':
-      return { tool: name, label: 'Checked memory', group: 'memory' }
-    case 'memory_update':
-      return { tool: name, label: 'Saved to learned memory', group: 'memory' }
-    case 'memory_delete':
-      return { tool: name, label: `Deleted memory matching "${str(args.query)}"`, group: 'memory' }
-    case 'scratchpad_write':
-      return { tool: name, label: 'Updated scratchpad', group: 'memory' }
-    case 'jira_batch_create_issues': {
-      const issues = (args.issues as Array<Record<string, unknown>>) || []
-      return { tool: name, label: `Creating ${issues.length} Jira issue${issues.length !== 1 ? 's' : ''}`, group: 'jira' }
-    }
-    default:
-      return { tool: name, label: name, group: 'file' }
-  }
-}
-
-interface AIResponse {
-  content: string
-  toolCalls?: Array<{
-    id: string
-    name: string
-    arguments: Record<string, unknown>
-  }>
-}
-
-interface AgentConfig {
-  userProfile: UserProfile | null
-  jiraMetadata?: JiraMetadataStore | null
-  memory?: MemoryStore | null
-  loadMemory?: () => Promise<MemoryStore | null>
-  maxIterations?: number // 0 = no limit, default 10
-  onMessage: (message: Message) => void
-  /** Called to update the content of an existing message (used for streaming) */
-  onUpdateMessage?: (id: string, content: string, isStreaming: boolean) => void
-  onPendingAction: (action: PendingAction) => void
-  executeJiraTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
-  executeFileTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
-  executeMemoryTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
-  callAI: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
-    success: boolean
-    data?: AIResponse
-    error?: string
-  }>
-  /** Optional streaming version of callAI — if provided, used for better UX */
-  callAIStream?: (
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-    tools: unknown[] | undefined,
-    onToken: (token: string) => void
-  ) => Promise<{ success: boolean; data?: AIResponse; error?: string }>
-  /**
-   * Optional reasoning model — used for complex tasks (scratchpad written, multi-step).
-   * Falls back to callAI when not configured.
-   */
-  callAIReasoning?: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{ success: boolean; data?: AIResponse; error?: string }>
-  callAIReasoningStream?: (
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-    tools: unknown[] | undefined,
-    onToken: (token: string) => void
-  ) => Promise<{ success: boolean; data?: AIResponse; error?: string }>
-}
-
 /**
- * Mirai Agent - AI Project Management Assistant
+ * smile:D Agent Runtime
  * 
  * Handles conversation flow, tool execution, and response formatting.
- * All Jira tool results are JSON - we send them back to AI for formatting.
+ * Connector tool results are sent back to AI for formatting.
  */
 export class Agent {
   private config: AgentConfig
@@ -257,6 +46,36 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config
+  }
+
+  private getConnectorForTool(toolName: string): ConnectorRuntime | undefined {
+    return this.config.connectors?.find(connector => ownsTool(connector.definition, toolName))
+  }
+
+  private getAllToolDefinitions(): ToolDefinition[] {
+    return [
+      ...toolDefinitions,
+      ...(this.config.connectors || []).flatMap(connector => connector.definition.tools),
+    ]
+  }
+
+  private getToolDefinition(toolName: string): ToolDefinition | undefined {
+    return this.getAllToolDefinitions().find(tool => tool.name === toolName)
+  }
+
+  private requiresConfirmation(toolName: string): boolean {
+    return this.getToolDefinition(toolName)?.requiresConfirmation ?? false
+  }
+
+  private getToolEntry(name: string, args: Record<string, unknown>): ToolEntry {
+    const connectorEntry = this.getConnectorForTool(name)?.definition.getToolEntry?.(name, args)
+    return connectorEntry || getCoreToolEntry(name, args)
+  }
+
+  private getConnectorPromptSections(): string[] {
+    return (this.config.connectors || [])
+      .map(connector => connector.definition.getPromptSection?.(connector.context) || '')
+      .filter(Boolean)
   }
 
   /** Stop the agent after the current iteration completes. */
@@ -322,25 +141,23 @@ export class Agent {
         for (const toolCall of response.toolCalls) {
           console.log('[Agent] Tool call:', toolCall.name, toolCall.arguments)
 
-          // ── Planning note ──────────────────────────────────────────────────
-          // Batch issue creation benefits from a traceable plan, but forcing the
-          // model to make an extra scratchpad_write call can create loops. Instead,
-          // derive a compact local note from the proposed issues and continue.
-          if (
-            toolCall.name === 'jira_batch_create_issues' &&
-            !this.scratchpadWrittenThisTurn
-          ) {
-            this.recordBatchCreationScratchpad(toolCall.arguments)
+          if (!this.scratchpadWrittenThisTurn) {
+            const plannedNote = this.getConnectorForTool(toolCall.name)?.definition.getScratchpadNote?.(toolCall.name, toolCall.arguments, '')
+            if (plannedNote) {
+              this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + plannedNote
+              this.scratchpadWrittenThisTurn = true
+            }
           }
-          // ── End planning note ──────────────────────────────────────────────
 
-          if (requiresConfirmation(toolCall.name)) {
+          if (this.requiresConfirmation(toolCall.name)) {
+            const confirmation = this.getActionConfirmation(toolCall.name, toolCall.arguments)
             const pendingAction: PendingAction = {
               id: toolCall.id,
               type: toolCall.name as PendingAction['type'],
-              description: getActionConfirmationPrompt(toolCall.name, toolCall.arguments),
+              description: confirmation?.description || this.getActionConfirmationPrompt(toolCall.name, toolCall.arguments),
               data: toolCall.arguments,
-              preview: this.getActionPreview(toolCall.name, toolCall.arguments),
+              preview: confirmation?.preview || this.getActionPreview(toolCall.name, toolCall.arguments),
+              confirmation,
             }
             this.pendingActions.set(toolCall.id, pendingAction)
             this.config.onPendingAction(pendingAction)
@@ -386,7 +203,7 @@ export class Agent {
           }
 
           // Record tool entry for the summary block (UI only — not in history)
-          toolEntries.push(getToolEntry(toolCall.name, toolCall.arguments))
+          toolEntries.push(this.getToolEntry(toolCall.name, toolCall.arguments))
 
           // Add result to history so AI has the data next iteration.
           // Prefix with [tool_result:] (lowercase, colon) so the AI sees it as
@@ -522,7 +339,7 @@ export class Agent {
         console.warn('[Agent] Failed to refresh memory before prompt:', error)
       }
     }
-    const systemPrompt = getSystemPrompt(this.config.userProfile, this.config.jiraMetadata, this.config.memory) + scratchpadSection
+    const systemPrompt = getSystemPrompt(this.config.userProfile, this.getConnectorPromptSections(), this.config.memory) + scratchpadSection
 
     // Simple chronological window — last 40 messages in order.
     // tool_summary messages are UI-only artifacts (grouped icons bar) and carry
@@ -536,16 +353,16 @@ export class Agent {
       ...relevantHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     ]
 
-    const tools = toolDefinitions.map(tool => ({
+    const tools = this.getAllToolDefinitions().map(tool => ({
       type: 'function' as const,
-      function: { name: tool.name, description: tool.description, parameters: this.zodToJsonSchema(tool.schema) },
+      function: { name: tool.name, description: tool.description, parameters: zodToJsonSchema(tool.schema) },
     }))
 
     // ── Choose model ──────────────────────────────────────────────────────────
     // Use the reasoning model for the INITIAL analysis phase — before the agent
     // has committed a plan to the scratchpad. Once planning is done and the
     // scratchpad has content, switch back to the main model for execution
-    // (tool calls, Jira writes, etc.) so we don't add latency to routine steps.
+    // (tool calls, connector writes, etc.) so we don't add latency to routine steps.
     // If no reasoning model is configured, the main model handles everything.
     const useReasoning = !this.scratchpadWrittenThisTurn && (
       !!this.config.callAIReasoningStream || !!this.config.callAIReasoning
@@ -714,14 +531,14 @@ export class Agent {
    * the next read call fetches fresh data rather than returning a cached snapshot.
    */
   private invalidateCacheAfterWrite(toolName: string, args: Record<string, unknown>): void {
-    // Jira writes → drop all cached Jira read results for that project/issue
-    const jiraWriteTools = ['jira_create_issue', 'jira_update_issue', 'jira_add_comment', 'jira_transition_issue', 'jira_upload_attachment']
-    if (jiraWriteTools.includes(toolName)) {
-      for (const key of this.toolResultCache.keys()) {
-        if (key.startsWith('jira_search_issues:') || key.startsWith('jira_get_issue:')) {
-          this.toolResultCache.delete(key)
-        }
-      }
+    const connector = this.getConnectorForTool(toolName)
+    const keysToDelete = connector?.definition.invalidateCacheAfterWrite?.(
+      toolName,
+      args,
+      [...this.toolResultCache.keys()]
+    ) || []
+    for (const key of keysToDelete) {
+      this.toolResultCache.delete(key)
     }
     // file_write → drop cached read for that exact path
     if (toolName === 'file_write') {
@@ -740,50 +557,11 @@ export class Agent {
    * old tool result messages are pushed out of the 40-message context window.
    */
   private updateScratchpadAfterTool(toolName: string, args: Record<string, unknown>, formattedResult: string): void {
-    const str = (v: unknown) => (v as string) || ''
-    let note = ''
-    if (toolName === 'file_read' || toolName === 'file_read_ocr') {
-      const fname = str(args.path).split(/[\\/]/).pop() || str(args.path)
-      const lines = formattedResult.split('\n').length
-      note = toolName === 'file_read_ocr'
-        ? `✓ OCR read: ${fname} (${lines} lines of content available in context)`
-        : `✓ Read: ${fname} (${lines} lines of content available in context)`
-    } else if (toolName === 'file_search') {
-      const pattern = str(args.pattern || args.name)
-      const matchCount = (formattedResult.match(/\n/g) || []).length + 1
-      note = `✓ Searched for "${pattern}" → ${formattedResult.startsWith('No') ? 'no results' : `${matchCount} match(es)`}`
-    } else if (toolName === 'file_list') {
-      note = `✓ Listed workspace files`
-    } else if (toolName === 'jira_create_issue') {
-      // Try to extract the new issue key from the result
-      const keyMatch = formattedResult.match(/[A-Z]+-\d+/)
-      note = `✓ Created Jira issue${keyMatch ? ': ' + keyMatch[0] : ''}`
-    } else if (toolName === 'jira_update_issue') {
-      note = `✓ Updated Jira issue: ${str(args.issueIdOrKey)}`
-    } else if (toolName === 'jira_transition_issue') {
-      note = `✓ Transitioned issue: ${str(args.issueIdOrKey)}`
-    }
+    let note = getCoreScratchpadNote(toolName, args, formattedResult)
+    note = note || this.getConnectorForTool(toolName)?.definition.getScratchpadNote?.(toolName, args, formattedResult) || ''
     if (note) {
-      this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + note
+      this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + formatScratchpadNote(note)
     }
-  }
-
-  private recordBatchCreationScratchpad(args: Record<string, unknown>): void {
-    const issues = (args.issues as Array<Record<string, unknown>>) || []
-    if (issues.length === 0) return
-
-    const project = (issues[0]?.projectKey as string) || 'Jira'
-    const preview = issues
-      .slice(0, 12)
-      .map((issue, index) => {
-        const type = issue.issueTypeName || issue.issueType || 'Task'
-        const summary = issue.summary || '(untitled)'
-        return `${index + 1}. ${type} — ${summary}`
-      })
-      .join('\n')
-
-    this.sessionScratchpad += `${this.sessionScratchpad ? '\n' : ''}Planned Jira batch creation: ${issues.length} issue(s) in ${project}\n${preview}${issues.length > 12 ? `\n...and ${issues.length - 12} more` : ''}`
-    this.scratchpadWrittenThisTurn = true
   }
 
   private shouldNudgeActionFirst(responseText: string): boolean {
@@ -792,28 +570,15 @@ export class Agent {
       .find(m => m.role === 'user' && !m.content.startsWith('[SYSTEM]'))?.content
       ?.toLowerCase() || ''
 
-    const looksActionable = /\b(create|add|update|change|transition|move|attach|upload|schedule|automate|make)\b/.test(latestUser)
-      && /\b(jira|issue|issues|task|tasks|ticket|tickets|comment|attachment|report|automation)\b/.test(latestUser)
-
-    if (!looksActionable) return false
-
-    // Clarifying questions are allowed. The guard targets prose plans/results
-    // where the model should have called a tool instead.
-    const isClarification = responseText.includes('?') && responseText.length < 500
-    if (isClarification) return false
-
-    const looksLikeWallText = responseText.length > 700
-      || /^\s*(?:[-*]|\d+\.)\s+/m.test(responseText)
-      || /\b(I would|I will|I'll|I can)\b/i.test(responseText)
-
-    return looksLikeWallText
+    return shouldNudgeActionFirst(latestUser, responseText)
   }
 
   private async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     console.log('[Agent] Executing tool:', name, 'with args:', args)
     
-    if (name.startsWith('jira_')) {
-      return this.config.executeJiraTool(name, args)
+    const connector = this.getConnectorForTool(name)
+    if (connector) {
+      return connector.executeTool(name, args)
     } else if (name.startsWith('file_')) {
       return this.config.executeFileTool(name, args)
     } else if (name.startsWith('memory_')) {
@@ -837,144 +602,16 @@ export class Agent {
 
   /**
    * Format tool result for AI context.
-   * Converts MCP/Jira JSON into compact readable text to minimise tokens per loop.
+   * Converts tool JSON into compact readable text to minimise tokens per loop.
    */
   private formatToolResultForAI(toolName: string, result: unknown): string {
     const data = result as { success?: boolean; data?: unknown; error?: string }
 
     if (data.success === false) return `Error: ${data.error || 'Unknown error'}`
 
-    // Unwrap MCP envelope: { data: { content: [{ text }] } }
-    const mcpData = data.data as { content?: Array<{ text?: string }> }
-    let raw = ''
-    if (mcpData?.content?.[0]?.text) {
-      raw = mcpData.content[0].text
-    } else if (data.data) {
-      raw = typeof data.data === 'string' ? data.data : JSON.stringify(data.data)
-    } else {
-      return 'Done.'
-    }
-
-    // --- Jira search: compact bullet list ---
-    if (toolName === 'jira_search_issues') {
-      try {
-        const parsed = JSON.parse(raw)
-        const issues: unknown[] = parsed.values ?? parsed.issues ?? (Array.isArray(parsed) ? parsed : [])
-        if (issues.length === 0) return 'No issues found.'
-        const lines = (issues as Array<Record<string, unknown>>).map(i => {
-          const fields = (i.fields ?? i) as Record<string, unknown>
-          const status = (fields.status as Record<string, unknown>)?.name ?? fields.status ?? ''
-          const assignee = (fields.assignee as Record<string, unknown>)?.displayName ?? ''
-          const created = fields.created ? (fields.created as string).slice(0, 10) : ''
-          return `- ${i.key}: ${fields.summary ?? ''}  [${status}]${assignee ? ` — ${assignee}` : ''}${created ? ` (${created})` : ''}`
-        })
-        return `${issues.length} issue(s):\n${lines.join('\n')}`
-      } catch { /* fall through */ }
-    }
-
-    // --- Single issue: compact key fields ---
-    if (toolName === 'jira_get_issue') {
-      try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>
-        const fields = (parsed.fields ?? parsed) as Record<string, unknown>
-        const status = (fields.status as Record<string, unknown>)?.name ?? ''
-        const assignee = (fields.assignee as Record<string, unknown>)?.displayName ?? 'Unassigned'
-        const extractAdf = (node: unknown): string => {
-          const n = node as Record<string, unknown>
-          if (!n) return ''
-          if (n.type === 'text') return n.text as string ?? ''
-          return ((n.content as unknown[]) ?? []).map(extractAdf).join(' ')
-        }
-        const description = typeof fields.description === 'string'
-          ? fields.description.slice(0, 300)
-          : extractAdf(fields.description).slice(0, 300)
-        const comments = ((fields.comment as Record<string, unknown>)?.comments as Array<Record<string, unknown>> ?? [])
-          .slice(-3).map(c => `  • [${(c.author as Record<string, unknown>)?.displayName ?? ''}] ${typeof c.body === 'string' ? c.body.slice(0, 100) : ''}`)
-        return [
-          `${parsed.key}: ${fields.summary}`,
-          `Status: ${status} | Assignee: ${assignee}`,
-          description ? `Description: ${description}` : '',
-          comments.length ? `Recent comments:\n${comments.join('\n')}` : '',
-        ].filter(Boolean).join('\n')
-      } catch { /* fall through */ }
-    }
-
-    // --- Transitions: id + name list ---
-    if (toolName === 'jira_get_transitions') {
-      try {
-        const parsed = JSON.parse(raw)
-        const transitions: Array<Record<string, unknown>> = parsed.transitions ?? (Array.isArray(parsed) ? parsed : [])
-        return transitions.map(t => `- ${t.id}: ${t.name}`).join('\n') || 'No transitions available.'
-      } catch { /* fall through */ }
-    }
-
-    // --- Projects: key + name list ---
-    if (toolName === 'jira_get_projects') {
-      try {
-        const parsed = JSON.parse(raw)
-        const projects: Array<Record<string, unknown>> = parsed.values ?? (Array.isArray(parsed) ? parsed : [])
-        return projects.map(p => `- ${p.key}: ${p.name}`).join('\n') || 'No projects found.'
-      } catch { /* fall through */ }
-    }
-
-    // --- Files: compact, explicit search/list results ---
-    if (toolName === 'file_search' || toolName === 'file_list') {
-      try {
-        const parsed = JSON.parse(raw)
-        const files: Array<Record<string, unknown>> = Array.isArray(parsed)
-          ? parsed
-          : Array.isArray(parsed.files)
-            ? parsed.files
-            : []
-
-        if (files.length === 0) {
-          return toolName === 'file_search'
-            ? 'No files found for this search.'
-            : 'No files found in this folder.'
-        }
-
-        const lines = files.slice(0, 80).map(file => {
-          const name = String(file.name || file.path || '(unnamed)')
-          const filePath = String(file.path || name)
-          const suffix = file.isDirectory ? '/' : ''
-          return `- ${filePath}${suffix}`
-        })
-
-        const shown = files.length > lines.length
-          ? `\n...and ${files.length - lines.length} more`
-          : ''
-
-        return `${files.length} file(s):\n${lines.join('\n')}${shown}`
-      } catch { /* fall through */ }
-    }
-
-    // Pass everything else verbatim — no artificial caps.
-    // If the model's context window is exceeded it will error naturally.
-    return raw
-  }
-
-  private getToolFailureMessage(result: unknown, formattedResult: string): string | null {
-    const data = result as { success?: boolean; data?: unknown; error?: string }
-    if (data.success === false) return data.error || formattedResult || 'Unknown error'
-    if (formattedResult.startsWith('Error:') || formattedResult.includes('MCP error')) return formattedResult
-
-    const mcpData = data.data as { isError?: boolean; content?: Array<{ text?: string }> }
-    const rawText = mcpData?.content?.[0]?.text
-    if (mcpData?.isError || rawText?.includes('"error":true')) {
-      if (!rawText) return formattedResult || 'Unknown Jira error'
-      try {
-        const parsed = JSON.parse(rawText) as { message?: string; error?: unknown }
-        return parsed.message || String(parsed.error || formattedResult || rawText)
-      } catch {
-        return rawText
-      }
-    }
-
-    return null
-  }
-
-  private isSystemicJiraFailure(message: string): boolean {
-    return /(?:\b403\b|forbidden|unauthorized|permission|tenant is restricted|suspended-inactivity|authentication|not authorized)/i.test(message)
+    const connectorFormatted = this.getConnectorForTool(toolName)?.definition.formatToolResultForAI?.(toolName, result)
+    if (connectorFormatted !== null && connectorFormatted !== undefined) return connectorFormatted
+    return formatCoreToolResultForAI(toolName, result)
   }
 
   /**
@@ -987,44 +624,22 @@ export class Agent {
     }
     this.pendingActions.delete(actionId)
 
-    // ── Batch issue creation ───────────────────────────────────────────────
-    if (action.type === 'jira_batch_create_issues') {
-      const issues = (action.data.issues as Array<Record<string, unknown>>) || []
-      const created: string[] = []
-      const failed: string[] = []
-
-      for (const issue of issues) {
-        const result = await this.executeTool('jira_create_issue', issue)
-        const fmt = this.formatToolResultForAI('jira_create_issue', result)
-        const failureMessage = this.getToolFailureMessage(result, fmt)
-        // Try to extract the issue key from the result
-        const keyMatch = fmt.match(/[A-Z]+-\d+/)
-        const label = keyMatch ? keyMatch[0] : issue.summary as string
-        if (failureMessage) {
-          failed.push(`${issue.summary}: ${failureMessage}`)
-          if (this.isSystemicJiraFailure(failureMessage)) {
-            console.log('[Agent] Stopping batch creation after systemic Jira failure:', failureMessage)
-            break
-          }
-        } else {
-          created.push(label)
-          this.updateScratchpadAfterTool('jira_create_issue', issue, fmt)
-        }
-        // Cache the individual create result
-        this.toolResultCache.set(`jira_create_issue:${JSON.stringify(issue)}`, fmt)
-        this.invalidateCacheAfterWrite('jira_create_issue', issue)
-      }
-
-      const summary = created.length > 0
-        ? `Created ${created.length} issue(s): ${created.join(', ')}.`
-        : ''
-      const errors = failed.length > 0
-        ? ` ${created.length > 0 ? 'Stopped after an error' : 'Action blocked'}: ${failed[0]}${failed.length > 1 ? ` (${failed.length} total failures)` : ''}.`
-        : ''
+    const connectorApproval = await this.getConnectorForTool(action.type)?.definition.approveAction?.({
+      actionType: action.type,
+      data: action.data,
+      executeTool: (name, args) => this.executeTool(name, args),
+      formatToolResultForAI: (name, result) => this.formatToolResultForAI(name, result),
+      updateScratchpadAfterTool: (name, args, formattedResult) => this.updateScratchpadAfterTool(name, args, formattedResult),
+      invalidateCacheAfterWrite: (name, args) => this.invalidateCacheAfterWrite(name, args),
+      cacheToolResult: (name, args, formattedResult) => {
+        this.toolResultCache.set(`${name}:${JSON.stringify(args)}`, formattedResult)
+      },
+    })
+    if (connectorApproval?.handled) {
       const completionMsg: Message = {
         id: uuidv4(),
         role: 'assistant',
-        content: summary + errors || 'No issues were created.',
+        content: connectorApproval.message || 'Action completed.',
         timestamp: new Date().toISOString(),
       }
       this.conversationHistory.push(completionMsg)
@@ -1075,15 +690,9 @@ export class Agent {
    * Get preview text for an action
    */
   private getActionPreview(toolName: string, args: Record<string, unknown>): string {
+    const connectorPreview = this.getConnectorForTool(toolName)?.definition.getActionPreview?.(toolName, args)
+    if (connectorPreview) return connectorPreview
     switch (toolName) {
-      case 'jira_create_issue':
-        return `Create: ${args.summary}`
-      case 'jira_update_issue':
-        return `Update: ${args.issueIdOrKey || args.issueKey}`
-      case 'jira_add_comment':
-        return `Comment on: ${args.issueIdOrKey || args.issueKey}`
-      case 'jira_transition_issue':
-        return `Transition: ${args.issueIdOrKey || args.issueKey}`
       case 'file_write':
         return `Write to: ${args.path}`
       default:
@@ -1091,18 +700,15 @@ export class Agent {
     }
   }
 
-
-  /**
-   * Convert Zod schema to JSON Schema (simplified)
-   */
-  /**
-   * Convert a Zod schema to JSON Schema format understood by LLM tool-calling APIs.
-   * Handles: string, number, boolean, arrays of primitives, arrays of objects
-   * (nested ZodObject), optional/default wrappers, and enum types.
-   */
-  private zodToJsonSchema(schema: unknown): Record<string, unknown> {
-    return zodFieldToJsonSchema(schema)
+  private getActionConfirmation(toolName: string, args: Record<string, unknown>): PendingAction['confirmation'] {
+    return this.getConnectorForTool(toolName)?.definition.getActionConfirmation?.(toolName, args) || undefined
   }
+
+  private getActionConfirmationPrompt(toolName: string, args: Record<string, unknown>): string {
+    return this.getConnectorForTool(toolName)?.definition.getActionConfirmationPrompt?.(toolName, args)
+      || `Action: ${toolName}`
+  }
+
 
   /**
    * Clear conversation history

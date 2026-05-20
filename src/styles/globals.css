@@ -20,8 +20,8 @@ html, body, #root {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  background-color: #f9fafb;
-  color: #111827;
+  background-color: #ffffff;
+  color: #0a0a0a;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -90,7 +90,7 @@ body {
 
 /* Message bubbles */
 .message-user {
-  @apply bg-mirai-600 text-white rounded-2xl rounded-br-md;
+  @apply bg-neutral-950 text-white rounded-2xl rounded-br-md;
 }
 
 .message-assistant {
@@ -104,7 +104,7 @@ body {
 
 /* Input focus states */
 input:focus, textarea:focus, select:focus {
-  @apply outline-none ring-2 ring-mirai-500 ring-opacity-50;
+  @apply outline-none ring-2 ring-neutral-500 ring-opacity-50;
 }
 
 /* Button base styles */
@@ -113,7 +113,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .btn-primary {
-  @apply bg-mirai-600 text-white hover:bg-mirai-700 active:bg-mirai-800;
+  @apply bg-neutral-950 text-white hover:bg-neutral-700 active:bg-neutral-800;
 }
 
 .btn-secondary {
@@ -130,17 +130,17 @@ input:focus, textarea:focus, select:focus {
 
 /* Sidebar item */
 .sidebar-item {
-  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-100 cursor-pointer transition-colors;
+  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-neutral-800 hover:bg-neutral-100 cursor-pointer transition-colors;
 }
 
 .sidebar-item.active {
-  @apply bg-mirai-50 text-mirai-700;
+  @apply underline underline-offset-4 text-neutral-950;
 }
 
 /* Chat input */
 .chat-input {
   @apply w-full resize-none rounded-xl border border-gray-200 px-4 py-3 pr-12 text-gray-800 placeholder-gray-400;
-  @apply focus:border-mirai-400 focus:ring-2 focus:ring-mirai-100;
+  @apply focus:border-neutral-400 focus:ring-2 focus:ring-neutral-100;
 }
 
 /* Markdown content styling */
@@ -180,7 +180,7 @@ input:focus, textarea:focus, select:focus {
 
 /* Loading dots */
 .loading-dots span {
-  @apply inline-block w-2 h-2 bg-mirai-500 rounded-full mx-0.5;
+  @apply inline-block w-2 h-2 bg-neutral-500 rounded-full mx-0.5;
   animation: loadingDot 1.4s infinite ease-in-out both;
 }
 
