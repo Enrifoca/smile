@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
 import { Agent, Message, PendingAction, UserProfile } from '../agent'
 import { MemoryStore } from '../types/memory'
+import { loadEnabledConnectors } from '../connectors/registry'
 import ChatMessage from './ChatMessage'
 
 interface ChatViewProps {
@@ -70,7 +71,8 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { storage, mcp, file, ai, jiraMetadata: jiraMetadataAPI, memory: memoryAPI, jiraAttachment } = useElectron()
+  const electron = useElectron()
+  const { storage, mcp, file, ai, memory: memoryAPI } = electron
 
   const loadMemoryForAgent = async (): Promise<MemoryStore | null> => {
     try {
@@ -127,7 +129,7 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
         // Read file as ArrayBuffer
         const arrayBuffer = await f.arrayBuffer()
         
-        // Save to .mirai/attachments folder
+        // Save to .smile/attachments folder
         const result = await file.saveAttachment(f.name, arrayBuffer)
         
         if (result.success && result.path) {
@@ -231,19 +233,8 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
       
       const userProfile = await storage.get('userProfile') as UserProfile | null
       
-      // Get Jira metadata for the agent's system prompt
-      const jiraMetadataRaw = await jiraMetadataAPI.get()
-      // Cast to the proper type since the IPC returns a more generic type
-      // Ensure all required fields exist with defaults for backward compatibility
-      const jiraMetadata: import('../types/jira').JiraMetadataStore = {
-        monitoredProjects: jiraMetadataRaw?.monitoredProjects || [],
-        projectMetadata: (jiraMetadataRaw?.projectMetadata || {}) as Record<string, import('../types/jira').JiraProjectMetadata>,
-        standardFields: (jiraMetadataRaw?.standardFields || []) as import('../types/jira').JiraField[],
-        users: (jiraMetadataRaw?.users || []) as import('../types/jira').JiraUser[],
-        lastSynced: jiraMetadataRaw?.lastSynced || null,
-        syncedProjects: jiraMetadataRaw?.syncedProjects || [],
-      }
-      setManagedProjects(jiraMetadata.monitoredProjects)
+      const connectors = await loadEnabledConnectors(electron)
+      setManagedProjects(connectors.scopes)
 
       // Load memory for the agent
       const memory = await loadMemoryForAgent()
@@ -269,14 +260,13 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
 
       const newAgent = new Agent({
         userProfile,
-        jiraMetadata: jiraMetadata.monitoredProjects.length > 0 ? jiraMetadata : null,
+        connectors: connectors.runtimes,
         memory,
         loadMemory: loadMemoryForAgent,
         maxIterations,
         onMessage: handleNewMessage,
         onUpdateMessage: handleUpdateMessage,
         onPendingAction: handlePendingAction,
-        executeJiraTool,
         executeFileTool,
         executeMemoryTool,
         callAI: async (messages, tools) => ai.chat(messages, tools),
@@ -425,89 +415,6 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
       return newMessages
     })
   }, [saveChat])
-
-  const executeJiraTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
-    console.log('[ChatView] executeJiraTool:', name, args)
-    try {
-      // Use MCP for Jira operations
-      switch (name) {
-        case 'jira_search_issues': {
-          const jql = args.jql as string
-          const maxResults = (args.maxResults as number) || 20
-          
-          let fields: string[] | undefined
-          if (args.fields) {
-            if (Array.isArray(args.fields)) {
-              fields = args.fields as string[]
-            } else if (typeof args.fields === 'string') {
-              fields = (args.fields as string).split(',').map(f => f.trim()).filter(f => f)
-            }
-          }
-          
-          if (!jql) return { success: false, error: 'JQL query is required.' }
-          return await mcp.searchIssues(jql, maxResults, fields)
-        }
-        case 'jira_get_issue': {
-          const issueKey = (args.issueIdOrKey || args.issueKey) as string
-          if (!issueKey) return { success: false, error: 'Issue key is required.' }
-          return await mcp.getIssue(issueKey)
-        }
-        case 'jira_get_projects':
-          return await mcp.getProjects()
-        case 'jira_get_issue_types': {
-          const projectKey = (args.projectIdOrKey || args.projectKey) as string
-          if (!projectKey) return { success: false, error: 'Project key is required.' }
-          return await mcp.getProjectIssueTypes(projectKey)
-        }
-        case 'jira_get_transitions': {
-          const issueKey = (args.issueIdOrKey || args.issueKey) as string
-          if (!issueKey) return { success: false, error: 'Issue key is required.' }
-          return await mcp.getTransitions(issueKey)
-        }
-        case 'jira_lookup_user': {
-          const searchString = (args.searchString || args.query) as string
-          if (!searchString) return { success: false, error: 'Search string is required.' }
-          return await mcp.lookupUser(searchString)
-        }
-        case 'jira_create_issue': {
-          const projectKey = (args.projectKey || args.project) as string
-          const issueTypeName = (args.issueTypeName || args.issueType) as string
-          const summary = args.summary as string
-          const description = args.description as string | undefined
-          if (!projectKey || !issueTypeName || !summary) return { success: false, error: 'Project key, issue type, and summary are required.' }
-          const { projectKey: _pk, project: _p, issueTypeName: _itn, issueType: _it, summary: _s, description: _d, ...extra } = args
-          return await mcp.createIssue(projectKey, issueTypeName, summary, description, Object.keys(extra).length > 0 ? extra : undefined)
-        }
-        case 'jira_update_issue': {
-          const issueKey = (args.issueIdOrKey || args.issueKey) as string
-          if (!issueKey) return { success: false, error: 'Issue key is required.' }
-          return await mcp.editIssue(issueKey, args)
-        }
-        case 'jira_add_comment': {
-          const issueKey = (args.issueIdOrKey || args.issueKey) as string
-          const body = (args.body || args.comment || args.commentBody) as string
-          if (!issueKey || !body) return { success: false, error: 'Issue key and body are required.' }
-          return await mcp.addComment(issueKey, body)
-        }
-        case 'jira_transition_issue': {
-          const issueKey = (args.issueIdOrKey || args.issueKey) as string
-          const transitionId = args.transitionId as string
-          if (!issueKey || !transitionId) return { success: false, error: 'Issue key and transition ID are required.' }
-          return await mcp.transitionIssue(issueKey, transitionId)
-        }
-        case 'jira_upload_attachment': {
-          const issueKey = (args.issueIdOrKey || args.issueKey) as string
-          const filePath = args.filePath as string
-          if (!issueKey || !filePath) return { success: false, error: 'Issue key and file path are required.' }
-          return await jiraAttachment.upload(issueKey, filePath)
-        }
-        default:
-          return { success: false, error: `Unknown Jira tool: ${name}` }
-      }
-    } catch (error) {
-      throw error
-    }
-  }
 
   const executeFileTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
@@ -748,34 +655,6 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
     
     try {
       await agent.approveAction(action.id)
-      
-      // If this was a create issue action, add it to memory for style learning
-      if (action.type === 'jira_create_issue') {
-        try {
-          const data = action.data as {
-            projectKey?: string
-            issueTypeName?: string
-            issueType?: string
-            summary?: string
-            description?: string
-          }
-          
-          const issueTypeName = data.issueTypeName || data.issueType || 'Task'
-          
-          // Add to memory (the memoryService will handle rotation of old examples)
-          await memoryAPI.addIssueExample(issueTypeName, '', {
-            issueKey: `NEW-${Date.now()}`, // Placeholder key, will be replaced on next sync
-            summary: data.summary || '',
-            description: data.description,
-            createdAt: new Date().toISOString(),
-          })
-          
-          console.log('[ChatView] Added new issue to memory for style learning')
-        } catch (memError) {
-          console.log('[ChatView] Failed to add to memory:', memError)
-          // Non-critical - don't interrupt flow
-        }
-      }
     } catch (error) {
       console.error('Failed to execute action:', error)
     }
@@ -827,10 +706,10 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
     
     if (mcpConnectionState === 'connecting') {
       return (
-        <div className="bg-mirai-50 border-b border-mirai-200 px-4 py-2">
-          <div className="max-w-3xl mx-auto flex items-center gap-2 text-mirai-700 text-sm">
+        <div className="bg-neutral-50 border-b border-neutral-200 px-4 py-2">
+          <div className="max-w-3xl mx-auto flex items-center gap-2 text-neutral-700 text-sm">
             <LoadingSpinner />
-            <span>Connecting to Jira...</span>
+            <span>Connecting to connector...</span>
           </div>
         </div>
       )
@@ -840,7 +719,7 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
       return (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2">
           <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <span className="text-red-700 text-sm">Connection to Jira failed</span>
+            <span className="text-red-700 text-sm">Connector connection failed</span>
             <button 
               onClick={() => mcp.connect()}
               className="text-sm text-red-600 hover:text-red-800 font-medium"
@@ -870,19 +749,19 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
                 How can I help you today?
               </h2>
               <p className="text-gray-500 mb-8">
-                Ask me about your Jira projects, sprint progress, or let me help you create tasks.
+                Ask me anything, work with your files, or use any configured connector.
               </p>
               <div className="grid grid-cols-2 gap-3 max-w-lg mx-auto">
                 {[
-                  'Show me open issues',
-                  'What\'s the sprint progress?',
+                  'Show me open records',
+                  'Summarize this workspace',
                   'Generate a status report',
-                  'List my projects',
+                  'List connected scopes',
                 ].map((suggestion) => (
                   <button
                     key={suggestion}
                     onClick={() => setInput(suggestion)}
-                    className="p-3 text-sm text-left bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-mirai-300 transition-colors"
+                    className="p-3 text-sm text-left bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-neutral-300 transition-colors"
                   >
                     {suggestion}
                   </button>
@@ -918,7 +797,7 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
       {/* Input Area */}
       <div 
         className={`border-t border-gray-200 bg-white px-4 py-4 transition-colors ${
-          isDragging ? 'bg-mirai-50 border-mirai-300' : ''
+          isDragging ? 'bg-neutral-50 border-neutral-300' : ''
         }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -953,9 +832,9 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
 
           {/* Drag overlay */}
           {isDragging && (
-            <div className="mb-3 p-4 border-2 border-dashed border-mirai-400 rounded-lg bg-mirai-50 text-center">
-              <p className="text-mirai-600 font-medium">Drop files here to attach</p>
-              <p className="text-sm text-mirai-500">Max 10MB per file</p>
+            <div className="mb-3 p-4 border-2 border-dashed border-neutral-400 rounded-lg bg-neutral-50 text-center">
+              <p className="text-neutral-700 font-medium">Drop files here to attach</p>
+              <p className="text-sm text-neutral-500">Max 10MB per file</p>
             </div>
           )}
 
@@ -986,7 +865,7 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={mcpConnectionState === 'connecting' ? 'Connecting to Jira...' : 'Ask me anything...'}
+              placeholder={mcpConnectionState === 'connecting' ? 'Connecting to connector...' : 'Ask me anything...'}
               rows={1}
               className="chat-input pl-12" 
               disabled={isLoading || mcpConnectionState === 'connecting'}
@@ -1003,7 +882,7 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
               <button
                 onClick={handleSend}
                 disabled={!input.trim() || mcpConnectionState === 'connecting'}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-mirai-600 hover:text-mirai-700 disabled:text-gray-300 transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-neutral-700 hover:text-neutral-950 disabled:text-gray-300 transition-colors"
               >
                 <SendIcon />
               </button>
@@ -1011,13 +890,13 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
           </div>
           <p className="text-xs text-gray-400 mt-2 text-center">
             {mcpConnectionState === 'connecting' 
-              ? 'Please wait while connecting to Jira...' 
+              ? 'Please wait while connecting to connector...'
               : 'Press Enter to send, Shift+Enter for new line. Drop files or click 📎 to attach.'}
           </p>
           {managedProjects.length > 0 && (
             <details className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
               <summary className="cursor-pointer select-none font-medium text-gray-700">
-                Scope this message with / "project name" or a project key. Managed projects ({managedProjects.length})
+                Scope this message with / "scope name" or a connector key. Connected scopes ({managedProjects.length})
               </summary>
               <div className="mt-2 flex flex-wrap gap-2">
                 {managedProjects.map(project => (
@@ -1029,7 +908,7 @@ export default function ChatView({ chatId, onChatCreated }: ChatViewProps) {
                       setInput(current => current.startsWith(prefix) ? current : `${prefix}${current}`)
                       textareaRef.current?.focus()
                     }}
-                    className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700 hover:border-mirai-300 hover:text-mirai-700"
+                    className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700 hover:border-neutral-300 hover:text-neutral-950"
                     title={`Use ${project.name} for this message`}
                   >
                     {project.avatarUrl && <img src={project.avatarUrl} alt="" className="h-4 w-4 rounded" />}

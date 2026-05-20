@@ -177,7 +177,7 @@ export function ProjectSelector({ onSelectionComplete, onBack, mode = 'onboardin
             <h2 className="text-xl font-semibold text-gray-900 mb-2">Connect to Atlassian</h2>
             <p className="text-gray-600 text-sm">
               {mode === 'onboarding' 
-                ? "Connect your Atlassian account to select which projects Mirai should help you manage."
+                ? "Connect your Atlassian account to select which projects this connector should expose."
                 : "Connect your Atlassian account to access Jira projects."}
             </p>
           </div>
@@ -214,7 +214,7 @@ export function ProjectSelector({ onSelectionComplete, onBack, mode = 'onboardin
           </button>
 
           <p className="text-xs text-gray-500 text-center mt-4">
-            You'll be redirected to Atlassian to authorize Mirai. We only request access to the projects you work on.
+            You'll be redirected to Atlassian to authorize the connector. Only project access needed by this module is requested.
           </p>
 
           {onBack && (
@@ -236,7 +236,7 @@ export function ProjectSelector({ onSelectionComplete, onBack, mode = 'onboardin
       <div className="p-6 border-b border-gray-200">
         <h2 className="text-xl font-semibold text-gray-900 mb-1">Select Projects to Monitor</h2>
         <p className="text-gray-600 text-sm">
-          Choose which Jira projects Mirai should help you manage. The AI will focus exclusively on these projects unless you specifically ask about others.
+          Choose which Jira projects this connector should expose to the agent.
         </p>
       </div>
 

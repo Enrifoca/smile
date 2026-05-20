@@ -399,8 +399,8 @@ export class FileService {
           const entries = await fs.readdir(fullPath, { withFileTypes: true })
           
           for (const entry of entries) {
-            // Skip hidden files/folders but allow .mirai folder access
-            if (entry.name.startsWith('.') && entry.name !== '.mirai') continue
+            // Skip hidden files/folders but allow the framework workspace folder.
+            if (entry.name.startsWith('.') && entry.name !== '.smile') continue
             
             const entryRelPath = path.join(dirPath, entry.name)
             const entryFullPath = path.join(fullPath, entry.name)
@@ -466,11 +466,11 @@ export class FileService {
   }
 
   /**
-   * Ensure .mirai/attachments directory exists
+   * Ensure .smile/attachments directory exists
    */
   async ensureAttachmentsDir(): Promise<{ success: boolean; path?: string; error?: string }> {
     try {
-      const attachmentsPath = path.join(this.workspacePath, '.mirai', 'attachments')
+      const attachmentsPath = path.join(this.workspacePath, '.smile', 'attachments')
       await fs.mkdir(attachmentsPath, { recursive: true })
       return { success: true, path: attachmentsPath }
     } catch (error) {
@@ -480,7 +480,7 @@ export class FileService {
   }
 
   /**
-   * Save a file to .mirai/attachments
+   * Save a file to .smile/attachments
    */
   async saveAttachment(fileName: string, data: Buffer): Promise<{ success: boolean; path?: string; error?: string }> {
     try {
@@ -498,7 +498,7 @@ export class FileService {
         }
       }
 
-      const attachmentPath = path.join('.mirai', 'attachments', fileName)
+      const attachmentPath = path.join('.smile', 'attachments', fileName)
       const fullPath = this.validatePath(attachmentPath)
       
       await fs.writeFile(fullPath, data)
@@ -521,7 +521,7 @@ export class FileService {
       if (stats.size > MAX_ATTACHMENT_SIZE) {
         return { 
           success: false, 
-          error: `File is too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Maximum size for Jira attachments is 10MB.` 
+          error: `File is too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Maximum size for connector attachments is 10MB.` 
         }
       }
 

@@ -1,7 +1,7 @@
 {
-  "name": "mirai",
+  "name": "smile",
   "version": "0.1.0",
-  "description": "AI-powered project management assistant",
+  "description": "White-label desktop framework for building vertical AI agents",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -52,8 +52,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.mirai.app",
-    "productName": "Mirai",
+    "appId": "com.smile.framework",
+    "productName": "smile:D",
     "directories": {
       "output": "release"
     },

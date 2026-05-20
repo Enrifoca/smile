@@ -8,17 +8,17 @@ const TrashIcon = () => (
   </svg>
 )
 
-const defaultUserMarkdown = `# Mirai User Memory
+const defaultUserMarkdown = `# smile:D User Memory
 
 ## Standing Instructions
-- Use the normal Jira Task issue type by default.
-- Do not use Tech Task unless the project supports it and the user explicitly asks.
+- Add durable instructions that should shape every agent response.
+- Keep domain-specific rules here only when they apply across sessions.
 
 ## Writing Style
 - Match the user's direct, product-focused tone.
 
-## Project Conventions
-- Add stable project rules here when they should always affect Mirai's behavior.
+## Workspace Conventions
+- Add stable workspace rules here when they should always affect the agent's behavior.
 `
 
 const defaultMemory: MemoryStore = {
@@ -104,7 +104,7 @@ export default function MemoriesView() {
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-mirai-600 border-t-transparent"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-neutral-900 border-t-transparent"></div>
       </div>
     )
   }
@@ -123,7 +123,7 @@ export default function MemoriesView() {
           <div>
             <h2 className="text-lg font-semibold text-gray-800">User Memory</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Edit this Markdown to control what Mirai should always remember and follow.
+              Edit this Markdown to control what the agent should always remember and follow.
             </p>
           </div>
 
@@ -133,18 +133,18 @@ export default function MemoriesView() {
               setUserMemoryDraft(e.target.value)
               setUserMemoryStatus('idle')
             }}
-            className="w-full min-h-[420px] px-4 py-3 border border-gray-200 rounded-xl font-mono text-sm leading-relaxed resize-y focus:ring-2 focus:ring-mirai-500 focus:border-transparent"
+            className="w-full min-h-[420px] px-4 py-3 border border-gray-200 rounded-xl font-mono text-sm leading-relaxed resize-y focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
             spellCheck={false}
           />
 
           <div className="flex items-center justify-between">
             <p className="text-xs text-gray-500">
-              Saved to <code className="bg-gray-100 px-1 py-0.5 rounded">.mirai/memories/user.md</code>
+              Saved to <code className="bg-gray-100 px-1 py-0.5 rounded">.smile/memories/user.md</code>
             </p>
             <button
               onClick={handleSaveUserMemory}
               disabled={userMemoryStatus === 'saving'}
-              className="px-4 py-2 text-sm bg-mirai-600 text-white rounded-lg hover:bg-mirai-700 disabled:opacity-50"
+              className="px-4 py-2 text-sm bg-neutral-950 text-white rounded-lg hover:bg-neutral-700 disabled:opacity-50"
             >
               {userMemoryStatus === 'saving' ? 'Saving...' : userMemoryStatus === 'saved' ? 'Saved' : 'Save Memory'}
             </button>
@@ -158,7 +158,7 @@ export default function MemoriesView() {
           <div>
             <h2 className="text-lg font-semibold text-gray-800">Learned Notes</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Notes Mirai saved automatically. They never override User Memory.
+              Notes the agent saved automatically. They never override User Memory.
             </p>
           </div>
 

@@ -17,7 +17,7 @@ export interface MemoryEntry {
   source: MemorySource
 }
 
-// General memory - preferences, behaviors, Jira conventions
+// General memory - preferences, behaviors, connector conventions
 export interface GeneralMemory {
   entries: MemoryEntry[]
 }
@@ -60,7 +60,7 @@ export interface IssueTypeMemory {
 // Complete memory store
 export interface MemoryStore {
   // Highest-priority, user-owned instructions. Stored as plain Markdown in
-  // .mirai/memories/user.md and injected before every agent response.
+  // .smile/memories/user.md and injected before every agent response.
   userMarkdown: string
   general: GeneralMemory
   lexicon: LexiconMemory
@@ -69,17 +69,17 @@ export interface MemoryStore {
   version: number // for future migrations
 }
 
-export const defaultUserMemoryMarkdown = `# Mirai User Memory
+export const defaultUserMemoryMarkdown = `# smile:D User Memory
 
 ## Standing Instructions
-- Use the normal Jira Task issue type by default.
-- Do not use Tech Task unless the project supports it and the user explicitly asks.
+- Add durable instructions that should shape every agent response.
+- Keep domain-specific rules here only when they apply across sessions.
 
 ## Writing Style
 - Match the user's direct, product-focused tone.
 
-## Project Conventions
-- Add stable project rules here when they should always affect Mirai's behavior.
+## Workspace Conventions
+- Add stable workspace rules here when they should always affect the agent's behavior.
 `
 
 // Default empty memory store
@@ -99,10 +99,10 @@ export function formatMemoryForPrompt(memory: MemoryStore): string {
   if (!memory) return ''
 
   const lines: string[] = [
-    '## Mirai Memory (Always Loaded)',
+    '## smile:D Memory (Always Loaded)',
     '',
     'Memory is already loaded for this response. Do not call memory_read just to check it.',
-    'Priority: current user message > User Memory > Jira context > Learned Notes > defaults.',
+    'Priority: current user message > User Memory > connector context > Learned Notes > defaults.',
     'If User Memory conflicts with Learned Notes, follow User Memory.',
     '',
   ]

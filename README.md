@@ -1,25 +1,26 @@
-# Mirai - AI Project Management Assistant
+# smile:D
 
-A lightweight, privacy-focused desktop app that helps project managers monitor Jira projects, generate reports, and manage tasks with AI assistance.
+smile:D is a white-label desktop framework for building vertical AI agents for work.
+
+It gives you the reusable structure: a local desktop shell, multi-model agent loop, human-in-the-loop tool approvals, editable memory, workspace file access, and a connector system. Bring a use case, add connector modules, tune the prompts, and ship a focused agent for that domain.
 
 ## Features
 
-- **Chat-first Interface** - Simple UI like ChatGPT desktop, everything accessible from chat
-- **100% Local** - All data stored locally and encrypted, nothing in the cloud
-- **Smart Agent** - Learns your writing style, asks before any Jira changes
-- **Multi-Provider AI** - Supports OpenAI, Anthropic (Claude), and Groq
-- **Jira Integration** - Full read/write access to your Jira projects
-- **Scheduled Tasks** - Set up recurring automated reports and checks
-- **Alerts** - Get notified about deadlines, blockers, and status changes
+- **Desktop agent shell** - Electron, React, TypeScript, Vite, and Tailwind.
+- **Multi-model runtime** - Configure chat, reasoning, and OCR-capable models.
+- **Human-in-the-loop writes** - Read tools can run freely; write tools pause for user approval.
+- **Editable memory** - User memory lives in Markdown under `.smile/memories`.
+- **Workspace access** - Agents can read, search, OCR, and write inside a selected local folder.
+- **Connector modules** - Third-party capabilities are intended to live outside the core agent loop.
+- **Clean white-label UI** - Minimal black and white interface ready to adapt to a vertical use case.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- npm or yarn
-- A Jira account with API access
-- An API key from OpenAI, Anthropic, or Groq
+- npm
+- An API key from one supported model provider
 
 ### Installation
 
@@ -48,35 +49,30 @@ npm run build:mac
 
 On first launch, the app will guide you through:
 
-1. **Jira Setup** - Enter your Jira URL, email, and API token
-2. **AI Provider** - Choose and configure your preferred AI provider
-3. **Workspace** - Select a folder for document access and report creation
-4. **Communication Style** - Customize how the AI communicates with you
+1. **AI Provider** - Choose and configure your preferred AI provider.
+2. **Workspace** - Select a folder for document access and generated outputs.
+3. **Memory** - Edit durable user instructions in Markdown.
+4. **Connectors** - Add third-party modules such as Jira from the Connectors section.
 
-## Usage
+## Framework Pillars
 
-### Chat Commands
+- **Multi models** - Main model, reasoning model, and OCR model are configured independently.
+- **Human in the loop** - Connector write actions use confirmation cards before execution.
+- **Craftable modules** - Connectors contribute tools, prompt sections, auth, preview labels, and approval copy.
+- **Memory management** - User memory is authoritative; learned notes are lower priority; scratchpad is per-turn.
 
-The AI assistant understands natural language. Here are some examples:
+## Connector Contract
 
-- "Show me all open issues in PROJECT-KEY"
-- "What's the sprint progress?"
-- "Generate a weekly status report"
-- "Create a task: [description]"
-- "What blockers do we have?"
-- "Summarize the project health"
+A connector should be able to provide:
 
-### Scheduled Tasks
+- Tool definitions, split by read and write safety.
+- A prompt section describing domain capabilities and heuristics.
+- A human-readable tool summary entry.
+- A write-action confirmation message and preview.
+- Auth or OAuth setup UI.
+- Cache invalidation rules after writes.
 
-Set up recurring tasks that run automatically:
-- Daily standup summaries
-- Weekly sprint reports
-- Blocker checks
-- Deadline reminders
-
-### Important
-
-The AI will **always ask for your approval** before making any changes in Jira. You control what gets modified.
+The bundled Jira code is being kept as the first example connector while the framework core becomes connector-neutral.
 
 ## Security
 
@@ -93,6 +89,10 @@ The AI will **always ask for your approval** before making any changes in Jira. 
 - **Vite** - Fast build tooling
 - **TailwindCSS** - Styling
 - **Vercel AI SDK concepts** - AI agent architecture
+
+## Repository Direction
+
+The project is being refactored from a project-management assistant into a reusable framework. The target structure is inspired by agent-first open-source repos: clear docs, explicit agent instructions, connector boundaries, and simple setup for contributors and downstream users.
 
 ## License
 

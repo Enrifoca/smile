@@ -4,9 +4,10 @@ import ChatView from './components/ChatView'
 import MemoriesView from './components/MemoriesView'
 import SettingsView from './components/SettingsView'
 import Onboarding from './components/Onboarding'
+import ConnectorsView from './components/ConnectorsView'
 import { useElectron } from './hooks/useElectron'
 
-type View = 'chat' | 'memories' | 'settings'
+type View = 'chat' | 'memories' | 'connectors' | 'settings'
 
 interface UserProfileStore {
   onboardingCompleted: boolean
@@ -52,7 +53,7 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-50">
+      <div className="flex items-center justify-center h-full bg-white">
         <div className="loading-dots">
           <span></span>
           <span></span>
@@ -67,7 +68,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-full bg-gray-50">
+    <div className="flex h-full bg-white">
       <Sidebar
         currentView={currentView}
         onNavigate={setCurrentView}
@@ -78,7 +79,7 @@ function App() {
 
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Drag region */}
-        <div className="h-8 drag-region bg-gray-50 flex items-center justify-end px-2">
+        <div className="h-7 drag-region bg-white border-b-2 border-neutral-950 flex items-center justify-end px-2">
           <div className="no-drag flex gap-1" />
         </div>
 
@@ -91,6 +92,9 @@ function App() {
           )}
           {currentView === 'memories' && (
             <MemoriesView />
+          )}
+          {currentView === 'connectors' && (
+            <ConnectorsView />
           )}
           {currentView === 'settings' && (
             <SettingsView onResetOnboarding={() => setShowOnboarding(true)} />
