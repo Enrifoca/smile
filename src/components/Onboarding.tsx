@@ -538,8 +538,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               </p>
             </div>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="text-sm text-amber-800">
+            <div className="snippet-info">
+              <p className="text-sm">
                 Atlassian MCP handles Jira reading and updates through OAuth. The REST API token is used for attachment uploads and site selection.
               </p>
             </div>
@@ -622,14 +622,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
             {/* MCP Connection Status */}
             {mcpState === 'idle' && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="snippet-info">
                 <div className="flex items-start gap-3">
-                  <svg className="w-6 h-6 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6 text-neutral-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <div>
-                    <p className="font-medium text-blue-800">Secure Atlassian Connection</p>
-                    <p className="text-sm text-blue-700 mt-1">
+                    <p className="font-medium">Secure Atlassian Connection</p>
+                    <p className="text-sm mt-1">
                       Clicking the button below opens your browser for Atlassian OAuth. Your Jira API token is only used locally for REST features like attachments.
                     </p>
                   </div>
@@ -638,24 +638,24 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             )}
 
             {mcpState === 'connecting' && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="snippet-info">
                 <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
-                  <p className="text-blue-800">{mcpStatusMessage || 'Connecting...'}</p>
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-neutral-500 border-t-transparent"></div>
+                  <p>{mcpStatusMessage || 'Connecting...'}</p>
                 </div>
               </div>
             )}
 
             {mcpState === 'oauth_pending' && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="snippet-info">
                 <div className="flex items-start gap-3">
-                  <svg className="w-6 h-6 text-amber-600 mt-0.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6 text-neutral-500 mt-0.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
                   <div>
-                    <p className="font-medium text-amber-800">Waiting for authentication...</p>
-                    <p className="text-sm text-amber-700 mt-1">
+                    <p className="font-medium">Waiting for authentication...</p>
+                    <p className="text-sm mt-1">
                       Please complete the sign-in process in your browser. If a browser window didn't open, check if it was blocked by your popup blocker.
                     </p>
                   </div>

@@ -13,6 +13,7 @@
 - `src/prompts`: Markdown prompts and prompt assembly.
 - `src/connectors`: connector contract, registry, and connector modules.
 - `src/components`: generic React UI.
+- `src/components/connectors`: reusable connector setup UI shells (`ConnectorSettingsModules.tsx`).
 - `src/hooks`: renderer hooks for desktop APIs.
 - `src/types`: shared TypeScript types.
 - `src/utils`: migration or cross-cutting utilities.
@@ -33,3 +34,5 @@
 - Generic agent loop behavior: `src/agent`.
 - Generic prompt behavior: `src/prompts/core`.
 - UI presentation: `src/components`.
+- Connector setup UI shells: `src/components/connectors/ConnectorSettingsModules.tsx` (see `src/components/connectors/README.md`).
+- Connector settings pages: compose modules in `src/connectors/<id>/ui/` (see `src/connectors/jira/ui/`).

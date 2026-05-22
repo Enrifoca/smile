@@ -2,10 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --sidebar-width: 260px;
-}
-
 * {
   margin: 0;
   padding: 0;
@@ -19,11 +15,15 @@ html, body, #root {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  background-color: #ffffff;
-  color: #0a0a0a;
+  font-family: var(--font-app);
+  background-color: var(--color-surface);
+  color: var(--color-border-strong);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, textarea, select {
+  font: inherit;
 }
 
 /* Custom scrollbar */
@@ -113,7 +113,16 @@ input:focus, textarea:focus, select:focus {
 }
 
 .btn-primary {
-  @apply bg-neutral-950 text-white hover:bg-neutral-700 active:bg-neutral-800;
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.btn-primary:hover {
+  background-color: var(--color-primary-hover);
+}
+
+.btn-primary:active {
+  background-color: var(--color-primary-active);
 }
 
 .btn-secondary {
@@ -128,9 +137,63 @@ input:focus, textarea:focus, select:focus {
   @apply bg-transparent text-gray-600 hover:bg-gray-100 active:bg-gray-200;
 }
 
+.page-shell {
+  padding: var(--page-padding-y) var(--page-padding-x);
+}
+
+.content-shell {
+  max-width: var(--content-max-width);
+}
+
 /* Sidebar item */
 .sidebar-item {
   @apply flex items-center gap-3 px-3 py-2 rounded-lg text-neutral-800 hover:bg-neutral-100 cursor-pointer transition-colors;
+}
+
+.app-sidebar {
+  width: var(--sidebar-expanded-width);
+  z-index: 30;
+}
+
+.app-sidebar.collapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+.sidebar-collapse-button {
+  display: flex;
+  width: var(--sidebar-collapse-button-size);
+  height: var(--sidebar-collapse-button-size);
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  margin-top: 0.125rem;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--sidebar-collapse-button-color);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-collapse-button:hover {
+  background: var(--color-muted-surface);
+  color: var(--color-border-strong);
+}
+
+.app-sidebar svg {
+  width: var(--sidebar-icon-size);
+  height: var(--sidebar-icon-size);
+  flex-shrink: 0;
+}
+
+.app-sidebar.collapsed .sidebar-item svg,
+.app-sidebar.collapsed .new-chat-button svg {
+  width: var(--sidebar-collapsed-icon-size);
+  height: var(--sidebar-collapsed-icon-size);
+}
+
+.sidebar-collapse-button svg {
+  width: var(--sidebar-collapse-icon-size);
+  height: var(--sidebar-collapse-icon-size);
 }
 
 .sidebar-item.active {
@@ -141,6 +204,42 @@ input:focus, textarea:focus, select:focus {
 .chat-input {
   @apply w-full resize-none rounded-xl border border-gray-200 px-4 py-3 pr-12 text-gray-800 placeholder-gray-400;
   @apply focus:border-neutral-400 focus:ring-2 focus:ring-neutral-100;
+}
+
+.snippet-info {
+  background-color: var(--color-muted-surface);
+  border: 1px solid var(--color-muted-border);
+  color: var(--color-muted-text);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.connector-card {
+  display: flex;
+  width: 6rem;
+  height: 6rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 2px solid var(--color-border-strong);
+  border-radius: 1rem;
+  background: var(--color-surface);
+  color: var(--color-border-strong);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.connector-card:hover {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.connector-card-icon {
+  width: 2rem;
+  height: 2rem;
+  object-fit: contain;
 }
 
 /* Markdown content styling */
@@ -161,7 +260,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .prose-chat code {
-  @apply bg-gray-100 px-1 py-0.5 rounded text-sm font-mono;
+  @apply bg-gray-100 px-1 py-0.5 rounded text-sm;
 }
 
 .prose-chat pre {

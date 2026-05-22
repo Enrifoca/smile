@@ -13,6 +13,7 @@ interface SidebarProps {
   onSelectChat: (chatId: string) => void
   onNewChat: () => void
   currentChatId: string | null
+  collapsed: boolean
 }
 
 // Icons as simple SVG components
@@ -52,12 +53,19 @@ const ConnectorsIcon = () => (
   </svg>
 )
 
+const PlusIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+  </svg>
+)
+
 export default function Sidebar({ 
   currentView, 
   onNavigate, 
   onSelectChat, 
   onNewChat,
-  currentChatId 
+  currentChatId,
+  collapsed,
 }: SidebarProps) {
   const [chatHistoryOpen, setChatHistoryOpen] = useState(true)
   const [chats, setChats] = useState<Chat[]>([])
@@ -102,19 +110,21 @@ export default function Sidebar({
   }, {} as Record<string, Chat[]>)
 
   return (
-    <aside className="w-56 bg-white border-r-2 border-neutral-950 flex flex-col h-full">
+    <aside className={`app-sidebar ${collapsed ? 'collapsed' : ''} relative bg-white border-r-2 border-neutral-950 flex flex-col h-full transition-[width] duration-200`}>
       {/* Drag region for macOS */}
-      <div className="h-7 drag-region border-b-2 border-neutral-950 px-4 text-sm font-medium leading-7">
-        smile:D
+      <div className="h-7 drag-region border-b-2 border-neutral-950 px-2 text-center text-sm font-medium flex items-center justify-center">
+        <span className="truncate">{collapsed ? ':D' : 'smile:D'}</span>
       </div>
 
       {/* New Chat Button */}
-      <div className="p-4">
+      <div className="p-4 pb-3">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 border-2 border-neutral-950 rounded-lg hover:bg-neutral-950 hover:text-white transition-colors"
+          className="new-chat-button btn-primary w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors"
+          title="New Chat"
         >
-          <span>New Chat</span>
+          <PlusIcon />
+          {!collapsed && <span>New Chat</span>}
         </button>
       </div>
 
@@ -123,32 +133,39 @@ export default function Sidebar({
         {/* Agent Memory */}
         <button
           onClick={() => onNavigate('memories')}
-          className={`sidebar-item w-full ${currentView === 'memories' ? 'active' : ''}`}
+          className={`sidebar-item w-full ${collapsed ? 'justify-center px-0' : ''} ${currentView === 'memories' ? 'active' : ''}`}
+          title="Agent Memory"
         >
           <MemoriesIcon />
-          <span>Agent Memory</span>
+          {!collapsed && <span>Agent Memory</span>}
         </button>
 
         <button
           onClick={() => onNavigate('connectors')}
-          className={`sidebar-item w-full ${currentView === 'connectors' ? 'active' : ''}`}
+          className={`sidebar-item w-full ${collapsed ? 'justify-center px-0' : ''} ${currentView === 'connectors' ? 'active' : ''}`}
+          title="Connectors"
         >
           <ConnectorsIcon />
-          <span>Connectors</span>
+          {!collapsed && <span>Connectors</span>}
         </button>
 
         {/* Chat History Accordion */}
-        <div className="pt-2">
+        <div>
           <button
-            onClick={() => setChatHistoryOpen(!chatHistoryOpen)}
-            className="sidebar-item w-full"
+            onClick={() => collapsed ? onNavigate('chat') : setChatHistoryOpen(!chatHistoryOpen)}
+            className={`sidebar-item w-full ${collapsed ? 'justify-center px-0' : ''}`}
+            title="Chat History"
           >
             <ChatIcon />
-            <span>Chat History</span>
-            <ChevronIcon open={chatHistoryOpen} />
+            {!collapsed && (
+              <>
+                <span>Chat History</span>
+                <ChevronIcon open={chatHistoryOpen} />
+              </>
+            )}
           </button>
 
-          {chatHistoryOpen && (
+          {!collapsed && chatHistoryOpen && (
             <div className="ml-4 mt-1 space-y-1">
               {Object.entries(groupedChats).map(([group, groupChats]) => (
                 <div key={group}>
@@ -180,10 +197,11 @@ export default function Sidebar({
       <div className="p-4">
         <button
           onClick={() => onNavigate('settings')}
-          className={`sidebar-item w-full ${currentView === 'settings' ? 'active' : ''}`}
+          className={`sidebar-item w-full ${collapsed ? 'justify-center px-0' : ''} ${currentView === 'settings' ? 'active' : ''}`}
+          title="Settings"
         >
           <SettingsIcon />
-          <span>Settings</span>
+          {!collapsed && <span>Settings</span>}
         </button>
       </div>
     </aside>

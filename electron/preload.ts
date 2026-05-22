@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setSecure: (key: string, value: string) => ipcRenderer.invoke('storage:setSecure', key, value),
   },
 
+  // Window controls
+  windowControls: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+  },
+
   // Model catalog
   models: {
     getCatalog: () => ipcRenderer.invoke('models:getCatalog'),

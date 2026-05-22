@@ -16,6 +16,11 @@ export interface ElectronAPI {
     getSecure: (key: string) => Promise<string | null>
     setSecure: (key: string, value: string) => Promise<void>
   }
+  windowControls: {
+    minimize: () => Promise<void>
+    toggleMaximize: () => Promise<void>
+    close: () => Promise<void>
+  }
   models: {
     getCatalog: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
     refresh: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>

@@ -69,18 +69,7 @@ export interface MemoryStore {
   version: number // for future migrations
 }
 
-export const defaultUserMemoryMarkdown = `# smile:D User Memory
-
-## Standing Instructions
-- Add durable instructions that should shape every agent response.
-- Keep domain-specific rules here only when they apply across sessions.
-
-## Writing Style
-- Match the user's direct, product-focused tone.
-
-## Workspace Conventions
-- Add stable workspace rules here when they should always affect the agent's behavior.
-`
+export const defaultUserMemoryMarkdown = ''
 
 // Default empty memory store
 export const defaultMemoryStore: MemoryStore = {

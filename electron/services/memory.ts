@@ -47,18 +47,7 @@ interface MemoryStore {
   version: number
 }
 
-const DEFAULT_USER_MARKDOWN = `# smile:D User Memory
-
-## Standing Instructions
-- Add durable instructions that should shape every agent response.
-- Keep domain-specific rules here only when they apply across sessions.
-
-## Lexicon & Style
-- Match the user's direct, product-focused tone.
-
-## Workspace Conventions
-- Add stable workspace rules here when they should always affect the agent's behavior.
-`
+const DEFAULT_USER_MARKDOWN = ''
 
 const DEFAULT_MEMORY: MemoryStore = {
   userMarkdown: DEFAULT_USER_MARKDOWN,
@@ -473,26 +462,19 @@ export class MemoryService {
       for (const note of parsed.vocabularyNotes) addUnique(lexicon, note)
     }
 
-    const lines = ['# smile:D User Memory', '']
-    lines.push('## Standing Instructions')
+    const lines: string[] = []
     if (standing.length > 0) {
+      lines.push('## Standing Instructions')
       for (const item of standing) lines.push(`- ${item}`)
-    } else {
-      lines.push('- Add durable instructions that should shape every agent response.')
-      lines.push('- Keep domain-specific rules here only when they apply across sessions.')
     }
 
-    lines.push('', '## Lexicon & Style')
     if (lexicon.length > 0) {
+      if (lines.length > 0) lines.push('')
+      lines.push('## Lexicon & Style')
       for (const item of lexicon) lines.push(`- ${item}`)
-    } else {
-      lines.push("- Match the user's direct, product-focused tone.")
     }
 
-    lines.push('', '## Workspace Conventions')
-    lines.push("- Add stable workspace rules here when they should always affect the agent's behavior.")
-    lines.push('')
-    return lines.join('\n')
+    return lines.join('\n').trim()
   }
 
   private parseEntriesFromMarkdown(content: string, source: 'learned' | 'user' = 'user'): MemoryEntry[] {

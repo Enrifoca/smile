@@ -221,7 +221,7 @@ export default function ChatMessage({ message, onApproveAction, onRejectAction, 
           {part.split('\n').map((line, j) => {
             line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             line = line.replace(/\*(.*?)\*/g, '<em>$1</em>')
-            line = line.replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>')
+            line = line.replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm">$1</code>')
             line = line.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" class="text-neutral-700 hover:underline" target="_blank">$1</a>')
             if (line.startsWith('- ') || line.startsWith('• ')) {
               return (
