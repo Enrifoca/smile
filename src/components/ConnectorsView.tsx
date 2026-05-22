@@ -1,285 +1,173 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useElectron } from '../hooks/useElectron'
-
-interface ConnectorProject {
-  id: string
-  key: string
-  name: string
-  projectTypeKey: string
-  avatarUrl?: string
-  avatarUrls?: Record<string, string>
-}
-
-type ConnectorId = 'jira'
-
-const connectorCatalog: Array<{
-  id: ConnectorId
-  name: string
-  description: string
-  status: 'available'
-}> = [
-  {
-    id: 'jira',
-    name: 'Jira',
-    description: 'Example connector module for Atlassian work tracking.',
-    status: 'available',
-  },
-]
-
-export default function ConnectorsView() {
-  const [selectedConnector, setSelectedConnector] = useState<ConnectorId | null>(null)
-  const [search, setSearch] = useState('')
-  const [mcpConnected, setMcpConnected] = useState(false)
-  const [mcpConnecting, setMcpConnecting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [projects, setProjects] = useState<ConnectorProject[]>([])
-  const [selectedProjectKeys, setSelectedProjectKeys] = useState<Set<string>>(new Set())
-  const [loadingProjects, setLoadingProjects] = useState(false)
-  const [savingProjects, setSavingProjects] = useState(false)
-
-  const { mcp, jiraMetadata } = useElectron()
-
-  useEffect(() => {
-    loadConnectorState()
-  }, [])
-
-  const filteredCatalog = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return connectorCatalog
-    return connectorCatalog.filter(connector =>
-      connector.name.toLowerCase().includes(query) ||
-      connector.description.toLowerCase().includes(query)
-    )
-  }, [search])
-
-  const connectedConnectors = mcpConnected
-    ? connectorCatalog.filter(connector => connector.id === 'jira')
-    : []
-
-  async function loadConnectorState() {
-    try {
-      const [status, metadata] = await Promise.all([
-        mcp.status(),
-        jiraMetadata.get(),
-      ])
-      setMcpConnected(status.connected)
-      setSelectedProjectKeys(new Set(metadata.monitoredProjects.map(project => project.key)))
-      if (metadata.monitoredProjects.length > 0) {
-        setProjects(metadata.monitoredProjects)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load connector state')
-    }
-  }
-
-  async function connectJira() {
-    setMcpConnecting(true)
-    setError(null)
-    try {
-      const result = await mcp.connect({ forceReauth: true })
-      if (!result.success) {
-        setError(result.error || 'Failed to connect connector')
-        return
-      }
-      setMcpConnected(true)
-      await loadProjects()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect connector')
-    } finally {
-      setMcpConnecting(false)
-    }
-  }
-
-  async function loadProjects() {
-    setLoadingProjects(true)
-    setError(null)
-    try {
-      const result = await mcp.getProjects()
-      if (!result.success || !Array.isArray(result.data)) {
-        setError(result.error || 'Failed to load projects')
-        return
-      }
-      setProjects(result.data as ConnectorProject[])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load projects')
-    } finally {
-      setLoadingProjects(false)
-    }
-  }
-
-  async function saveProjects() {
-    setSavingProjects(true)
-    setError(null)
-    try {
-      const selected = projects.filter(project => selectedProjectKeys.has(project.key))
-      await jiraMetadata.setMonitoredProjects(selected.map(project => ({
-        id: project.id,
-        key: project.key,
-        name: project.name,
-        projectTypeKey: project.projectTypeKey,
-        avatarUrl: project.avatarUrls?.['48x48'] || project.avatarUrl,
-      })))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save projects')
-    } finally {
-      setSavingProjects(false)
-    }
-  }
-
-  function toggleProject(projectKey: string) {
-    setSelectedProjectKeys(prev => {
-      const next = new Set(prev)
-      if (next.has(projectKey)) next.delete(projectKey)
-      else next.add(projectKey)
-      return next
-    })
-  }
-
-  if (selectedConnector === 'jira') {
-    return (
-      <div className="h-full overflow-y-auto bg-white">
-        <div className="max-w-3xl px-10 py-8 space-y-8">
-          <button
-            onClick={() => setSelectedConnector(null)}
-            className="text-sm underline underline-offset-4"
-          >
-            Connected/Jira
-          </button>
-
-          <section className="space-y-4">
-            <div>
-              <h1 className="text-xl font-medium text-neutral-950">Atlassian connection</h1>
-              <p className="text-sm text-neutral-500 mt-1">
-                This connector is intentionally isolated from the core framework.
-              </p>
-            </div>
-
-            <button
-              onClick={connectJira}
-              disabled={mcpConnecting}
-              className="min-w-44 rounded-xl border-2 border-neutral-950 px-6 py-3 text-sm font-medium hover:bg-neutral-950 hover:text-white disabled:opacity-50"
-            >
-              {mcpConnecting ? 'Connecting...' : mcpConnected ? 'Reconnect to Atlassian' : 'Connect to Atlassian'}
-            </button>
-          </section>
-
-          <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-medium text-neutral-950">Monitored projects</h2>
-                <p className="text-sm text-neutral-500">Optional connector-specific scope.</p>
-              </div>
-              <button
-                onClick={loadProjects}
-                disabled={!mcpConnected || loadingProjects}
-                className="rounded-xl border border-neutral-950 px-4 py-2 text-sm hover:bg-neutral-950 hover:text-white disabled:opacity-50"
-              >
-                {loadingProjects ? 'Loading...' : 'Load projects'}
-              </button>
-            </div>
-
-            <div className="rounded-2xl border-2 border-neutral-950 p-3">
-              {projects.length === 0 ? (
-                <p className="px-2 py-6 text-center text-sm text-neutral-500">
-                  Connect and load projects to select a scope.
-                </p>
-              ) : (
-                <div className="max-h-72 space-y-2 overflow-y-auto">
-                  {projects.map(project => (
-                    <label
-                      key={project.id}
-                      className="flex cursor-pointer items-center gap-3 rounded-xl border border-neutral-200 p-3 hover:border-neutral-950"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedProjectKeys.has(project.key)}
-                        onChange={() => toggleProject(project.key)}
-                      />
-                      <span className="font-medium">{project.name}</span>
-                      <span className="text-sm text-neutral-500">{project.key}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={saveProjects}
-              disabled={savingProjects || projects.length === 0}
-              className="rounded-xl bg-neutral-950 px-5 py-2.5 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
-            >
-              {savingProjects ? 'Saving...' : 'Save selected projects'}
-            </button>
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-lg font-medium text-neutral-950">Connector notes</h2>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {['System prompt extension', 'Read/write tool registration', 'Human approval prompts'].map(item => (
-                <div key={item} className="rounded-2xl border border-neutral-950 p-4 text-sm">
-                  {item}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {error && (
-            <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="h-full overflow-y-auto bg-white">
-      <div className="max-w-5xl px-10 py-8 space-y-8">
-        <section>
-          <h1 className="text-xl font-medium text-neutral-950">Connected</h1>
-          <div className="mt-5 flex flex-wrap gap-4">
-            {connectedConnectors.length === 0 ? (
-              <p className="text-sm text-neutral-500">No connectors connected yet.</p>
-            ) : (
-              connectedConnectors.map(connector => (
-                <button
-                  key={connector.id}
-                  onClick={() => setSelectedConnector(connector.id)}
-                  className="flex h-24 w-24 items-center justify-center rounded-2xl border-2 border-neutral-950 text-sm font-medium hover:bg-neutral-950 hover:text-white"
-                >
-                  {connector.name}
-                </button>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="space-y-4">
-          <h2 className="text-xl font-medium text-neutral-950">Catalog</h2>
-          <input
-            value={search}
-            onChange={event => setSearch(event.target.value)}
-            placeholder="Search"
-            className="w-full rounded-lg border-2 border-neutral-950 px-4 py-2"
-          />
-
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
-            {filteredCatalog.map(connector => (
-              <button
-                key={connector.id}
-                onClick={() => setSelectedConnector(connector.id)}
-                className="flex h-24 items-center justify-center rounded-2xl border-2 border-neutral-950 px-3 text-sm font-medium hover:bg-neutral-950 hover:text-white"
-                title={connector.description}
-              >
-                {connector.name}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {error && (
-          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
-        )}
-      </div>
-    </div>
-  )
-}
+import { useEffect, useMemo, useState } from 'react'
+import { useElectron } from '../hooks/useElectron'
+import { jiraCatalogEntry, JiraSettingsView } from '../connectors/jira/ui'
+
+const CONNECTOR_LOADING_MIN_MS = 700
+
+const connectorCatalog = [jiraCatalogEntry]
+
+type ConnectorId = (typeof connectorCatalog)[number]['id']
+
+function ConnectorCard({
+  connector,
+  onClick,
+}: {
+  connector: (typeof connectorCatalog)[number]
+  onClick: () => void
+}) {
+  const Icon = connector.Icon
+
+  return (
+    <button
+      onClick={onClick}
+      className="connector-card"
+      title={connector.description}
+    >
+      <Icon />
+      <span>{connector.name}</span>
+    </button>
+  )
+}
+
+function ConnectorDetailView({
+  connectorId,
+  onBack,
+  onConnectionChange,
+}: {
+  connectorId: ConnectorId
+  onBack: () => void
+  onConnectionChange: (connected: boolean) => void
+}) {
+  switch (connectorId) {
+    case 'jira':
+      return <JiraSettingsView onBack={onBack} onConnectionChange={onConnectionChange} />
+    default:
+      return null
+  }
+}
+
+export default function ConnectorsView() {
+  const [selectedConnector, setSelectedConnector] = useState<ConnectorId | null>(null)
+  const [search, setSearch] = useState('')
+  const [mcpConnected, setMcpConnected] = useState(false)
+  const [loadingConnectorState, setLoadingConnectorState] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const { mcp } = useElectron()
+
+  useEffect(() => {
+    void loadConnectorState()
+
+    const cleanup = mcp.onConnectionStateChange((state) => {
+      const connected = state.state === 'connected'
+      setMcpConnected(connected)
+      setLoadingConnectorState(state.state === 'connecting')
+    })
+
+    return cleanup
+  }, [])
+
+  const filteredCatalog = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return connectorCatalog
+    return connectorCatalog.filter(connector =>
+      connector.name.toLowerCase().includes(query) ||
+      connector.description.toLowerCase().includes(query)
+    )
+  }, [search])
+
+  const connectedConnectors = mcpConnected
+    ? connectorCatalog.filter(connector => connector.id === 'jira')
+    : []
+
+  async function loadConnectorState() {
+    setLoadingConnectorState(true)
+    const startedAt = Date.now()
+    let keepLoadingForConnection = false
+    try {
+      const [status, connectionState] = await Promise.all([
+        mcp.status(),
+        mcp.getConnectionState(),
+      ])
+      setMcpConnected(status.connected || connectionState.connected)
+      keepLoadingForConnection = connectionState.state === 'connecting'
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load connector state')
+    } finally {
+      if (!keepLoadingForConnection) {
+        const elapsed = Date.now() - startedAt
+        const remaining = Math.max(0, CONNECTOR_LOADING_MIN_MS - elapsed)
+        window.setTimeout(() => setLoadingConnectorState(false), remaining)
+      }
+    }
+  }
+
+  if (selectedConnector) {
+    return (
+      <ConnectorDetailView
+        connectorId={selectedConnector}
+        onBack={() => setSelectedConnector(null)}
+        onConnectionChange={setMcpConnected}
+      />
+    )
+  }
+
+  return (
+    <div className="h-full overflow-y-auto bg-white">
+      <div className="content-shell page-shell space-y-8">
+        <section>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-medium text-neutral-950">Connected</h1>
+            {loadingConnectorState && (
+              <div className="flex items-center gap-2 text-sm text-neutral-500">
+                <div
+                  className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-950"
+                  aria-label="Loading connected connectors"
+                  title="Loading connected connectors"
+                />
+                <span>Checking...</span>
+              </div>
+            )}
+          </div>
+          <div className="mt-5 flex flex-wrap gap-4">
+            {!loadingConnectorState && connectedConnectors.length === 0 ? (
+              <p className="text-sm text-neutral-500">No connectors connected yet.</p>
+            ) : (
+              connectedConnectors.map(connector => (
+                <ConnectorCard
+                  key={connector.id}
+                  connector={connector}
+                  onClick={() => setSelectedConnector(connector.id)}
+                />
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-xl font-medium text-neutral-950">Catalog</h2>
+          <input
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder="Search"
+            className="w-full rounded-lg border-2 border-neutral-950 px-4 py-2"
+          />
+
+          <div className="flex flex-wrap gap-4">
+            {filteredCatalog.map(connector => (
+              <ConnectorCard
+                key={connector.id}
+                connector={connector}
+                onClick={() => setSelectedConnector(connector.id)}
+              />
+            ))}
+          </div>
+        </section>
+
+        {error && (
+          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        )}
+      </div>
+    </div>
+  )
+}

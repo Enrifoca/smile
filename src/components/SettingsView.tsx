@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useElectron } from '../hooks/useElectron'
+import { UserProfile } from '../agent/types'
 import {
   AIConfig,
   AIProvider,
@@ -16,15 +17,6 @@ import {
   getBundledProviderRole,
 } from '../shared/modelCatalog'
 
-interface JiraProject {
-  id: string
-  key: string
-  name: string
-  projectTypeKey: string
-  avatarUrl?: string
-  avatarUrls?: Record<string, string>
-}
-
 interface SettingsViewProps {
   onResetOnboarding: () => void
 }
@@ -35,21 +27,9 @@ const CheckIcon = () => (
   </svg>
 )
 
-const XIcon = () => (
-  <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-  </svg>
-)
-
 const FolderIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-  </svg>
-)
-
-const LinkIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
   </svg>
 )
 
@@ -59,6 +39,20 @@ const RefreshIcon = () => (
   </svg>
 )
 
+const defaultUserProfile: UserProfile = {
+  style: 'balanced',
+  verbosity: 'balanced',
+  tone: 'balanced',
+  writingPatterns: {
+    commonPhrases: [],
+    taskFormat: '',
+    commentStyle: '',
+  },
+  focusProjects: [],
+  confirmAllConnectorActions: true,
+  onboardingCompleted: true,
+}
+
 export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   const [aiConfig, setAIConfig] = useState<AIConfig | null>(null)
   const [workspace, setWorkspace] = useState<string | null>(null)
@@ -67,6 +61,9 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   // Agent behavior
   const [maxIterations, setMaxIterations] = useState<number>(10)
   const [savingMaxIter, setSavingMaxIter] = useState(false)
+  const [agentProfile, setAgentProfile] = useState<UserProfile>(defaultUserProfile)
+  const [savingAgentProfile, setSavingAgentProfile] = useState(false)
+  const [agentProfileSaveStatus, setAgentProfileSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
   // Reasoning model
   const [reasoningForm, setReasoningForm] = useState({
@@ -89,18 +86,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   const [savingOcr, setSavingOcr] = useState(false)
   const [ocrSaveStatus, setOcrSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
-  // MCP state
-  const [mcpConnected, setMcpConnected] = useState(false)
-  const [mcpConnecting, setMcpConnecting] = useState(false)
-  const [mcpError, setMcpError] = useState<string | null>(null)
-  
-  // Monitored projects
-  const [monitoredProjects, setMonitoredProjects] = useState<JiraProject[]>([])
-  const [allProjects, setAllProjects] = useState<JiraProject[]>([])
-  const [showProjectSelector, setShowProjectSelector] = useState(false)
-  const [selectedProjectKeys, setSelectedProjectKeys] = useState<Set<string>>(new Set())
-  const [loadingProjects, setLoadingProjects] = useState(false)
-  
   // Form state
   const [aiForm, setAIForm] = useState({
     provider: 'openai' as AIProvider,
@@ -108,30 +93,11 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     model: '',
   })
   
-  // Jira API token for attachments (REST API)
-  const [jiraApiForm, setJiraApiForm] = useState({
-    baseUrl: '',
-    email: '',
-    apiToken: '',
-  })
-  const [hasJiraApiToken, setHasJiraApiToken] = useState(false)
-
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null)
   const [refreshingModels, setRefreshingModels] = useState(false)
   const [modelRefreshStatus, setModelRefreshStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
-  const { storage, models: modelCatalogAPI, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
-
-  const normalizeJiraSiteUrl = (url: string) => url.trim().replace(/\/+$/, '').toLowerCase()
-
-  const emptyJiraMetadata = {
-    monitoredProjects: [],
-    projectMetadata: {},
-    standardFields: [],
-    users: [],
-    lastSynced: null,
-    syncedProjects: [],
-  }
+  const { storage, models: modelCatalogAPI, file } = useElectron()
 
   useEffect(() => {
     loadSettings()
@@ -167,17 +133,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     try {
       await loadModelCatalog()
 
-      // Check MCP connection status
-      const mcpStatus = await mcp.status()
-      setMcpConnected(mcpStatus.connected)
-
-      // Load monitored projects
-      const metadata = await jiraMetadataAPI.get()
-      if (metadata.monitoredProjects) {
-        setMonitoredProjects(metadata.monitoredProjects)
-        setSelectedProjectKeys(new Set(metadata.monitoredProjects.map(p => p.key)))
-      }
-
       // Load AI config
       const aiConfigStr = await storage.getSecure('aiConfig')
       if (aiConfigStr) {
@@ -197,6 +152,18 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
       // Load agent behavior settings
       const savedMaxIter = await storage.get('agentMaxIterations') as number | null
       if (savedMaxIter !== null && savedMaxIter !== undefined) setMaxIterations(savedMaxIter)
+
+      const savedProfile = await storage.get('userProfile') as Partial<UserProfile> | null
+      if (savedProfile) {
+        setAgentProfile({
+          ...defaultUserProfile,
+          ...savedProfile,
+          writingPatterns: {
+            ...defaultUserProfile.writingPatterns,
+            ...savedProfile.writingPatterns,
+          },
+        })
+      }
 
       // Load reasoning model config (migrates legacy plannerConfig)
       const reasoningConfigStr = await storage.getSecure('reasoningConfig')
@@ -224,130 +191,8 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
         })
       }
 
-      // Load Jira API config (for attachments)
-      const jiraConfigStr = await storage.getSecure('jiraApiConfig')
-      if (jiraConfigStr) {
-        const jiraConfig = JSON.parse(jiraConfigStr)
-        setHasJiraApiToken(true)
-        setJiraApiForm({
-          baseUrl: jiraConfig.baseUrl || '',
-          email: jiraConfig.email || '',
-          apiToken: '••••••••',
-        })
-      }
     } catch (error) {
       console.error('Failed to load settings:', error)
-    }
-  }
-
-  // MCP Connection handlers
-  const handleMCPConnect = async () => {
-    setMcpConnecting(true)
-    setMcpError(null)
-    
-    try {
-      const result = await mcp.connect({ forceReauth: true })
-      if (result.success) {
-        setMcpConnected(true)
-        // Refresh projects list
-        await loadProjects(true)
-      } else {
-        setMcpError(result.error || 'Failed to connect')
-      }
-    } catch (err) {
-      setMcpError(err instanceof Error ? err.message : 'Connection failed')
-    } finally {
-      setMcpConnecting(false)
-    }
-  }
-
-  const handleMCPDisconnect = async () => {
-    try {
-      await mcp.disconnect()
-      setMcpConnected(false)
-      setAllProjects([])
-      setMcpError(null)
-    } catch (err) {
-      console.error('Failed to disconnect:', err)
-    }
-  }
-
-  const handleMCPSwitchAccount = async () => {
-    if (!confirm('Reconnect Atlassian? This will clear smile:D\'s cached Atlassian login and open the browser so you can choose the right account.')) return
-    await handleMCPConnect()
-  }
-
-  const loadProjects = async (force = false) => {
-    if (!force && !mcpConnected) return
-    
-    setLoadingProjects(true)
-    setMcpError(null)
-    try {
-      const result = await mcp.getProjects()
-      if (result.success && Array.isArray(result.data)) {
-        setAllProjects(result.data as JiraProject[])
-      } else if (!result.success) {
-        setMcpError(result.error || 'Failed to load Jira projects')
-        setAllProjects([])
-      }
-    } catch (err) {
-      console.error('Failed to load projects:', err)
-      setMcpError(err instanceof Error ? err.message : 'Failed to load Jira projects')
-      setAllProjects([])
-    } finally {
-      setLoadingProjects(false)
-    }
-  }
-
-  const handleOpenProjectSelector = async () => {
-    await loadProjects(true)
-    setShowProjectSelector(true)
-  }
-
-  const toggleProject = (key: string) => {
-    const newSelected = new Set(selectedProjectKeys)
-    if (newSelected.has(key)) {
-      newSelected.delete(key)
-    } else {
-      newSelected.add(key)
-    }
-    setSelectedProjectKeys(newSelected)
-  }
-
-  const saveMonitoredProjects = async () => {
-    setIsSaving(true)
-    try {
-      const selected = allProjects.filter(p => selectedProjectKeys.has(p.key))
-      await jiraMetadataAPI.setMonitoredProjects(selected.map(p => ({
-        id: p.id,
-        key: p.key,
-        name: p.name,
-        projectTypeKey: p.projectTypeKey,
-        avatarUrl: p.avatarUrls?.['48x48'] || p.avatarUrl
-      })))
-      setMonitoredProjects(selected)
-      setShowProjectSelector(false)
-      
-      // Sync ALL metadata for selected projects (issue types, fields, users)
-      if (selected.length > 0) {
-        const result = await mcp.syncAllMetadata(selected.map(p => p.key))
-        
-        if (result.success && result.metadata) {
-          const syncedMetadata = result.metadata as {
-            projects: Record<string, unknown>
-            users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>
-          }
-          
-          // Save users if found
-          if (syncedMetadata.users && syncedMetadata.users.length > 0) {
-            await jiraMetadataAPI.setUsers(syncedMetadata.users)
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Failed to save projects:', err)
-    } finally {
-      setIsSaving(false)
     }
   }
 
@@ -459,6 +304,44 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     }
   }
 
+  const saveAgentProfile = async (nextProfile: UserProfile) => {
+    setSavingAgentProfile(true)
+    setAgentProfileSaveStatus('idle')
+    try {
+      await storage.set('userProfile', nextProfile)
+      setAgentProfile(nextProfile)
+      setAgentProfileSaveStatus('success')
+      setTimeout(() => setAgentProfileSaveStatus('idle'), 2000)
+    } catch (error) {
+      console.error('Failed to save agent profile:', error)
+      setAgentProfileSaveStatus('error')
+      setTimeout(() => setAgentProfileSaveStatus('idle'), 3000)
+    } finally {
+      setSavingAgentProfile(false)
+    }
+  }
+
+  const updateAgentProfile = (updates: Partial<UserProfile>) => {
+    const nextProfile = {
+      ...agentProfile,
+      ...updates,
+    }
+    setAgentProfile(nextProfile)
+    void saveAgentProfile(nextProfile)
+  }
+
+  const updateWritingSample = (sample: string) => {
+    setAgentProfile(prev => ({
+      ...prev,
+      writingPatterns: {
+        ...prev.writingPatterns,
+        taskFormat: sample,
+        commentStyle: sample,
+      },
+    }))
+    setAgentProfileSaveStatus('idle')
+  }
+
   const selectWorkspace = async () => {
     try {
       const result = await file.selectWorkspace()
@@ -467,116 +350,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
       }
     } catch (error) {
       console.error('Failed to select workspace:', error)
-    }
-  }
-
-  const [jiraApiSaveStatus, setJiraApiSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
-  
-  const saveJiraApiConfig = async () => {
-    // Validate required fields
-    if (!jiraApiForm.baseUrl || !jiraApiForm.email) {
-      console.log('Missing baseUrl or email')
-      setJiraApiSaveStatus('error')
-      setTimeout(() => setJiraApiSaveStatus('idle'), 3000)
-      return
-    }
-    
-    // If token is masked, we need to get the existing token
-    let tokenToSave = jiraApiForm.apiToken
-    if (jiraApiForm.apiToken === '••••••••') {
-      // Load existing config to get the token
-      const existingConfig = await storage.getSecure('jiraApiConfig')
-      if (existingConfig) {
-        try {
-          const parsed = JSON.parse(existingConfig)
-          tokenToSave = parsed.apiToken
-        } catch {
-          console.error('Failed to parse existing config')
-          setJiraApiSaveStatus('error')
-          setTimeout(() => setJiraApiSaveStatus('idle'), 3000)
-          return
-        }
-      } else {
-        // No existing config and no new token entered
-        console.log('No API token provided')
-        setJiraApiSaveStatus('error')
-        setTimeout(() => setJiraApiSaveStatus('idle'), 3000)
-        return
-      }
-    }
-    
-    if (!tokenToSave) {
-      console.log('No API token to save')
-      setJiraApiSaveStatus('error')
-      setTimeout(() => setJiraApiSaveStatus('idle'), 3000)
-      return
-    }
-
-    setIsSaving(true)
-    setJiraApiSaveStatus('idle')
-    try {
-      const existingConfigStr = await storage.getSecure('jiraApiConfig')
-      let existingBaseUrl: string | null = null
-      if (existingConfigStr) {
-        try {
-          existingBaseUrl = JSON.parse(existingConfigStr).baseUrl || null
-        } catch {
-          existingBaseUrl = null
-        }
-      }
-
-      const configToSave = {
-        baseUrl: jiraApiForm.baseUrl.replace(/\/$/, ''), // Remove trailing slash
-        email: jiraApiForm.email,
-        apiToken: tokenToSave,
-      }
-      const siteChanged = !!existingBaseUrl
-        && normalizeJiraSiteUrl(existingBaseUrl) !== normalizeJiraSiteUrl(configToSave.baseUrl)
-
-      console.log('Saving Jira API config:', { baseUrl: configToSave.baseUrl, email: configToSave.email, hasToken: !!configToSave.apiToken })
-      
-      await storage.setSecure('jiraApiConfig', JSON.stringify(configToSave))
-      if (siteChanged) {
-        await jiraMetadataAPI.set(emptyJiraMetadata)
-        await mcp.disconnect()
-        setMcpConnected(false)
-        setMonitoredProjects([])
-        setSelectedProjectKeys(new Set())
-        setAllProjects([])
-        setShowProjectSelector(false)
-        setMcpError('Jira site changed. Reconnect to Atlassian, then select the projects you manage in this site.')
-      }
-
-      setHasJiraApiToken(true)
-      setJiraApiForm(prev => ({ ...prev, apiToken: '••••••••' }))
-      console.log('Jira API config saved successfully')
-      setJiraApiSaveStatus('success')
-      setTimeout(() => setJiraApiSaveStatus('idle'), 3000)
-    } catch (error) {
-      console.error('Failed to save Jira API config:', error)
-      setJiraApiSaveStatus('error')
-      setTimeout(() => setJiraApiSaveStatus('idle'), 3000)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const clearJiraApiConfig = async () => {
-    if (!confirm('Remove Jira API token? You won\'t be able to upload attachments.')) return
-    
-    try {
-      await storage.setSecure('jiraApiConfig', '')
-      await jiraMetadataAPI.set(emptyJiraMetadata)
-      await mcp.disconnect()
-      setHasJiraApiToken(false)
-      setJiraApiForm({ baseUrl: '', email: '', apiToken: '' })
-      setMcpConnected(false)
-      setMonitoredProjects([])
-      setSelectedProjectKeys(new Set())
-      setAllProjects([])
-      setMcpError(null)
-    } catch (error) {
-      console.error('Failed to clear Jira API config:', error)
     }
   }
 
@@ -599,341 +372,16 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto p-6">
+      <div className="content-shell page-shell">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">Settings</h1>
-          <p className="text-gray-500 mt-1">
-            Configure your integrations and preferences
+          <h1 className="text-xl font-medium text-neutral-950">Settings</h1>
+          <p className="text-sm text-neutral-500 mt-1">
+            Configure framework-level model, workspace, and runtime preferences.
           </p>
         </div>
 
         <div className="space-y-6">
-          {/* Atlassian Connection */}
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <LinkIcon />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-800">Atlassian Connection</h2>
-                  <p className="text-sm text-gray-500">Connect to Jira via Atlassian MCP</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {mcpConnected ? <CheckIcon /> : <XIcon />}
-                <span className={`text-sm font-medium ${mcpConnected ? 'text-green-600' : 'text-gray-500'}`}>
-                  {mcpConnected ? 'Connected' : 'Not connected'}
-                </span>
-              </div>
-            </div>
-
-            {mcpError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-700">{mcpError}</p>
-              </div>
-            )}
-
-            {mcpConnecting && (
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
-                  <p className="text-sm text-blue-700">Connecting... A browser window may open for authentication.</p>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {mcpConnected ? (
-                <>
-                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <CheckIcon />
-                      <div>
-                        <p className="font-medium text-green-800">Connected to Atlassian</p>
-                        <p className="text-sm text-green-700 mt-1">
-                          This connector can access your Jira projects securely via OAuth.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleMCPDisconnect}
-                      className="btn btn-secondary"
-                    >
-                      Disconnect
-                    </button>
-                    <button
-                      onClick={handleMCPSwitchAccount}
-                      disabled={mcpConnecting}
-                      className="btn btn-primary"
-                    >
-                      {mcpConnecting ? 'Reconnecting...' : 'Switch Account / Site'}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-gray-600">
-                    Connect your Atlassian account to allow this connector to access your Jira projects.
-                    This uses secure OAuth authentication - no API tokens needed.
-                  </p>
-                  
-                  <button
-                    onClick={handleMCPConnect}
-                    disabled={mcpConnecting}
-                    className="btn btn-primary flex items-center gap-2"
-                  >
-                    <LinkIcon />
-                    {mcpConnecting ? 'Connecting...' : 'Connect to Atlassian'}
-                  </button>
-                </>
-              )}
-            </div>
-          </section>
-
-          {/* Monitored Projects */}
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-800">Monitored Projects</h2>
-                <p className="text-sm text-gray-500">Projects this connector will expose to the agent</p>
-              </div>
-              {mcpConnected && (
-                <button
-                  onClick={handleOpenProjectSelector}
-                  disabled={loadingProjects}
-                  className="btn btn-secondary flex items-center gap-2"
-                >
-                  {loadingProjects ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-600 border-t-transparent"></div>
-                      Loading...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshIcon />
-                      {monitoredProjects.length > 0 ? 'Change' : 'Select Projects'}
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-
-            {!mcpConnected ? (
-              <p className="text-sm text-gray-500 italic">
-                Connect to Atlassian first to select projects.
-              </p>
-            ) : monitoredProjects.length === 0 ? (
-              <p className="text-sm text-gray-500 italic">
-                No projects selected. Click "Select Projects" to choose which Jira projects this connector should expose.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {monitoredProjects.map(project => (
-                  <div
-                    key={project.id}
-                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
-                  >
-                    {project.avatarUrl && (
-                      <img src={project.avatarUrl} alt="" className="w-6 h-6 rounded" />
-                    )}
-                    <div>
-                      <span className="font-medium text-gray-900">{project.name}</span>
-                      <span className="text-sm text-gray-500 ml-2">({project.key})</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Project Selector Modal */}
-            {showProjectSelector && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
-                  <div className="p-4 border-b border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-800">Select Projects to Monitor</h3>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Choose which Jira projects this connector should expose
-                    </p>
-                  </div>
-                  
-                  <div className="flex-1 overflow-y-auto p-4">
-                    <div className="flex items-center justify-between mb-3 text-sm">
-                      <span className="text-gray-600">
-                        {selectedProjectKeys.size} of {allProjects.length} selected
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setSelectedProjectKeys(new Set(allProjects.map(p => p.key)))}
-                          className="text-neutral-700 hover:underline"
-                        >
-                          Select all
-                        </button>
-                        <span className="text-gray-300">|</span>
-                        <button
-                          onClick={() => setSelectedProjectKeys(new Set())}
-                          className="text-neutral-700 hover:underline"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      {allProjects.map(project => (
-                        <label
-                          key={project.id}
-                          className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
-                            selectedProjectKeys.has(project.key)
-                              ? 'border-neutral-500 bg-neutral-50'
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedProjectKeys.has(project.key)}
-                            onChange={() => toggleProject(project.key)}
-                            className="sr-only"
-                          />
-                          <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center transition-colors ${
-                            selectedProjectKeys.has(project.key)
-                              ? 'border-neutral-500 bg-neutral-950'
-                              : 'border-gray-300'
-                          }`}>
-                            {selectedProjectKeys.has(project.key) && (
-                              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
-                          {(project.avatarUrls?.['24x24'] || project.avatarUrl) && (
-                            <img src={project.avatarUrls?.['24x24'] || project.avatarUrl} alt="" className="w-6 h-6 rounded mr-2" />
-                          )}
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">{project.name}</div>
-                            <div className="text-xs text-gray-500">{project.key}</div>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <div className="p-4 border-t border-gray-200 flex gap-3">
-                    <button
-                      onClick={() => setShowProjectSelector(false)}
-                      className="flex-1 btn btn-secondary"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={saveMonitoredProjects}
-                      disabled={isSaving}
-                      className="flex-1 btn btn-primary"
-                    >
-                      {isSaving ? 'Saving...' : 'Save Selection'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-
-          {/* Jira API Token for Attachments */}
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-800">Jira API Token</h2>
-                <p className="text-sm text-gray-500">Required for uploading attachments to Jira</p>
-              </div>
-              {hasJiraApiToken && (
-                <div className="flex items-center gap-2">
-                  <CheckIcon />
-                  <span className="text-sm font-medium text-green-600">Configured</span>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-              <p className="text-sm text-amber-800">
-                <strong>Why is this needed?</strong> The Atlassian MCP doesn't support file uploads. 
-                To attach images/files to Jira issues, we need a separate API token.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Jira Site URL
-                </label>
-                <input
-                  type="text"
-                  value={jiraApiForm.baseUrl}
-                  onChange={(e) => setJiraApiForm({ ...jiraApiForm, baseUrl: e.target.value })}
-                  placeholder="https://your-domain.atlassian.net"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={jiraApiForm.email}
-                  onChange={(e) => setJiraApiForm({ ...jiraApiForm, email: e.target.value })}
-                  placeholder="your-email@example.com"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  API Token
-                </label>
-                <input
-                  type="password"
-                  value={jiraApiForm.apiToken}
-                  onChange={(e) => setJiraApiForm({ ...jiraApiForm, apiToken: e.target.value })}
-                  onFocus={() => jiraApiForm.apiToken === '••••••••' && setJiraApiForm({ ...jiraApiForm, apiToken: '' })}
-                  placeholder="Your Jira API token"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Get your token from <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" className="text-neutral-700 hover:underline">Atlassian Account Settings</a>
-                </p>
-              </div>
-
-              <div className="flex gap-3 items-center">
-                <button
-                  onClick={saveJiraApiConfig}
-                  disabled={isSaving || !jiraApiForm.baseUrl || !jiraApiForm.email || (!jiraApiForm.apiToken && !hasJiraApiToken)}
-                  className="btn btn-primary"
-                >
-                  {isSaving ? 'Saving...' : 'Save'}
-                </button>
-                {hasJiraApiToken && (
-                  <button
-                    onClick={clearJiraApiConfig}
-                    className="btn btn-secondary"
-                  >
-                    Remove
-                  </button>
-                )}
-                {jiraApiSaveStatus === 'success' && (
-                  <span className="text-sm text-green-600 font-medium">Saved successfully!</span>
-                )}
-                {jiraApiSaveStatus === 'error' && (
-                  <span className="text-sm text-red-600 font-medium">Failed to save. Check all fields.</span>
-                )}
-              </div>
-            </div>
-          </section>
-
           {/* AI Configuration */}
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-4">
@@ -1040,8 +488,8 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
             <p className="text-sm text-gray-500 mb-2">
               A dedicated model for complex, multi-step tasks. When configured, it takes over automatically whenever the agent needs to plan deeply, such as analyzing documents, creating multiple connector records, or reasoning through ambiguous requests.
             </p>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-5">
-              <p className="text-xs text-blue-800">
+            <div className="snippet-info mb-5">
+              <p className="text-xs">
                 <strong>Best picks:</strong> Claude 3.7 Sonnet (extended thinking), o4-mini / o3-mini (OpenAI reasoning), or DeepSeek-R1 on Groq (free, native chain-of-thought). If you leave this empty, the main model handles everything.
               </p>
             </div>
@@ -1142,8 +590,8 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
               A specialist model for scanned PDFs and image-based documents. When configured, the agent will automatically use OCR if normal PDF text extraction returns nothing or unreadable text.
             </p>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-5">
-              <p className="text-xs text-amber-800">
+            <div className="snippet-info mb-5">
+              <p className="text-xs">
                 <strong>Provider notes:</strong> Mistral uses the official OCR API. DeepSeek uses the DeepSeek-OCR model through DeepInfra, so use a DeepInfra API token for that option.
               </p>
             </div>
@@ -1232,6 +680,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
             <h2 className="text-lg font-semibold text-gray-800 mb-1">Agent Behavior</h2>
             <p className="text-sm text-gray-500 mb-5">Control how the agent processes your requests.</p>
 
+            <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-medium text-gray-800">Max iterations per request</h3>
@@ -1258,6 +707,117 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 </select>
                 {savingMaxIter && <span className="text-xs text-gray-400">Saving…</span>}
               </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-5 space-y-5">
+              <div>
+                <h3 className="font-medium text-gray-800">Communication preferences</h3>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  These are the same behavior settings collected during onboarding.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Communication Style
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['technical', 'balanced', 'conversational'] as const).map((style) => (
+                    <button
+                      key={style}
+                      onClick={() => updateAgentProfile({ style })}
+                      disabled={savingAgentProfile}
+                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
+                        agentProfile.style === style
+                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {style}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Response Length
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['concise', 'balanced', 'detailed'] as const).map((verbosity) => (
+                    <button
+                      key={verbosity}
+                      onClick={() => updateAgentProfile({ verbosity })}
+                      disabled={savingAgentProfile}
+                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
+                        agentProfile.verbosity === verbosity
+                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {verbosity}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tone
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['formal', 'balanced', 'casual'] as const).map((tone) => (
+                    <button
+                      key={tone}
+                      onClick={() => updateAgentProfile({ tone })}
+                      disabled={savingAgentProfile}
+                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
+                        agentProfile.tone === tone
+                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {tone}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="flex items-start justify-between gap-4 rounded-xl border border-gray-200 p-4">
+                <div>
+                  <span className="font-medium text-gray-800">Confirm connector write actions</span>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Ask before the agent creates, edits, sends, uploads, or otherwise writes through a connector.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={agentProfile.confirmAllConnectorActions}
+                  onChange={event => updateAgentProfile({ confirmAllConnectorActions: event.target.checked })}
+                  disabled={savingAgentProfile}
+                  className="mt-1"
+                />
+              </label>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Writing Sample
+                </label>
+                <textarea
+                  value={agentProfile.writingPatterns.taskFormat}
+                  onChange={event => updateWritingSample(event.target.value)}
+                  onBlur={() => saveAgentProfile(agentProfile)}
+                  placeholder="Paste a sample of how you typically write tasks, comments, emails, or other work output..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent h-24 resize-none"
+                />
+              </div>
+
+              <div className="h-5">
+                {savingAgentProfile && <span className="text-xs text-gray-400">Saving behavior settings…</span>}
+                {agentProfileSaveStatus === 'success' && <span className="text-xs text-green-600">Behavior settings saved</span>}
+                {agentProfileSaveStatus === 'error' && <span className="text-xs text-red-600">Could not save behavior settings</span>}
+              </div>
+            </div>
             </div>
           </section>
 
@@ -1291,14 +851,12 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   </p>
                 </div>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (confirm('Are you sure? This will delete all your data including credentials and chat history.')) {
-                      // Clear all storage
-                      storage.set('chatHistory', [])
-                      storage.set('userProfile', null)
-                      storage.setSecure('jiraConfig', '')
-                      storage.setSecure('aiConfig', '')
-                      window.location.reload()
+                      await storage.set('chatHistory', [])
+                      await storage.set('userProfile', null)
+                      await storage.setSecure('aiConfig', '')
+                      onResetOnboarding()
                     }
                   }}
                   className="btn btn-danger"

@@ -8,18 +8,7 @@ const TrashIcon = () => (
   </svg>
 )
 
-const defaultUserMarkdown = `# smile:D User Memory
-
-## Standing Instructions
-- Add durable instructions that should shape every agent response.
-- Keep domain-specific rules here only when they apply across sessions.
-
-## Writing Style
-- Match the user's direct, product-focused tone.
-
-## Workspace Conventions
-- Add stable workspace rules here when they should always affect the agent's behavior.
-`
+const defaultUserMarkdown = ''
 
 const defaultMemory: MemoryStore = {
   userMarkdown: defaultUserMarkdown,
@@ -48,7 +37,7 @@ export default function MemoriesView() {
       if (result.success && result.data) {
         const loadedMemory = result.data as MemoryStore
         setMemory(loadedMemory)
-        setUserMemoryDraft(loadedMemory.userMarkdown || defaultUserMarkdown)
+        setUserMemoryDraft(loadedMemory.userMarkdown || '')
       }
     } catch (error) {
       console.error('Failed to load memories:', error)
@@ -111,40 +100,41 @@ export default function MemoriesView() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <div className="content-shell page-shell space-y-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Memory</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-xl font-medium text-neutral-950">Memory</h1>
+          <p className="text-sm text-neutral-500 mt-1">
             User Memory is loaded before every response. Learned Notes are lower-priority hints.
           </p>
         </div>
 
-        <section className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+        <section className="bg-white rounded-2xl border-2 border-neutral-950 p-5 space-y-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800">User Memory</h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <h2 className="text-lg font-medium text-neutral-950">User Memory</h2>
+            <p className="text-sm text-neutral-500 mt-1">
               Edit this Markdown to control what the agent should always remember and follow.
             </p>
           </div>
 
           <textarea
             value={userMemoryDraft}
+            placeholder="Add durable instructions, preferences, and workspace conventions here..."
             onChange={(e) => {
               setUserMemoryDraft(e.target.value)
               setUserMemoryStatus('idle')
             }}
-            className="w-full min-h-[420px] px-4 py-3 border border-gray-200 rounded-xl font-mono text-sm leading-relaxed resize-y focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
+            className="w-full min-h-[420px] px-4 py-3 border-2 border-neutral-950 rounded-xl text-sm leading-relaxed resize-y focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
             spellCheck={false}
           />
 
           <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-neutral-500">
               Saved to <code className="bg-gray-100 px-1 py-0.5 rounded">.smile/memories/user.md</code>
             </p>
             <button
               onClick={handleSaveUserMemory}
               disabled={userMemoryStatus === 'saving'}
-              className="px-4 py-2 text-sm bg-neutral-950 text-white rounded-lg hover:bg-neutral-700 disabled:opacity-50"
+              className="px-5 py-2.5 text-sm bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 disabled:opacity-50"
             >
               {userMemoryStatus === 'saving' ? 'Saving...' : userMemoryStatus === 'saved' ? 'Saved' : 'Save Memory'}
             </button>
@@ -154,10 +144,10 @@ export default function MemoriesView() {
           )}
         </section>
 
-        <section className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <section className="bg-white rounded-2xl border-2 border-neutral-950 p-5 space-y-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800">Learned Notes</h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <h2 className="text-lg font-medium text-neutral-950">Learned Notes</h2>
+            <p className="text-sm text-neutral-500 mt-1">
               Notes the agent saved automatically. They never override User Memory.
             </p>
           </div>

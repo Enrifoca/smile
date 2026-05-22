@@ -24,6 +24,8 @@ smile:D is a framework for building vertical AI agents in a desktop app.
 - Connector modules: `src/connectors/<id>`
 - Desktop services: `electron/services`
 - Connectors UI: `src/components/ConnectorsView.tsx`
+- Connector setup UI modules: `src/components/connectors/ConnectorSettingsModules.tsx` (guide: `src/components/connectors/README.md`)
+- Connector settings pages: `src/connectors/<id>/ui/` (Jira example: `src/connectors/jira/ui/`)
 - Memory: `.smile/memories` in the selected workspace
 
 ## Coding Guidelines

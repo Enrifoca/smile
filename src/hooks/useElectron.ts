@@ -39,6 +39,20 @@ export function useElectron() {
     }, []),
   }
 
+  const windowControls = {
+    minimize: useCallback(async () => {
+      return api.windowControls.minimize()
+    }, []),
+
+    toggleMaximize: useCallback(async () => {
+      return api.windowControls.toggleMaximize()
+    }, []),
+
+    close: useCallback(async () => {
+      return api.windowControls.close()
+    }, []),
+  }
+
   // Jira operations
   const jira = {
     configure: useCallback(async (config: { baseUrl: string; email: string; apiToken: string }) => {
@@ -381,6 +395,7 @@ export function useElectron() {
 
   return {
     storage,
+    windowControls,
     models,
     jira,
     file,

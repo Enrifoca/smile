@@ -249,6 +249,21 @@ ipcMain.handle('storage:setSecure', async (_, key: string, value: string) => {
   return storageService.setSecure(key, value)
 })
 
+// Window controls
+ipcMain.handle('window:minimize', async () => {
+  mainWindow?.minimize()
+})
+
+ipcMain.handle('window:toggleMaximize', async () => {
+  if (!mainWindow) return
+  if (mainWindow.isMaximized()) mainWindow.unmaximize()
+  else mainWindow.maximize()
+})
+
+ipcMain.handle('window:close', async () => {
+  mainWindow?.close()
+})
+
 // Model catalog
 ipcMain.handle('models:getCatalog', async () => {
   if (!modelCatalogService) return { success: false, error: 'Model catalog not initialized' }
@@ -633,6 +648,7 @@ ipcMain.handle('mcp:disconnect', async () => {
   stopMcpKeepAlive()
   sendMcpConnectionState('disconnected')
   storageService.setJiraConnectionMode(null)
+  storageService.setMonitoredProjects([])
   if (mcpService) {
     mcpService.disconnect()
     mcpService = null
