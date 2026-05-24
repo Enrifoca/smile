@@ -93,7 +93,9 @@ export class FileService {
         return { success: false, error: 'OCR completed but did not return readable text.' }
       }
 
-      const pageInfo = `[PDF OCR: ${pageCount} page${pageCount !== 1 ? 's' : ''}]\n\n`
+      const pageInfo = pageCount > 0
+        ? `[PDF OCR: ${pageCount} page${pageCount !== 1 ? 's' : ''}]\n\n`
+        : '[PDF OCR]\n\n'
       return { success: true, data: pageInfo + text }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'OCR failed'
@@ -219,17 +221,24 @@ export class FileService {
             const ocrResult = await this.extractPdfWithOcr(buffer, parsed.numpages)
             if (ocrResult.success) return ocrResult
 
-            // Text is mostly non-printable — warn the agent clearly so it
-            // doesn't waste iterations trying to interpret garbled content.
-            const warning = `[WARNING: PDF text extraction quality is poor (${Math.round(printableRatio * 100)}% readable). `
-              + `The font encoding in this PDF is not standard. The extracted text below may contain garbled characters. `
-              + `Inform the user that this specific PDF cannot be read automatically and ask them to provide the content as plain text or a different file format.]\n\n`
-            return { success: true, data: pageInfo + warning + text }
+            return {
+              success: false,
+              error: `PDF text extraction quality is poor (${Math.round(printableRatio * 100)}% readable). `
+                + 'Call file_read_ocr on the same path to read it with the OCR model.',
+            }
           }
 
           return { success: true, data: pageInfo + text }
         } catch (pdfErr) {
-          return { success: false, error: `Failed to parse PDF: ${pdfErr instanceof Error ? pdfErr.message : 'unknown error'}` }
+          const ocrResult = await this.extractPdfWithOcr(buffer, 0)
+          if (ocrResult.success) return ocrResult
+
+          const parseMessage = pdfErr instanceof Error ? pdfErr.message : 'unknown error'
+          return {
+            success: false,
+            error: `Failed to parse PDF (${parseMessage}). `
+              + (ocrResult.error || 'Call file_read_ocr on the same path to read it with the OCR model.'),
+          }
         }
       }
 

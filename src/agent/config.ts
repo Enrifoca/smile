@@ -1,6 +1,9 @@
 import { Message, PendingAction, UserProfile } from './types'
 import { MemoryStore } from '../types/memory'
 import { ConnectorRuntime } from '../connectors/types'
+import { ConnectorScope } from '../connectors/registry'
+import { SourceMemoryLeafInput } from '../memory/sourceTypes'
+import type { AIStreamProgressEvent } from '../shared/streamProgress'
 
 export interface AIResponse {
   content: string
@@ -14,12 +17,16 @@ export interface AIResponse {
 export interface AgentConfig {
   userProfile: UserProfile | null
   connectors?: ConnectorRuntime[]
+  monitoredScopes?: ConnectorScope[]
   memory?: MemoryStore | null
   loadMemory?: () => Promise<MemoryStore | null>
+  appendSourceMemory?: (leaf: SourceMemoryLeafInput) => Promise<void>
   maxIterations?: number
   onMessage: (message: Message) => void
   onUpdateMessage?: (id: string, content: string, isStreaming: boolean) => void
   onPendingAction: (action: PendingAction) => void
+  /** Live status line while the agent is working (null clears it) */
+  onAgentStatus?: (status: string | null) => void
   executeFileTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeMemoryTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   callAI: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
@@ -30,12 +37,14 @@ export interface AgentConfig {
   callAIStream?: (
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     tools: unknown[] | undefined,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    onProgress?: (event: AIStreamProgressEvent) => void,
   ) => Promise<{ success: boolean; data?: AIResponse; error?: string }>
   callAIReasoning?: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{ success: boolean; data?: AIResponse; error?: string }>
   callAIReasoningStream?: (
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     tools: unknown[] | undefined,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    onProgress?: (event: AIStreamProgressEvent) => void,
   ) => Promise<{ success: boolean; data?: AIResponse; error?: string }>
 }

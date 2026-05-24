@@ -20,8 +20,9 @@
  * Docs: https://github.com/geelen/mcp-remote
  */
 
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, ChildProcess, execFile, execFileSync } from 'child_process'
 import { EventEmitter } from 'events'
+import { promisify } from 'util'
 import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
@@ -30,6 +31,11 @@ import * as crypto from 'crypto'
 // Use the correct MCP endpoint (HTTP transport, not SSE)
 const MCP_SERVER_URL = 'https://mcp.atlassian.com/v1/mcp'
 const MCP_SERVER_HASH = crypto.createHash('md5').update(MCP_SERVER_URL).digest('hex')
+const MCP_OAUTH_CALLBACK_PORT = 3736
+const SMILE_MCP_CALLBACK_PORT = 43736
+const MCP_CONNECT_TIMEOUT_MS = 120000
+
+const execFileAsync = promisify(execFile)
 
 // Keep smile:D auth isolated from other mcp-remote clients so switching accounts
 // can clear this connector's OAuth state without touching unrelated tools.
@@ -95,6 +101,9 @@ export class AtlassianMCPService extends EventEmitter {
   private pendingRequests: Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }> = new Map()
   private requestId: number = 0
   private outputBuffer: string = ''
+  private connectQueue: Promise<unknown> = Promise.resolve()
+  private activeProxyPid: number | null = null
+  private connectInProgress = false
 
   /**
    * Write debug log
@@ -119,61 +128,171 @@ export class AtlassianMCPService extends EventEmitter {
    * This starts the mcp-remote proxy that handles the OAuth flow
    */
   async connect(options: { forceReauth?: boolean } = {}): Promise<{ success: boolean; error?: string }> {
+    const run = () => this.connectInternal(options)
+    const result = this.connectQueue.then(run, run)
+    this.connectQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private async connectInternal(options: { forceReauth?: boolean } = {}): Promise<{ success: boolean; error?: string }> {
+    if (this.connectInProgress) {
+      return {
+        success: false,
+        error: 'Connection already in progress. Complete authorization in the browser or wait a moment.',
+      }
+    }
+
+    this.connectInProgress = true
+    try {
     if (options.forceReauth) {
       this.debugLog('Force reauth requested; clearing smile:D MCP auth cache')
-      this.clearAuthCache()
+      await this.clearAuthCache()
     }
 
     // If already connected, return success
-    if (this.isConnected && this.mcpProxy) {
+    if (this.isConnected && this.mcpProxy && !options.forceReauth) {
       this.debugLog('Already connected, reusing existing connection')
       return { success: true }
     }
 
-    // Clean up any existing process
+    // Clean up any existing process and wait for OAuth callback port to release
     if (this.mcpProxy) {
       this.debugLog('Cleaning up existing process before reconnecting')
-      this.mcpProxy.kill()
-      this.mcpProxy = null
+      await this.destroyProxy()
     }
 
-    try {
-      this.debugLog(`Starting mcp-remote with URL: ${MCP_SERVER_URL}`)
-      
-      const isWindows = process.platform === 'win32'
-      
-      // On Windows, we need to use shell: true for npx to work properly
-      // On other platforms, we can spawn directly
-      const spawnOptions = {
-        stdio: ['pipe', 'pipe', 'pipe'] as const,
-        shell: isWindows,  // Windows requires shell for npx
-        windowsHide: true,  // Hide the console window on Windows
-        env: {
-          ...process.env,
-          PATH: process.env.PATH,
-          MCP_REMOTE_CONFIG_DIR: MCP_AUTH_DIR
+    const maxAttempts = 3
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        this.debugLog(`Retrying MCP connect (${attempt}/${maxAttempts}) after callback port conflict`)
+        await new Promise(resolve => setTimeout(resolve, 2500))
+      }
+
+      await this.ensureOAuthEnvironmentClean(Boolean(options.forceReauth) || attempt > 1)
+
+      try {
+        const result = await this.startProxyAndInitialize(Boolean(options.forceReauth))
+        if (result.success || !this.isPortBusyError(result.error) || attempt === maxAttempts) {
+          return result
+        }
+        await this.destroyProxy()
+      } catch (error) {
+        await this.destroyProxy()
+        if (attempt === maxAttempts) {
+          this.debugLog(`Connection error: ${error instanceof Error ? error.message : String(error)}`)
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to connect to Atlassian MCP',
+          }
         }
       }
-      this.debugLog(`Using MCP_REMOTE_CONFIG_DIR: ${MCP_AUTH_DIR}`)
-      
-      // The mcp-remote proxy handles the OAuth flow
-      // User will be prompted in browser to authorize
-      // Using -y to auto-accept install, and --debug for verbose logging
-      const args = [
-        '-y',
-        'mcp-remote@latest',
-        MCP_SERVER_URL,
-        '--transport', 'http-first',
-        '--debug',
-        '--auth-timeout', '120'  // 2 minutes for OAuth flow
-      ]
-      
-      this.debugLog(`Spawn command: npx ${args.join(' ')}`)
-      this.debugLog(`Using shell: ${isWindows}`)
-      
-      this.mcpProxy = spawn('npx', args, spawnOptions)
+    }
 
-      this.debugLog(`Spawned mcp-remote process with PID: ${this.mcpProxy.pid}`)
+    return { success: false, error: 'Failed to connect to Atlassian MCP after multiple attempts.' }
+    } finally {
+      this.connectInProgress = false
+    }
+  }
+
+  private isProxyReadySignal(text: string): boolean {
+    const lower = text.toLowerCase()
+    return lower.includes('proxy established successfully')
+      || lower.includes('local stdio server running')
+  }
+
+  private isAuthCompleteSignal(text: string): boolean {
+    const lower = text.toLowerCase()
+    if (this.isProxyReadySignal(text)) return true
+    if (lower.includes('authentication successful') || lower.includes('authenticated successfully')) return true
+    if (lower.includes('authorization completed successfully')) return true
+    if (lower.includes('oauth callback received')) return true
+    return false
+  }
+
+  private isPortBusyError(error?: string): boolean {
+    if (!error) return false
+    const lower = error.toLowerCase()
+    return lower.includes('callback port')
+      || lower.includes('eaddrinuse')
+      || lower.includes('address already in use')
+      || lower.includes('oauth callback port')
+  }
+
+  private formatProcessExitCode(code: number | null): string {
+    if (code === null) return 'unknown'
+    if (code === 4294967295 || code === -1) {
+      return 'abnormal termination'
+    }
+    return String(code)
+  }
+
+  private resolveSystemNodePath(): string | null {
+    const candidates = [
+      process.env.npm_node_execpath,
+      process.env.NODE,
+    ].filter((value): value is string => Boolean(value && fs.existsSync(value)))
+
+    if (candidates[0]) return path.resolve(candidates[0])
+
+    try {
+      const lookupCmd = process.platform === 'win32' ? 'where.exe' : 'which'
+      const lookupArg = process.platform === 'win32' ? 'node.exe' : 'node'
+      const stdout = execFileSync(lookupCmd, [lookupArg], { encoding: 'utf-8', windowsHide: true })
+      const first = stdout.split(/\r?\n/).map(line => line.trim()).find(Boolean)
+      return first && fs.existsSync(first) ? path.resolve(first) : null
+    } catch {
+      return null
+    }
+  }
+
+  private resolveMcpRunner(scriptPath: string): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
+    const args = [
+      scriptPath,
+      MCP_SERVER_URL,
+      String(SMILE_MCP_CALLBACK_PORT),
+      '--transport', 'http-first',
+      '--debug',
+      '--auth-timeout', '120',
+    ]
+    const baseEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: process.env.PATH,
+      MCP_REMOTE_CONFIG_DIR: MCP_AUTH_DIR,
+    }
+
+    const systemNode = this.resolveSystemNodePath()
+    if (systemNode) {
+      this.debugLog(`Using system Node for mcp-remote: ${systemNode}`)
+      return { command: systemNode, args, env: baseEnv }
+    }
+
+    this.debugLog(`Using Electron-as-Node for mcp-remote: ${process.execPath}`)
+    return {
+      command: process.execPath,
+      args,
+      env: { ...baseEnv, ELECTRON_RUN_AS_NODE: '1' },
+    }
+  }
+
+  private async startProxyAndInitialize(requireFreshAuth = false): Promise<{ success: boolean; error?: string }> {
+    try {
+      this.debugLog(`Starting mcp-remote with URL: ${MCP_SERVER_URL}`)
+      this.debugLog(`Using MCP_REMOTE_CONFIG_DIR: ${MCP_AUTH_DIR}`)
+
+      const scriptPath = this.resolveMcpRemoteScript()
+      const runner = this.resolveMcpRunner(scriptPath)
+      const spawnOptions = {
+        stdio: ['pipe', 'pipe', 'pipe'] as const,
+        shell: false,
+        windowsHide: true,
+        env: runner.env,
+      }
+
+      this.debugLog(`Spawn command: ${runner.command} ${runner.args.join(' ')}`)
+
+      this.mcpProxy = spawn(runner.command, runner.args, spawnOptions)
+      this.activeProxyPid = this.mcpProxy.pid ?? null
+      this.debugLog(`Spawned mcp-remote process with PID: ${this.activeProxyPid ?? 'unknown'}`)
 
       // Handle stdout (responses from MCP)
       this.mcpProxy.stdout?.on('data', (data: Buffer) => {
@@ -194,7 +313,8 @@ export class AtlassianMCPService extends EventEmitter {
           text.includes('Opening browser') ||
           text.includes('Please authorize this client by visiting:') ||
           text.includes('Browser opened automatically') ||
-          text.includes('Authentication required')
+          text.includes('Authentication required') ||
+          text.includes('Waiting for auth code from callback server')
         ) {
           this.emit('oauth-started')
           this.debugLog('OAuth flow detected - browser should open')
@@ -232,29 +352,36 @@ export class AtlassianMCPService extends EventEmitter {
 
       // Wait for the MCP proxy to be ready
       // The proxy sends a JSON-RPC response when it's ready
-      const connectionResult = await this.waitForConnection()
+      const connectionResult = await this.waitForConnection(requireFreshAuth)
+      if (!connectionResult.success) {
+        await this.destroyProxy()
+        return connectionResult
+      }
       
       if (connectionResult.success) {
-        this.debugLog('MCP proxy started; attempting initialize handshake')
+        this.debugLog('MCP proxy ready; attempting initialize handshake')
+        // mcp-remote may still be finishing its post-OAuth reconnect when the proxy-ready signal arrives.
+        await new Promise(resolve => setTimeout(resolve, 400))
         await this.initialize()
         this.isConnected = true
 
         const workspaceValidation = await this.ensureAccessibleWorkspace()
         if (!workspaceValidation.success) {
           this.debugLog(`Workspace validation failed: ${workspaceValidation.error}`)
-          this.disconnect()
+          await this.destroyProxy()
           return { success: false, error: workspaceValidation.error }
         }
 
         this.debugLog('MCP connection established successfully')
+        return { success: true }
       }
       
       return connectionResult
     } catch (error) {
       this.debugLog(`Connection error: ${error instanceof Error ? error.message : String(error)}`)
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Failed to connect to Atlassian MCP' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to connect to Atlassian MCP',
       }
     }
   }
@@ -262,38 +389,115 @@ export class AtlassianMCPService extends EventEmitter {
   /**
    * Wait for the mcp-remote process to be ready
    */
-  private waitForConnection(): Promise<{ success: boolean; error?: string }> {
+  private waitForConnection(requireFreshAuth = false): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        this.debugLog('Connection timeout after 120 seconds')
-        resolve({ 
-          success: false, 
-          error: 'MCP connection timeout. Please ensure you complete the OAuth flow in the browser.' 
+      const proxy = this.mcpProxy
+      if (!proxy) {
+        resolve({ success: false, error: 'MCP process failed to start' })
+        return
+      }
+
+      let settled = false
+      let oauthInProgress = requireFreshAuth
+      const finish = (result: { success: boolean; error?: string }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(authTimeout)
+        clearTimeout(cachedTokenTimer)
+        proxy.stdout?.off('data', onStdout)
+        proxy.stderr?.off('data', onStderr)
+        proxy.off('exit', onExit)
+        proxy.off('error', onError)
+        resolve(result)
+      }
+
+      const authTimeout = setTimeout(() => {
+        finish({
+          success: false,
+          error: 'MCP connection timed out. Complete Atlassian authorization in the browser, then reconnect.',
         })
-      }, 120000) // 120 second timeout for OAuth flow
+      }, MCP_CONNECT_TIMEOUT_MS)
 
-      // Check for any output indicating readiness
-      const checkReady = () => {
-        // mcp-remote outputs to stderr when ready, look for connection success
-        // For now, we'll wait a bit then try to send initialize
-        setTimeout(() => {
-          clearTimeout(timeout)
-          this.debugLog('Proceeding with initialization attempt')
-          resolve({ success: true })
-        }, 5000) // Wait 5 seconds for initial setup
+      const onExit = (code: number | null) => {
+        finish({
+          success: false,
+          error: code === 1
+            ? 'MCP OAuth setup failed because the callback port was still busy. Retry in a few seconds.'
+            : `MCP process exited during setup (${this.formatProcessExitCode(code)}). Complete OAuth in the browser if it opened, then reconnect.`,
+        })
       }
 
-      // Start checking after process spawns
-      if (this.mcpProxy?.pid) {
-        checkReady()
-      } else {
-        this.mcpProxy?.on('spawn', checkReady)
+      const onError = (err: Error) => {
+        finish({ success: false, error: err.message })
       }
 
-      this.mcpProxy?.on('error', (err) => {
-        clearTimeout(timeout)
-        resolve({ success: false, error: err.message })
-      })
+      const onStderr = (data: Buffer) => {
+        const text = data.toString()
+
+        if (text.includes('EADDRINUSE') || text.includes('address already in use')) {
+          finish({
+            success: false,
+            error: 'OAuth callback port is busy from a previous Atlassian session. Retry in a few seconds.',
+          })
+          return
+        }
+
+        if (
+          text.includes('Opening browser') ||
+          text.includes('Please authorize this client by visiting:') ||
+          text.includes('Browser opened automatically') ||
+          text.includes('Authentication required') ||
+          text.includes('Waiting for auth code from callback server')
+        ) {
+          oauthInProgress = true
+        }
+
+        if (oauthInProgress) {
+          if (this.isProxyReadySignal(text)) {
+            setTimeout(() => finish({ success: true }), 400)
+          }
+          return
+        }
+
+        if (this.isAuthCompleteSignal(text)) {
+          setTimeout(() => finish({ success: true }), 250)
+        }
+      }
+
+      const onStdout = (data: Buffer) => {
+        if (settled) return
+        for (const line of data.toString().split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('{')) continue
+          try {
+            const parsed = JSON.parse(trimmed) as { result?: unknown; method?: string }
+            if (parsed.result !== undefined || parsed.method !== undefined) {
+              setTimeout(() => finish({ success: true }), 250)
+              return
+            }
+          } catch {
+            // ignore partial JSON
+          }
+        }
+      }
+
+      proxy.once('exit', onExit)
+      proxy.once('error', onError)
+      proxy.stderr?.on('data', onStderr)
+      proxy.stdout?.on('data', onStdout)
+
+      // Cached credentials can connect without opening OAuth UI.
+      const cachedTokenTimer = setTimeout(() => {
+        if (settled || oauthInProgress) return
+        if (!this.mcpProxy || this.mcpProxy.killed || this.mcpProxy.exitCode !== null) {
+          finish({
+            success: false,
+            error: 'MCP process stopped before it was ready. Retry in a few seconds.',
+          })
+          return
+        }
+        finish({ success: true })
+      }, 5000)
     })
   }
 
@@ -329,7 +533,11 @@ export class AtlassianMCPService extends EventEmitter {
         jsonrpc: '2.0',
         method: 'notifications/initialized'
       }
-      this.mcpProxy?.stdin?.write(JSON.stringify(notification) + '\n')
+      this.mcpProxy?.stdin?.write(JSON.stringify(notification) + '\n', (err) => {
+        if (err) {
+          this.debugLog(`Initialized notification write failed: ${err.message}`)
+        }
+      })
       
       this.isInitialized = true
       this.debugLog('MCP initialization complete')
@@ -342,8 +550,25 @@ export class AtlassianMCPService extends EventEmitter {
   /**
    * Send a raw request and wait for response
    */
+  private canWriteToProxy(): boolean {
+    const stdin = this.mcpProxy?.stdin
+    return Boolean(
+      this.mcpProxy &&
+      !this.mcpProxy.killed &&
+      this.mcpProxy.exitCode === null &&
+      stdin &&
+      !stdin.destroyed &&
+      stdin.writable,
+    )
+  }
+
   private sendRequest(request: object, timeoutMs: number = 60000): Promise<unknown> {
     return new Promise((resolve, reject) => {
+      if (!this.canWriteToProxy()) {
+        reject(new Error('MCP connection is not available'))
+        return
+      }
+
       const id = (request as { id?: string }).id || `req_${++this.requestId}`
       
       const timeout = setTimeout(() => {
@@ -366,35 +591,319 @@ export class AtlassianMCPService extends EventEmitter {
     })
   }
 
-  /**
-   * Disconnect from MCP
-   */
-  disconnect(): void {
-    this.debugLog('Disconnecting from MCP')
-    
-    // Clear all pending requests
+  private async forceKillProcess(proc: ChildProcess): Promise<void> {
+    if (!proc.pid) {
+      try { proc.kill() } catch { /* ignore */ }
+      return
+    }
+
+    if (process.platform === 'win32') {
+      try {
+        await execFileAsync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true })
+      } catch {
+        try { proc.kill() } catch { /* ignore */ }
+      }
+      return
+    }
+
+    try {
+      proc.kill('SIGTERM')
+    } catch {
+      try { proc.kill('SIGKILL') } catch { /* ignore */ }
+    }
+  }
+
+  private async releaseOAuthCallbackPort(port = MCP_OAUTH_CALLBACK_PORT): Promise<void> {
+    if (process.platform === 'win32') {
+      await this.killWindowsPortListeners(port)
+      return
+    }
+
+    try {
+      const { stdout } = await execFileAsync('lsof', ['-ti', `:${port}`])
+      for (const pidText of stdout.trim().split('\n')) {
+        const pid = parseInt(pidText, 10)
+        if (Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
+          try { process.kill(pid, 'SIGTERM') } catch { /* ignore */ }
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 500))
+    } catch {
+      // Port is already free.
+    }
+  }
+
+  private async killWindowsPortListeners(port: number): Promise<void> {
+    try {
+      const { stdout } = await execFileAsync('netstat', ['-ano'], { windowsHide: true })
+      const pids = new Set<number>()
+
+      for (const line of stdout.split('\n')) {
+        if (!line.includes(`:${port}`) || !line.includes('LISTENING')) continue
+        const parts = line.trim().split(/\s+/)
+        const pid = parseInt(parts[parts.length - 1], 10)
+        if (Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
+          pids.add(pid)
+        }
+      }
+
+      for (const pid of pids) {
+        this.debugLog(`Freeing OAuth callback port ${port}: killing PID ${pid}`)
+        try {
+          await execFileAsync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
+        } catch {
+          // Process may already be gone.
+        }
+      }
+
+      if (pids.size > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1500))
+      }
+    } catch (error) {
+      this.debugLog(`Port release check failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  private async destroyProxy(): Promise<void> {
+    this.debugLog('Destroying MCP proxy process')
+
     for (const [_id, { reject, timeout }] of this.pendingRequests) {
       clearTimeout(timeout)
       reject(new Error('Connection closed'))
     }
     this.pendingRequests.clear()
-    
-    if (this.mcpProxy) {
-      this.mcpProxy.kill()
-      this.mcpProxy = null
-    }
+
+    const proc = this.mcpProxy
+    this.mcpProxy = null
     this.isConnected = false
     this.isInitialized = false
     this.outputBuffer = ''
-    this.cloudId = null  // Reset cloudId on disconnect
-  }
+    this.cloudId = null
 
-  clearAuthCache(): void {
-    this.disconnect()
+    if (!proc) return
+
+    proc.stdout?.removeAllListeners('data')
+    proc.stderr?.removeAllListeners('data')
+    proc.stdin?.removeAllListeners('error')
+    proc.removeAllListeners('exit')
+    proc.removeAllListeners('error')
+    proc.removeAllListeners('spawn')
 
     try {
+      if (proc.stdin && !proc.stdin.destroyed) {
+        proc.stdin.end()
+      }
+    } catch {
+      // ignore
+    }
+
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+
+      const forceTimer = setTimeout(() => {
+        this.debugLog('Force-killing MCP proxy after timeout')
+        void this.forceKillProcess(proc).then(finish)
+      }, 8000)
+
+      proc.once('exit', () => {
+        clearTimeout(forceTimer)
+        finish()
+      })
+
+      if (proc.killed || proc.exitCode !== null) {
+        clearTimeout(forceTimer)
+        finish()
+        return
+      }
+
+      try {
+        proc.kill()
+      } catch {
+        // ignore
+      }
+    })
+
+    this.activeProxyPid = null
+  }
+
+  private resolveMcpRemoteScript(): string {
+    const roots = [
+      process.cwd(),
+      path.join(__dirname, '..', '..'),
+      path.join(__dirname, '..', '..', '..'),
+    ]
+
+    for (const root of roots) {
+      const script = path.join(root, 'node_modules', 'mcp-remote', 'dist', 'proxy.js')
+      if (fs.existsSync(script)) {
+        return path.resolve(script)
+      }
+    }
+
+    throw new Error('mcp-remote is not installed. Run npm install in the smile project and restart the app.')
+  }
+
+  private collectOAuthCallbackPorts(): number[] {
+    const ports = new Set<number>([MCP_OAUTH_CALLBACK_PORT, SMILE_MCP_CALLBACK_PORT])
+    for (const rootDir of [MCP_AUTH_DIR, LEGACY_MCP_AUTH_DIR]) {
+      ports.add(...this.readConfiguredCallbackPorts(rootDir))
+    }
+    return [...ports]
+  }
+
+  private readConfiguredCallbackPorts(rootDir: string): number[] {
+    const ports: number[] = []
+    if (!fs.existsSync(rootDir)) return ports
+
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          walk(fullPath)
+          continue
+        }
+        if (!entry.name.endsWith('_client_info.json')) continue
+        try {
+          const clientInfo = JSON.parse(fs.readFileSync(fullPath, 'utf-8')) as { redirect_uris?: string[] }
+          for (const uriText of clientInfo.redirect_uris || []) {
+            const uri = new URL(uriText)
+            if ((uri.hostname === 'localhost' || uri.hostname === '127.0.0.1') && uri.port) {
+              ports.push(parseInt(uri.port, 10))
+            }
+          }
+        } catch {
+          // ignore invalid client info
+        }
+      }
+    }
+
+    walk(rootDir)
+    return ports.filter(port => Number.isFinite(port) && port > 0)
+  }
+
+  private async ensureOAuthEnvironmentClean(forceReset: boolean): Promise<void> {
+    const ports = forceReset
+      ? this.collectOAuthCallbackPorts()
+      : [SMILE_MCP_CALLBACK_PORT, MCP_OAUTH_CALLBACK_PORT]
+
+    if (forceReset) {
+      await this.killOrphanMcpRemoteProcesses(this.activeProxyPid ? [this.activeProxyPid] : [])
+      this.removeMcpRemoteConfigDirs(MCP_AUTH_DIR)
+      this.removeMcpRemoteConfigDirs(LEGACY_MCP_AUTH_DIR)
+    }
+
+    await this.releaseOAuthCallbackPorts(ports)
+    await Promise.all(ports.map(port => this.waitForPortFree(port, forceReset ? 3000 : 1000)))
+  }
+
+  private async killOrphanMcpRemoteProcesses(excludePids: number[] = []): Promise<void> {
+    const excluded = new Set(excludePids.filter(pid => pid > 0))
+    excluded.add(process.pid)
+
+    if (process.platform === 'win32') {
+      try {
+        const { stdout } = await execFileAsync('powershell', [
+          '-NoProfile',
+          '-Command',
+          "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'node.exe' -or $_.Name -eq 'electron.exe') -and $_.CommandLine -match 'mcp-remote' } | ForEach-Object { $_.ProcessId }",
+        ], { windowsHide: true })
+
+        for (const pidText of stdout.trim().split(/\r?\n/)) {
+          const pid = parseInt(pidText.trim(), 10)
+          if (!Number.isFinite(pid) || pid <= 0 || excluded.has(pid)) continue
+          this.debugLog(`Killing orphan mcp-remote process ${pid}`)
+          try {
+            await execFileAsync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
+          } catch {
+            // Process may already be gone.
+          }
+        }
+      } catch (error) {
+        this.debugLog(`Orphan mcp-remote cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      return
+    }
+
+    try {
+      const { stdout } = await execFileAsync('pgrep', ['-f', 'mcp-remote'])
+      for (const pidText of stdout.trim().split('\n')) {
+        const pid = parseInt(pidText, 10)
+        if (Number.isFinite(pid) && pid > 0 && pid !== process.pid) {
+          try { process.kill(pid, 'SIGTERM') } catch { /* ignore */ }
+        }
+      }
+    } catch {
+      // No orphan processes found.
+    }
+  }
+
+  private async isPortInUse(port: number): Promise<boolean> {
+    if (process.platform === 'win32') {
+      try {
+        const { stdout } = await execFileAsync('netstat', ['-ano'], { windowsHide: true })
+        return stdout.split('\n').some(line => line.includes(`:${port}`) && line.includes('LISTENING'))
+      } catch {
+        return false
+      }
+    }
+
+    try {
+      const { stdout } = await execFileAsync('lsof', ['-ti', `:${port}`])
+      return stdout.trim().length > 0
+    } catch {
+      return false
+    }
+  }
+
+  private async waitForPortFree(port: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (!(await this.isPortInUse(port))) return true
+      await this.releaseOAuthCallbackPort(port)
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    return !(await this.isPortInUse(port))
+  }
+
+  private async releaseOAuthCallbackPorts(ports: number[]): Promise<void> {
+    for (const port of ports) {
+      await this.releaseOAuthCallbackPort(port)
+    }
+  }
+
+  private removeMcpRemoteConfigDirs(rootDir: string): void {
+    if (!fs.existsSync(rootDir)) return
+
+    for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith('mcp-remote-')) continue
+      const fullPath = path.join(rootDir, entry.name)
+      fs.rmSync(fullPath, { recursive: true, force: true })
+      this.debugLog(`Removed mcp-remote config directory: ${fullPath}`)
+    }
+  }
+
+  /**
+   * Disconnect from MCP
+   */
+  async disconnect(): Promise<void> {
+    this.debugLog('Disconnecting from MCP')
+    await this.destroyProxy()
+  }
+
+  async clearAuthCache(): Promise<void> {
+    await this.destroyProxy()
+
+    try {
+      this.removeMcpRemoteConfigDirs(MCP_AUTH_DIR)
+      this.removeMcpRemoteConfigDirs(LEGACY_MCP_AUTH_DIR)
       this.clearServerAuthFiles(MCP_AUTH_DIR)
       this.clearServerAuthFiles(LEGACY_MCP_AUTH_DIR)
+      await this.ensureOAuthEnvironmentClean(false)
       this.debugLog('Atlassian MCP auth cache cleared')
     } catch (error) {
       this.debugLog(`Failed to clear Atlassian MCP auth cache: ${error instanceof Error ? error.message : String(error)}`)
@@ -986,6 +1495,27 @@ export class AtlassianMCPService extends EventEmitter {
   }
 
   /**
+   * Jira REST expects object fields (e.g. priority: { name: "Low" }), not plain strings.
+   * The agent passes friendly strings; normalize before MCP.
+   */
+  private normalizeJiraAdditionalFields(fields: Record<string, unknown>): Record<string, unknown> {
+    const normalized = { ...fields }
+
+    if (typeof normalized.priority === 'string') {
+      normalized.priority = { name: normalized.priority }
+    }
+
+    if (typeof normalized.assignee === 'string') {
+      const assignee = normalized.assignee
+      if (/^[a-f0-9]{24}$/i.test(assignee)) {
+        normalized.assignee = { accountId: assignee }
+      }
+    }
+
+    return normalized
+  }
+
+  /**
    * Create a new issue
    * 
    * MCP Tool: createJiraIssue
@@ -1021,12 +1551,19 @@ export class AtlassianMCPService extends EventEmitter {
       }
       
       if (additionalFields && Object.keys(additionalFields).length > 0) {
-        args.additional_fields = additionalFields
+        args.additional_fields = this.normalizeJiraAdditionalFields(additionalFields)
       }
       
       this.debugLog(`createIssue args: ${JSON.stringify(args)}`)
       const result = await this.callTool('createJiraIssue', args)
-      return { success: true, data: result }
+      const parsedResult = this.parseToolText(result)
+      if (parsedResult.isError) {
+        return {
+          success: false,
+          error: parsedResult.error || 'Failed to create issue',
+        }
+      }
+      return { success: true, data: parsedResult.data ?? result }
     } catch (error) {
       return { 
         success: false, 

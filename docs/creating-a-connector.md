@@ -31,9 +31,28 @@ src/connectors/my-connector/
 3. Replace `tools.ts` with your connector's Zod schemas and tool definitions.
 4. Write domain behavior in `prompt.md`.
 5. Implement `runtime.ts` to call Electron IPC, an SDK, MCP, or another local service.
-6. Implement `formatters.ts` for action previews, approval copy, result compaction, cache invalidation, and special approval flows.
+6. Implement `formatters.ts` for action previews, approval copy, result compaction, cache invalidation, and special approval flows. Return `acceptanceCriteria` in `getActionConfirmation` when the user should verify specific items before approving a write.
 7. Register the runtime in `src/connectors/registry.ts`.
 8. Add connector-specific setup UI only if needed. Copy `src/connectors/jira/ui/`, compose modules from `src/components/connectors/ConnectorSettingsModules.tsx`, and register the catalog entry + detail route in `ConnectorsView.tsx`. Guides: `src/connectors/jira/ui/README.md`, `src/components/connectors/README.md`.
+9. **If the integration needs main-process transport** (OAuth, MCP, secure API keys, CORS-free HTTP): add or extend a desktop service under `electron/services/` and wire IPC. See [Electron desktop services](../electron/services/README.md).
+
+## Connector module vs desktop service
+
+Every connector needs a folder under `src/connectors/<id>/`. That is what the agent and UI import.
+
+You **may also** need a file under `electron/services/` when the provider cannot be called safely or reliably from the renderer alone. Examples in this repo:
+
+| Service | Why it exists |
+| --- | --- |
+| `electron/services/atlassian-mcp.ts` | OAuth, MCP proxy process, Jira tool calls, payload normalization |
+| `electron/services/jira.ts` | Direct REST API (alternate/legacy paths) |
+| `electron/services/jira-attachment.ts` | Binary uploads MCP does not cover |
+
+The connector's `runtime.ts` calls these through IPC (`electron.mcp.*`, etc.). It does **not** reimplement OAuth or MCP.
+
+**Full guide:** [electron/services/README.md](../electron/services/README.md) — when to create a service, what it should do, MCP vs REST patterns, and the IPC wiring checklist.
+
+Do **not** copy `atlassian-mcp.ts` for every connector. Copy the **pattern**: high-level methods, auth in main, normalize payloads, return `{ success, error }`, keep agent logic in `src/connectors/`.
 
 ## Connector Rules
 
@@ -66,6 +85,20 @@ Most connectors need one or more standard setup blocks. The modules are white-la
 - `children` — the settings content inside the panel
 
 Use connector-specific descriptions in user-facing UI. Framework docs may mention other example connectors (Semrush, Google) to illustrate patterns; do not copy those names into your connector's settings copy.
+
+## Write action confirmation
+
+Write tools pause for human approval. The agent explains the action in chat; **Accept / Refuse** buttons appear above the composer (`WriteActionConfirmModule`).
+
+Shape approval via connector formatters:
+
+| Hook / field | Purpose |
+| --- | --- |
+| `getActionConfirmation` → `approveLabel` | Primary Accept button (e.g. "Create issue") |
+| `getActionConfirmationPrompt` | Fallback chat copy when the model does not explain in prose |
+| `getActionConfirmation` → `acceptanceCriteria` | Optional checklist appended to fallback chat copy |
+
+See `src/components/chat/README.md` and Jira `formatters.ts`.
 
 ## Authentication And Token Refresh
 

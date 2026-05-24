@@ -2,6 +2,7 @@ import { ConnectorRuntime } from '../types'
 import { ElectronAPI } from '../../types/electron'
 import { JiraField, JiraMetadataStore, JiraProjectMetadata, JiraUser } from '../../types/jira'
 import { jiraConnector } from './connector'
+import { normalizeJiraIssueFields } from './fields'
 
 export function normalizeJiraMetadata(raw: Awaited<ReturnType<ElectronAPI['jiraMetadata']['get']>>): JiraMetadataStore {
   return {
@@ -57,11 +58,11 @@ export function createJiraRuntime(electron: ElectronAPI, context: JiraMetadataSt
           const summary = args.summary as string
           const description = args.description as string | undefined
           if (!projectKey || !issueTypeName || !summary) return { success: false, error: 'Project key, issue type, and summary are required.' }
-          const extra = Object.fromEntries(
+          const extra = normalizeJiraIssueFields(Object.fromEntries(
             Object.entries(args).filter(([key]) =>
               !['projectKey', 'project', 'issueTypeName', 'issueType', 'summary', 'description'].includes(key)
             )
-          )
+          ))
           return await electron.mcp.createIssue(projectKey, issueTypeName, summary, description, Object.keys(extra).length > 0 ? extra : undefined)
         }
         case 'jira_update_issue': {

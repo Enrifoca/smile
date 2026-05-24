@@ -32,7 +32,7 @@ export const jiraBatchCreateIssuesSchema = z.object({
     summary: z.string().describe('Issue summary / title'),
     description: z.string().optional().describe('Detailed description'),
     priority: z.string().optional().describe('Priority (e.g., High, Medium, Low)'),
-  })).min(1).describe('List of issues to create. All items are shown in one approval card.'),
+  })).min(1).describe('List of issues to create. All items are included in one write approval.'),
 })
 
 export const jiraCreateIssueSchema = z.object({

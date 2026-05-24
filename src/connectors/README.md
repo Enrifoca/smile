@@ -46,6 +46,14 @@ connectors/<id>/
 - Keep connector APIs out of `src/agent`.
 - Register enabled connectors through `registry.ts`.
 
+## Desktop services (optional)
+
+Connector modules live in `src/connectors/<id>/`. If the provider needs OAuth, MCP, secure API keys, or main-process HTTP, add a transport service under `electron/services/` and call it from `runtime.ts`.
+
+**When to create one, what it should do, and how to wire IPC:** [electron/services/README.md](../../electron/services/README.md)
+
+Jira example: `src/connectors/jira/runtime.ts` → `electron.mcp.*` → `electron/services/atlassian-mcp.ts`.
+
 ## Setup UI Modules
 
 Connector setup screens should reuse the modules in `src/components/connectors/ConnectorSettingsModules.tsx`:

@@ -93,7 +93,6 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     focusProjects: [],
     confirmAllConnectorActions: true,
   })
-  const [writingSample, setWritingSample] = useState('')
 
   const { storage, models: modelCatalogAPI, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
 
@@ -427,26 +426,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   // Handle style preferences and complete onboarding
   const handleStyleSubmit = async () => {
-    let nextProfile = { ...profile }
-    if (writingSample) {
-      const commonPhrases: string[] = []
-      const lowerSample = writingSample.toLowerCase()
-      if (lowerSample.includes('please')) commonPhrases.push('please')
-      if (lowerSample.includes('need to')) commonPhrases.push('need to')
-      if (lowerSample.includes('should')) commonPhrases.push('should')
-      
-      nextProfile = {
-        ...nextProfile,
-        writingPatterns: {
-          commonPhrases,
-          taskFormat: writingSample,
-          commentStyle: writingSample,
-        }
-      }
-      setProfile(nextProfile)
-    }
-
-    await handleComplete(nextProfile)
+    await handleComplete(profile)
   }
 
   // Complete onboarding
@@ -1065,18 +1045,6 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                     </button>
                   ))}
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Writing Sample (Optional)
-                </label>
-                <textarea
-                  value={writingSample}
-                  onChange={(e) => setWritingSample(e.target.value)}
-                  placeholder="Paste a sample of how you typically write Jira tasks or comments..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent h-24 resize-none"
-                />
               </div>
             </div>
 

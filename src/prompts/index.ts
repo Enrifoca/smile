@@ -1,6 +1,7 @@
 import systemPrompt from './core/system.md?raw'
 import plannerPrompt from './core/planner.md?raw'
 import { UserProfile } from '../agent/types'
+import { ConnectorScope } from '../connectors/registry'
 import { MemoryStore, formatMemoryForPrompt } from '../types/memory'
 import { renderPrompt, section } from './loader'
 
@@ -22,9 +23,8 @@ function buildWriteConfirmationMode(mode?: 'chat' | 'headless'): string {
 
   return [
     'For write operations:',
-    '- Call the tool directly with accurate, complete arguments.',
-    '- The UI automatically shows a confirmation card.',
-    '- Do not ask "Shall I proceed?" in chat. The confirmation button handles that.',
+    '- In the same turn, write a short chat message listing exactly what you will create or change (titles, targets, counts), then call the write tool.',
+    '- Accept/Refuse buttons appear above the composer. Do not ask "Shall I proceed?" — the user approves with those buttons or by typing changes in chat.',
   ].join('\n')
 }
 
@@ -32,10 +32,11 @@ export function getSystemPrompt(
   profile: UserProfile | null,
   connectorSections: string[] = [],
   memory?: MemoryStore | null,
-  mode?: 'chat' | 'headless'
+  mode?: 'chat' | 'headless',
+  monitoredScopes: ConnectorScope[] = [],
 ): string {
   const connectorContext = connectorSections.filter(Boolean).join('\n\n')
-  const memoryText = memory ? formatMemoryForPrompt(memory) : ''
+  const memoryText = memory ? formatMemoryForPrompt(memory, monitoredScopes) : ''
 
   return renderPrompt(systemPrompt, {
     writeConfirmationMode: buildWriteConfirmationMode(mode),

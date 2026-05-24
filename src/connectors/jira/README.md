@@ -17,7 +17,7 @@ This folder is the reference connector module for smile:D. Treat it as an exampl
 - Put Jira behavior in `prompt.md`, not in core prompts.
 - Put model-callable tool schemas in `tools.ts`.
 - Put user-facing approval copy and result formatting in `formatters.ts`.
-- Put desktop/API transport in `runtime.ts`.
+- Put desktop/API transport in `runtime.ts` (IPC calls). Heavy transport (OAuth, MCP, REST clients) belongs in `electron/services/` — see [electron/services/README.md](../../electron/services/README.md).
 - Do not add Jira branches to `src/agent`.
 
 ## Setup UI

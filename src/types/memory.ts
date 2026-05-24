@@ -1,9 +1,13 @@
 /**
  * Memory System Types
- * 
+ *
  * The memory system stores user-specific knowledge to help the agent
  * replicate the user's writing style and preferences.
  */
+
+import { selectLearnedNotesForPrompt } from '../memory/learnedBudget'
+import { formatActiveScopesForPrompt } from '../memory/promptSections'
+import { ConnectorScope } from '../connectors/registry'
 
 // Memory entry source
 export type MemorySource = 'learned' | 'user'
@@ -62,6 +66,8 @@ export interface MemoryStore {
   // Highest-priority, user-owned instructions. Stored as plain Markdown in
   // .smile/memories/user.md and injected before every agent response.
   userMarkdown: string
+  /** Condensed older learned notes for prompt budget (full entries remain on disk). */
+  learnedRollup: string
   general: GeneralMemory
   lexicon: LexiconMemory
   issueTypes: Record<string, IssueTypeMemory> // keyed by issue type name
@@ -74,17 +80,18 @@ export const defaultUserMemoryMarkdown = ''
 // Default empty memory store
 export const defaultMemoryStore: MemoryStore = {
   userMarkdown: defaultUserMemoryMarkdown,
+  learnedRollup: '',
   general: { entries: [] },
   lexicon: { entries: [], commonPhrases: [], vocabularyNotes: [] },
   issueTypes: {},
   lastSyncedAt: null,
-  version: 2,
+  version: 3,
 }
 
 /**
  * Format memory for the AI system prompt
  */
-export function formatMemoryForPrompt(memory: MemoryStore): string {
+export function formatMemoryForPrompt(memory: MemoryStore, monitoredScopes: ConnectorScope[] = []): string {
   if (!memory) return ''
 
   const lines: string[] = [
@@ -103,25 +110,35 @@ export function formatMemoryForPrompt(memory: MemoryStore): string {
     lines.push('')
   }
 
-  const generalEntries = (memory.general?.entries ?? []).filter(entry => entry.source === 'learned')
-  const lexiconEntries = (memory.lexicon?.entries ?? []).filter(entry => entry.source === 'learned')
-  const commonPhrases = memory.lexicon?.commonPhrases ?? []
-  const learnedNotes = [...generalEntries, ...lexiconEntries]
-  if (learnedNotes.length > 0 || commonPhrases.length > 0) {
+  const learned = selectLearnedNotesForPrompt(memory)
+  if (learned.recentLines.length > 0 || learned.rollup) {
     lines.push('### Learned Notes (Lower Priority)')
-    for (const entry of learnedNotes) {
-      lines.push(`- ${entry.content}`)
+    lines.push('Store habits and preferences only — not tool output or connector data.')
+    if (learned.rollup) {
+      lines.push('')
+      lines.push('**Archived summary (older notes):**')
+      lines.push(learned.rollup)
     }
-    if (commonPhrases.length > 0) {
-      for (const phrase of commonPhrases.slice(0, 10)) {
-        lines.push(`- Preferred phrase: "${phrase}"`)
-      }
+    if (learned.recentLines.length > 0) {
+      lines.push('')
+      lines.push('**Recent:**')
+      lines.push(...learned.recentLines)
+    }
+    if (learned.omittedCount > 0 || learned.truncatedRecent) {
+      lines.push('')
+      lines.push(`_${learned.omittedCount > 0 ? `${learned.omittedCount} older note(s)` : 'Additional notes'} available via memory_read._`)
     }
     lines.push('')
   }
 
+  const scopeSection = formatActiveScopesForPrompt(monitoredScopes)
+  if (scopeSection) {
+    lines.push(scopeSection)
+    lines.push('')
+  }
+
   // If no memories yet
-  if (lines.length <= 4) {
+  if (lines.length <= 4 && !scopeSection) {
     return ''
   }
 

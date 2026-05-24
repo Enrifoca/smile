@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useElectron } from '../../../hooks/useElectron'
+import { useActionFeedback } from '../../../hooks/useActionFeedback'
 import {
   ApiConnectionModule,
   CustomSettingsModule,
@@ -41,14 +42,15 @@ const BackIcon = () => (
 export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsViewProps) {
   const [mcpConnected, setMcpConnected] = useState(false)
   const [mcpConnecting, setMcpConnecting] = useState(false)
+  const [mcpOAuthPending, setMcpOAuthPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<JiraProject[]>([])
   const [selectedProjectKeys, setSelectedProjectKeys] = useState<Set<string>>(new Set())
   const [loadingProjects, setLoadingProjects] = useState(false)
-  const [savingProjects, setSavingProjects] = useState(false)
+  const projectsSave = useActionFeedback()
+  const jiraApiSave = useActionFeedback()
   const [jiraApiForm, setJiraApiForm] = useState({ baseUrl: '', email: '', apiToken: '' })
   const [hasJiraApiToken, setHasJiraApiToken] = useState(false)
-  const [jiraApiSaveStatus, setJiraApiSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
   const { mcp, jiraMetadata, storage } = useElectron()
 
@@ -63,11 +65,19 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
 
     const cleanup = mcp.onConnectionStateChange((state) => {
       const connected = state.state === 'connected'
+      const connecting = state.state === 'connecting'
+      const oauthPending = state.state === 'oauth_pending'
       setMcpConnected(connected)
+      setMcpConnecting(connecting || oauthPending)
+      setMcpOAuthPending(oauthPending)
       onConnectionChange?.(connected)
+      if (state.state === 'error' && state.error) {
+        setError(state.error)
+      }
       if (connected) {
+        setError(null)
         void loadSettings()
-      } else {
+      } else if (state.state === 'disconnected') {
         void clearProjectScope()
       }
     })
@@ -85,6 +95,8 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
       const connected = status.connected || connectionState.connected
       setMcpConnected(connected)
       onConnectionChange?.(connected)
+      setMcpConnecting(connectionState.state === 'connecting' || connectionState.state === 'oauth_pending')
+      setMcpOAuthPending(connectionState.state === 'oauth_pending')
 
       if (!connected) {
         if (metadata.monitoredProjects.length > 0) {
@@ -115,10 +127,10 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
   }
 
   async function connectJira() {
-    setMcpConnecting(true)
+    if (mcpConnecting) return
     setError(null)
     try {
-      const result = await mcp.connect({ forceReauth: true })
+      const result = await mcp.connect({ forceReauth: false })
       if (!result.success) {
         setError(result.error || 'Failed to connect connector')
         return
@@ -128,8 +140,6 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
       await loadProjects()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect connector')
-    } finally {
-      setMcpConnecting(false)
     }
   }
 
@@ -163,35 +173,38 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
   }
 
   async function saveProjects() {
-    if (!mcpConnected || projects.length === 0) return
+    if (!mcpConnected || projects.length === 0) {
+      projectsSave.markError()
+      return
+    }
 
-    setSavingProjects(true)
     setError(null)
-    try {
-      const selected = projects.filter(project => selectedProjectKeys.has(project.key))
-      await jiraMetadata.setMonitoredProjects(selected.map(project => ({
-        id: project.id,
-        key: project.key,
-        name: project.name,
-        projectTypeKey: project.projectTypeKey,
-        avatarUrl: project.avatarUrls?.['48x48'] || project.avatarUrl,
-      })))
-      if (selected.length > 0) {
-        const result = await mcp.syncAllMetadata(selected.map(project => project.key))
-        if (result.success && result.metadata) {
-          const syncedMetadata = result.metadata as {
-            users?: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>
-          }
-          if (syncedMetadata.users?.length) {
-            await jiraMetadata.setUsers(syncedMetadata.users)
+    await projectsSave.run(async () => {
+      try {
+        const selected = projects.filter(project => selectedProjectKeys.has(project.key))
+        await jiraMetadata.setMonitoredProjects(selected.map(project => ({
+          id: project.id,
+          key: project.key,
+          name: project.name,
+          projectTypeKey: project.projectTypeKey,
+          avatarUrl: project.avatarUrls?.['48x48'] || project.avatarUrl,
+        })))
+        if (selected.length > 0) {
+          const result = await mcp.syncAllMetadata(selected.map(project => project.key))
+          if (result.success && result.metadata) {
+            const syncedMetadata = result.metadata as {
+              users?: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>
+            }
+            if (syncedMetadata.users?.length) {
+              await jiraMetadata.setUsers(syncedMetadata.users)
+            }
           }
         }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to save projects')
+        throw err
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save projects')
-    } finally {
-      setSavingProjects(false)
-    }
+    })
   }
 
   function toggleProject(projectKey: string) {
@@ -204,10 +217,8 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
   }
 
   async function saveJiraApiConfig() {
-    setJiraApiSaveStatus('idle')
-
     if (!jiraApiForm.baseUrl || !jiraApiForm.email) {
-      setJiraApiSaveStatus('error')
+      jiraApiSave.markError()
       return
     }
 
@@ -215,49 +226,46 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
     if (apiToken === '••••••••') {
       const existingConfig = await storage.getSecure('jiraApiConfig')
       if (!existingConfig) {
-        setJiraApiSaveStatus('error')
+        jiraApiSave.markError()
         return
       }
       apiToken = JSON.parse(existingConfig).apiToken
     }
 
     if (!apiToken) {
-      setJiraApiSaveStatus('error')
+      jiraApiSave.markError()
       return
     }
 
-    setSavingProjects(true)
-    try {
-      const existingConfigStr = await storage.getSecure('jiraApiConfig')
-      const existingBaseUrl = existingConfigStr ? JSON.parse(existingConfigStr).baseUrl || null : null
-      const configToSave = {
-        baseUrl: jiraApiForm.baseUrl.replace(/\/$/, ''),
-        email: jiraApiForm.email,
-        apiToken,
-      }
-      const siteChanged = !!existingBaseUrl
-        && normalizeJiraSiteUrl(existingBaseUrl) !== normalizeJiraSiteUrl(configToSave.baseUrl)
+    await jiraApiSave.run(async () => {
+      try {
+        const existingConfigStr = await storage.getSecure('jiraApiConfig')
+        const existingBaseUrl = existingConfigStr ? JSON.parse(existingConfigStr).baseUrl || null : null
+        const configToSave = {
+          baseUrl: jiraApiForm.baseUrl.replace(/\/$/, ''),
+          email: jiraApiForm.email,
+          apiToken,
+        }
+        const siteChanged = !!existingBaseUrl
+          && normalizeJiraSiteUrl(existingBaseUrl) !== normalizeJiraSiteUrl(configToSave.baseUrl)
 
-      await storage.setSecure('jiraApiConfig', JSON.stringify(configToSave))
-      if (siteChanged) {
-        await jiraMetadata.set(emptyJiraMetadata)
-        await mcp.disconnect()
-        setMcpConnected(false)
-        onConnectionChange?.(false)
-        await clearProjectScope()
-        setError('Jira site changed. Reconnect to Atlassian, then select the projects this connector should expose.')
-      }
+        await storage.setSecure('jiraApiConfig', JSON.stringify(configToSave))
+        if (siteChanged) {
+          await jiraMetadata.set(emptyJiraMetadata)
+          await mcp.disconnect()
+          setMcpConnected(false)
+          onConnectionChange?.(false)
+          await clearProjectScope()
+          setError('Jira site changed. Reconnect to Atlassian, then select the projects this connector should expose.')
+        }
 
-      setHasJiraApiToken(true)
-      setJiraApiForm(prev => ({ ...prev, apiToken: '••••••••' }))
-      setJiraApiSaveStatus('success')
-      setTimeout(() => setJiraApiSaveStatus('idle'), 3000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save API token')
-      setJiraApiSaveStatus('error')
-    } finally {
-      setSavingProjects(false)
-    }
+        setHasJiraApiToken(true)
+        setJiraApiForm(prev => ({ ...prev, apiToken: '••••••••' }))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to save API token')
+        throw err
+      }
+    })
   }
 
   async function clearJiraApiConfig() {
@@ -299,19 +307,21 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
           description="OAuth connection used by the Jira connector for reading, creating, and updating Jira records through Atlassian MCP."
           connected={mcpConnected}
           connecting={mcpConnecting}
+          connectingLabel={mcpOAuthPending ? 'Waiting for browser...' : 'Connecting...'}
           onConnect={connectJira}
           onDisconnect={disconnectJira}
           connectLabel="Connect to Atlassian"
           reconnectLabel="Reconnect to Atlassian"
+          error={error}
         />
 
         <ApiConnectionModule
           title="Jira API connection"
           description="Optional REST API credentials for connector features Atlassian MCP does not cover, such as uploading images and videos up to 10MB per file."
           configured={hasJiraApiToken}
-          saving={savingProjects}
+          saving={jiraApiSave.saving}
           saveDisabled={!jiraApiForm.baseUrl || !jiraApiForm.email || (!jiraApiForm.apiToken && !hasJiraApiToken)}
-          saveStatus={jiraApiSaveStatus}
+          saveStatus={jiraApiSave.status}
           onSave={saveJiraApiConfig}
           onRemove={clearJiraApiConfig}
           saveLabel="Save API connection"
@@ -364,15 +374,15 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
               {loadingProjects ? 'Loading...' : 'Load projects'}
             </button>
           )}
-          footer={(
-            <button
-              onClick={saveProjects}
-              disabled={!mcpConnected || savingProjects || projects.length === 0}
-              className="rounded-xl bg-neutral-950 px-5 py-2.5 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
-            >
-              {savingProjects ? 'Saving...' : 'Save selected projects'}
-            </button>
-          )}
+          save={{
+            label: 'Save selected projects',
+            saving: projectsSave.saving,
+            saveStatus: projectsSave.status,
+            saveDisabled: !mcpConnected || projects.length === 0,
+            onSave: () => void saveProjects(),
+            successMessage: 'Projects saved',
+            errorMessage: 'Could not save projects',
+          }}
         >
           {projects.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-neutral-500">
@@ -398,10 +408,6 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
             </div>
           )}
         </CustomSettingsModule>
-
-        {error && (
-          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
-        )}
       </div>
     </div>
   )

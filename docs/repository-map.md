@@ -13,6 +13,7 @@
 - `src/prompts`: Markdown prompts and prompt assembly.
 - `src/connectors`: connector contract, registry, and connector modules.
 - `src/components`: generic React UI.
+- `src/components/ui`: shared UI kit (buttons, forms, panels, feedback).
 - `src/components/connectors`: reusable connector setup UI shells (`ConnectorSettingsModules.tsx`).
 - `src/hooks`: renderer hooks for desktop APIs.
 - `src/types`: shared TypeScript types.
@@ -23,14 +24,16 @@
 
 - `electron/main.ts`: IPC registration and service composition.
 - `electron/preload.ts`: safe bridge exposed to the renderer.
-- `electron/services`: desktop services for AI, files, memory, storage, OCR, and connector transports.
+- `electron/services`: desktop services for AI, files, memory, storage, OCR, and **connector transport** (OAuth, MCP, REST). See [electron/services/README.md](../electron/services/README.md).
 
 ## Where To Add Things
+
+See also the full documentation index in [README.md](../README.md#documentation).
 
 - New model/provider behavior: `electron/services/ai.ts` and relevant settings UI.
 - New connector tools: `src/connectors/<id>/tools.ts`.
 - New connector prompt rules: `src/connectors/<id>/prompt.md`.
-- New connector execution: `src/connectors/<id>/runtime.ts` and, if needed, Electron services.
+- New connector execution: `src/connectors/<id>/runtime.ts` and, if needed, a transport service in `electron/services/` ([guide](../electron/services/README.md)).
 - Generic agent loop behavior: `src/agent`.
 - Generic prompt behavior: `src/prompts/core`.
 - UI presentation: `src/components`.

@@ -1,5 +1,7 @@
 ﻿import { useState, useEffect } from 'react'
 import { useElectron } from '../hooks/useElectron'
+import { useActionFeedback } from '../hooks/useActionFeedback'
+import { ActionRow, Spinner } from './ui'
 import { MemoryEntry, MemoryStore } from '../types/memory'
 
 const TrashIcon = () => (
@@ -12,18 +14,19 @@ const defaultUserMarkdown = ''
 
 const defaultMemory: MemoryStore = {
   userMarkdown: defaultUserMarkdown,
+  learnedRollup: '',
   general: { entries: [] },
   lexicon: { entries: [], commonPhrases: [], vocabularyNotes: [] },
   issueTypes: {},
   lastSyncedAt: null,
-  version: 2,
+  version: 3,
 }
 
 export default function MemoriesView() {
   const [memory, setMemory] = useState<MemoryStore>(defaultMemory)
   const [isLoading, setIsLoading] = useState(true)
   const [userMemoryDraft, setUserMemoryDraft] = useState(defaultUserMarkdown)
-  const [userMemoryStatus, setUserMemoryStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const userMemorySave = useActionFeedback()
   const { memory: memoryAPI } = useElectron()
 
   useEffect(() => {
@@ -46,18 +49,12 @@ export default function MemoriesView() {
     }
   }
 
-  const handleSaveUserMemory = async () => {
-    setUserMemoryStatus('saving')
-    try {
+  const handleSaveUserMemory = () => {
+    void userMemorySave.run(async () => {
       const result = await memoryAPI.saveUserMarkdown(userMemoryDraft)
       if (!result.success) throw new Error(result.error || 'Failed to save user memory')
       setMemory(prev => ({ ...prev, userMarkdown: userMemoryDraft }))
-      setUserMemoryStatus('saved')
-      setTimeout(() => setUserMemoryStatus('idle'), 1600)
-    } catch (error) {
-      console.error('Failed to save user memory:', error)
-      setUserMemoryStatus('error')
-    }
+    })
   }
 
   const learnedNotes: Array<MemoryEntry & { kind: 'note' | 'style' }> = [
@@ -93,7 +90,7 @@ export default function MemoriesView() {
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-neutral-900 border-t-transparent"></div>
+        <Spinner size="lg" />
       </div>
     )
   }
@@ -121,27 +118,25 @@ export default function MemoriesView() {
             placeholder="Add durable instructions, preferences, and workspace conventions here..."
             onChange={(e) => {
               setUserMemoryDraft(e.target.value)
-              setUserMemoryStatus('idle')
+              userMemorySave.reset()
             }}
             className="w-full min-h-[420px] px-4 py-3 border-2 border-neutral-950 rounded-xl text-sm leading-relaxed resize-y focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
             spellCheck={false}
           />
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-neutral-500">
               Saved to <code className="bg-gray-100 px-1 py-0.5 rounded">.smile/memories/user.md</code>
             </p>
-            <button
-              onClick={handleSaveUserMemory}
-              disabled={userMemoryStatus === 'saving'}
-              className="px-5 py-2.5 text-sm bg-neutral-950 text-white rounded-xl hover:bg-neutral-700 disabled:opacity-50"
-            >
-              {userMemoryStatus === 'saving' ? 'Saving...' : userMemoryStatus === 'saved' ? 'Saved' : 'Save Memory'}
-            </button>
+            <ActionRow
+              label="Save Memory"
+              busy={userMemorySave.busy}
+              status={userMemorySave.status}
+              onAction={handleSaveUserMemory}
+              successMessage="Saved"
+              errorMessage="Could not save memory"
+            />
           </div>
-          {userMemoryStatus === 'error' && (
-            <p className="text-sm text-red-600">Could not save memory. Check the console for details.</p>
-          )}
         </section>
 
         <section className="bg-white rounded-2xl border-2 border-neutral-950 p-5 space-y-3">

@@ -7,6 +7,8 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
+import { reconcileLearnedMemoryBudget } from '../../src/memory/learnedBudget'
+import { validateLearnedNoteContent } from '../../src/memory/admission'
 
 // Memory types (duplicated here to avoid import issues in main process)
 interface MemoryEntry {
@@ -40,6 +42,7 @@ interface IssueTypeMemory {
 
 interface MemoryStore {
   userMarkdown: string
+  learnedRollup: string
   general: { entries: MemoryEntry[] }
   lexicon: { entries: MemoryEntry[]; commonPhrases: string[]; vocabularyNotes: string[] }
   issueTypes: Record<string, IssueTypeMemory>
@@ -51,11 +54,12 @@ const DEFAULT_USER_MARKDOWN = ''
 
 const DEFAULT_MEMORY: MemoryStore = {
   userMarkdown: DEFAULT_USER_MARKDOWN,
+  learnedRollup: '',
   general: { entries: [] },
   lexicon: { entries: [], commonPhrases: [], vocabularyNotes: [] },
   issueTypes: {},
   lastSyncedAt: null,
-  version: 2,
+  version: 3,
 }
 
 export class MemoryService {
@@ -146,11 +150,12 @@ export class MemoryService {
     const dir = this.getMemoriesDir()!
     const memory: MemoryStore = {
       userMarkdown: DEFAULT_USER_MARKDOWN,
+      learnedRollup: '',
       general: { entries: [] },
       lexicon: { entries: [], commonPhrases: [], vocabularyNotes: [] },
       issueTypes: {},
       lastSyncedAt: null,
-      version: 2,
+      version: 3,
     }
 
     // User-owned memory is plain Markdown and highest priority. If this file
@@ -173,6 +178,7 @@ export class MemoryService {
       memory.lexicon.entries = learned.lexicon
       memory.lexicon.commonPhrases = learned.commonPhrases
       memory.lexicon.vocabularyNotes = learned.vocabularyNotes
+      memory.learnedRollup = learned.rollup
     }
 
     // Load issue type files
@@ -205,8 +211,11 @@ export class MemoryService {
       }
     }
 
-    this.memoryCache = memory
-    return memory
+    this.memoryCache = reconcileLearnedMemoryBudget({
+      ...memory,
+      learnedRollup: memory.learnedRollup || '',
+    })
+    return this.memoryCache
   }
 
   /**
@@ -218,11 +227,12 @@ export class MemoryService {
     }
 
     const dir = this.getMemoriesDir()!
-    const normalizedMemory: MemoryStore = {
+    const normalizedMemory = reconcileLearnedMemoryBudget({
       ...memory,
       userMarkdown: memory.userMarkdown || DEFAULT_USER_MARKDOWN,
-      version: 2,
-    }
+      learnedRollup: memory.learnedRollup || '',
+      version: 3,
+    })
 
     // Save user-owned Markdown and learned notes separately.
     this.writeMarkdownFile(path.join(dir, 'user.md'), normalizedMemory.userMarkdown)
@@ -239,7 +249,7 @@ export class MemoryService {
     // Save metadata
     const meta = {
       lastSyncedAt: normalizedMemory.lastSyncedAt,
-      version: 2,
+      version: 3,
     }
     this.writeMarkdownFile(path.join(dir, '.meta.json'), JSON.stringify(meta, null, 2))
 
@@ -266,6 +276,14 @@ export class MemoryService {
    * Add a general memory entry
    */
   async addGeneralMemory(content: string, source: 'learned' | 'user' = 'learned'): Promise<boolean> {
+    if (source === 'learned') {
+      const admission = validateLearnedNoteContent(content)
+      if (!admission.ok) {
+        console.warn('[Memory] Rejected learned note:', admission.reason)
+        return false
+      }
+    }
+
     const memory = await this.getMemories()
     
     // Check if similar memory already exists
@@ -282,13 +300,21 @@ export class MemoryService {
       source,
     })
 
-    return this.saveMemories(memory)
+    return this.saveMemories(reconcileLearnedMemoryBudget(memory))
   }
 
   /**
    * Add a lexicon entry
    */
   async addLexiconEntry(content: string, source: 'learned' | 'user' = 'learned'): Promise<boolean> {
+    if (source === 'learned') {
+      const admission = validateLearnedNoteContent(content)
+      if (!admission.ok) {
+        console.warn('[Memory] Rejected learned note:', admission.reason)
+        return false
+      }
+    }
+
     const memory = await this.getMemories()
     
     const exists = memory.lexicon.entries.some(e => 
@@ -304,7 +330,7 @@ export class MemoryService {
       source,
     })
 
-    return this.saveMemories(memory)
+    return this.saveMemories(reconcileLearnedMemoryBudget(memory))
   }
 
   /**
@@ -545,15 +571,18 @@ export class MemoryService {
     lexicon: MemoryEntry[]
     commonPhrases: string[]
     vocabularyNotes: string[]
+    rollup: string
   } {
     const result = {
       general: [] as MemoryEntry[],
       lexicon: [] as MemoryEntry[],
       commonPhrases: [] as string[],
       vocabularyNotes: [] as string[],
+      rollup: '',
     }
     const lines = content.split('\n')
     let currentSection = ''
+    const rollupLines: string[] = []
 
     for (const line of lines) {
       const trimmed = line.trim()
@@ -561,6 +590,12 @@ export class MemoryService {
         currentSection = trimmed.substring(3).toLowerCase()
         continue
       }
+
+      if (currentSection.includes('archived rollup')) {
+        if (trimmed && !trimmed.startsWith('_')) rollupLines.push(trimmed)
+        continue
+      }
+
       if (!trimmed.startsWith('- ')) continue
 
       const value = trimmed.substring(2).trim()
@@ -586,6 +621,7 @@ export class MemoryService {
       }
     }
 
+    result.rollup = rollupLines.join(' ').trim()
     return result
   }
 
@@ -669,6 +705,14 @@ export class MemoryService {
     const lines = ['# Learned Memory', '']
     const learnedGeneral = memory.general.entries.filter(entry => entry.source === 'learned')
     const learnedLexicon = memory.lexicon.entries.filter(entry => entry.source === 'learned')
+
+    if (memory.learnedRollup?.trim()) {
+      lines.push('## Archived Rollup')
+      lines.push('_Condensed from older learned notes. Use memory_read for the full list._')
+      lines.push('')
+      lines.push(memory.learnedRollup.trim())
+      lines.push('')
+    }
 
     lines.push('## General Learned Notes')
     if (learnedGeneral.length > 0) {

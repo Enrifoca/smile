@@ -195,17 +195,19 @@ export function useElectron() {
     chatStream: useCallback((
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ) => {
-      return api.ai.chatStream(messages, tools, onToken)
+      return api.ai.chatStream(messages, tools, onToken, onProgress)
     }, []),
 
     chatReasoningStream: useCallback((
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ) => {
-      return api.ai.chatReasoningStream(messages, tools, onToken)
+      return api.ai.chatReasoningStream(messages, tools, onToken, onProgress)
     }, []),
   }
 
@@ -390,6 +392,24 @@ export function useElectron() {
     
     updateEntry: useCallback(async (category: 'general' | 'lexicon', id: string, content: string) => {
       return api.memory.updateEntry(category, id, content)
+    }, []),
+
+    appendSourceLeaf: useCallback(async (leaf: {
+      connectorId: string
+      scopeId: string
+      kind: 'write_outcome' | 'scope_sync' | 'user_pin'
+      toolName: string
+      summary: string
+    }) => {
+      return api.memory.appendSourceLeaf(leaf)
+    }, []),
+
+    readSource: useCallback(async (connectorId: string, scopeId: string) => {
+      return api.memory.readSource(connectorId, scopeId)
+    }, []),
+
+    listSources: useCallback(async () => {
+      return api.memory.listSources()
     }, []),
   }
 

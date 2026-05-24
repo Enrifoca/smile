@@ -12,6 +12,12 @@
   --color-muted-border: #d1d5db;
   --color-muted-text: #4b5563;
 
+  /* Feedback */
+  --color-success: #16a34a;
+  --color-error: #dc2626;
+  --action-feedback-reset-ms: 3000;
+  --save-feedback-reset-ms: var(--action-feedback-reset-ms);
+
   /* Typography */
   --font-app: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
 

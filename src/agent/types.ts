@@ -1,5 +1,9 @@
 // Agent types
 
+import type { MarkdownArtifact } from './artifacts'
+
+export type { MarkdownArtifact } from './artifacts'
+
 /** A single tool operation recorded in a tool-summary block */
 export interface ToolEntry {
   tool: string
@@ -21,8 +25,11 @@ export interface Message {
    *  - undefined / omitted → normal response bubble
    *  - 'thinking'      → "Thought for Xs" collapsible reasoning block
    *  - 'tool_summary'  → grouped tool-call summary row
+   *  - 'artifact'      → markdown report card (see artifact)
    */
-  type?: 'thinking' | 'tool_summary'
+  type?: 'thinking' | 'tool_summary' | 'artifact'
+  /** Markdown report shown as an in-chat card + modal */
+  artifact?: MarkdownArtifact
   /** Elapsed thinking time in ms (set on type:'thinking' messages) */
   thinkingMs?: number
   /** Tool operations for this round (set on type:'tool_summary' messages) */
@@ -59,6 +66,8 @@ export interface ConfirmationViewModel {
   items?: ConfirmationItem[]
   risk?: 'low' | 'medium' | 'high'
   approveLabel?: string
+  /** Optional checklist appended to fallback chat copy when the model does not explain the action */
+  acceptanceCriteria?: string[]
 }
 
 export interface PendingAction {

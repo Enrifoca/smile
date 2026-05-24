@@ -3,8 +3,14 @@ import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
 import { Agent, Message, PendingAction, UserProfile } from '../agent'
 import { MemoryStore } from '../types/memory'
-import { loadEnabledConnectors } from '../connectors/registry'
+import { validateLearnedNoteContent } from '../memory/admission'
+import { formatSourceMemoryListing, formatSourceMemoryRead } from '../memory/promptSections'
+import { SourceMemoryReadResult, SourceMemoryScopeListing } from '../memory/sourceTypes'
+import { buildReportPath, buildReportToolResult } from '../agent/artifacts'
+import { loadEnabledConnectors, ConnectorScope } from '../connectors/registry'
 import ChatMessage from './ChatMessage'
+import { Button } from './ui/Button'
+import { ChatBanner, ChatEmptyState, ChatActivityIndicator, WriteActionConfirmModule } from './chat'
 
 interface ChatViewProps {
   chatId: string | null
@@ -13,14 +19,6 @@ interface ChatViewProps {
 }
 
 type McpConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
-
-interface ManagedProject {
-  id: string
-  key: string
-  name: string
-  avatarUrl?: string
-}
-
 
 /** Returns a specific, human-readable label for a tool call based on its arguments */
 
@@ -36,23 +34,17 @@ const StopIcon = () => (
   </svg>
 )
 
-const LoadingSpinner = () => (
-  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-  </svg>
-)
-
 export default function ChatView({ chatId, onChatCreated, onOpenSettings }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [agent, setAgent] = useState<Agent | null>(null)
   const [isConfigured, setIsConfigured] = useState(false)
   const [mcpConnectionState, setMcpConnectionState] = useState<McpConnectionState>('disconnected')
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; path: string; size: number }>>([])
-  const [managedProjects, setManagedProjects] = useState<ManagedProject[]>([])
+  const [managedProjects, setManagedProjects] = useState<ConnectorScope[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Streaming content accumulator (keyed by message id)
@@ -262,19 +254,24 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
       const newAgent = new Agent({
         userProfile,
         connectors: connectors.runtimes,
+        monitoredScopes: connectors.scopes,
         memory,
         loadMemory: loadMemoryForAgent,
+        appendSourceMemory: async (leaf) => {
+          await memoryAPI.appendSourceLeaf(leaf)
+        },
         maxIterations,
         onMessage: handleNewMessage,
         onUpdateMessage: handleUpdateMessage,
         onPendingAction: handlePendingAction,
+        onAgentStatus: setAgentStatus,
         executeFileTool,
         executeMemoryTool,
         callAI: async (messages, tools) => ai.chat(messages, tools),
-        callAIStream: async (messages, tools, onToken) => ai.chatStream(messages, tools, onToken),
+        callAIStream: async (messages, tools, onToken, onProgress) => ai.chatStream(messages, tools, onToken, onProgress),
         ...(reasoningConfigured && {
           callAIReasoning: async (messages, tools) => ai.chatReasoning(messages, tools),
-          callAIReasoningStream: async (messages, tools, onToken) => ai.chatReasoningStream(messages, tools, onToken),
+          callAIReasoningStream: async (messages, tools, onToken, onProgress) => ai.chatReasoningStream(messages, tools, onToken, onProgress),
         }),
       })
 
@@ -405,18 +402,6 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
     setPendingAction(action)
   }, [])
 
-  const markPendingActionCard = useCallback((actionId: string, status: Message['pendingActionStatus']) => {
-    setMessages(prev => {
-      const newMessages = prev.map(m =>
-        m.pendingAction?.id === actionId
-          ? { ...m, pendingActionStatus: status }
-          : m
-      )
-      saveChat(newMessages)
-      return newMessages
-    })
-  }, [saveChat])
-
   const executeFileTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
       switch (name) {
@@ -424,6 +409,19 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         case 'file_read':   return await file.read(args.path as string)
         case 'file_read_ocr': return await file.readOcr(args.path as string)
         case 'file_write':  return await file.write(args.path as string, args.content as string)
+        case 'report_write': {
+          const title = String(args.title || 'Report')
+          const content = String(args.content || '')
+          const path = buildReportPath(title, args.path as string | undefined)
+          const writeResult = await file.write(path, content)
+          if (!writeResult.success) return writeResult
+          return {
+            success: true,
+            path,
+            title,
+            data: buildReportToolResult(path, title),
+          }
+        }
         case 'file_mkdir':  return await file.mkdir(args.path as string)
         case 'file_search': return await file.search(args.pattern as string, args.directory as string | undefined)
         default:            return { success: false, error: `Unknown file tool: ${name}` }
@@ -530,6 +528,11 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
           parts.push(mem.userMarkdown?.trim() || '(empty)')
           const entries = mem.general?.entries?.filter(entry => entry.source === 'learned') || []
           parts.push('\n## Learned Notes')
+          if (mem.learnedRollup?.trim()) {
+            parts.push('\n### Archived Rollup')
+            parts.push(mem.learnedRollup.trim())
+          }
+          parts.push('\n### Full entries')
           parts.push(entries.length ? entries.map(e => `- ${e.content}`).join('\n') : '(empty)')
         }
         if (section === 'all' || section === 'style' || section === 'lexicon') {
@@ -538,6 +541,31 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
           parts.push('\n## Learned Style Notes')
           parts.push(entries.length ? entries.map(e => `- ${e.content}`).join('\n') : '(empty)')
           if (phrases.length) parts.push('\n### Common Phrases\n' + phrases.map(p => `- "${p}"`).join('\n'))
+        }
+        if (section === 'source') {
+          const connectorId = String(args.connectorId || '').trim()
+          const scopeId = String(args.scopeId || '').trim()
+          if (connectorId && scopeId) {
+            const sourceResult = await memoryAPI.readSource(connectorId, scopeId)
+            if (!sourceResult.success) {
+              return { success: false, error: sourceResult.error || 'Could not read source memory' }
+            }
+            if (!sourceResult.data) {
+              return { success: true, data: `(no source memory for ${connectorId}/${scopeId} yet)` }
+            }
+            return {
+              success: true,
+              data: formatSourceMemoryRead(sourceResult.data as SourceMemoryReadResult),
+            }
+          }
+          const listResult = await memoryAPI.listSources()
+          if (!listResult.success) {
+            return { success: false, error: listResult.error || 'Could not list source memory' }
+          }
+          return {
+            success: true,
+            data: formatSourceMemoryListing((listResult.data || []) as SourceMemoryScopeListing[]),
+          }
         }
         return { success: true, data: parts.join('\n').trim() || 'Memory is empty.' }
       }
@@ -550,10 +578,18 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         const section = args.section as 'learned' | 'style' | 'general' | 'lexicon'
         const content = args.content as string
         if (!content?.trim()) return { success: false, error: 'content is required' }
+
+        const admission = validateLearnedNoteContent(content)
+        if (!admission.ok) {
+          return { success: false, error: admission.reason || 'Invalid learned note content' }
+        }
+
         if (section === 'style' || section === 'lexicon') {
-          await memoryAPI.addLexicon(content, 'learned')
+          const result = await memoryAPI.addLexicon(content, 'learned')
+          if (!result.success) return { success: false, error: result.error || 'Could not save learned note' }
         } else {
-          await memoryAPI.addGeneral(content, 'learned')
+          const result = await memoryAPI.addGeneral(content, 'learned')
+          if (!result.success) return { success: false, error: result.error || 'Could not save learned note' }
         }
         return { success: true, data: 'Saved to learned memory. Do not call memory_update again this turn. Give your final response now.' }
       }
@@ -604,6 +640,12 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
     }
   }
 
+  const refreshAgentProfile = async () => {
+    if (!agent) return
+    const userProfile = await storage.get('userProfile') as UserProfile | null
+    agent.updateUserProfile(userProfile)
+  }
+
   const handleSend = async () => {
     if (!input.trim() || isLoading || !agent) return
 
@@ -625,7 +667,6 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         if (pendingAction) {
           const actionId = pendingAction.id
           setPendingAction(null)
-          markPendingActionCard(actionId, 'cancelled')
           agent.rejectAction(actionId, { silent: true })
         }
         return
@@ -634,10 +675,12 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
       if (pendingAction) {
         await handleReiterateAction(userMessage)
       } else {
+        await refreshAgentProfile()
         await agent.processMessage(userMessage)
       }
     } finally {
       setIsLoading(false)
+      setAgentStatus(null)
     }
   }
 
@@ -652,12 +695,15 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
     if (!pendingAction || !agent) return
     const action = pendingAction
     setPendingAction(null)
-    markPendingActionCard(action.id, 'approved')
-    
+    setIsLoading(true)
+
     try {
       await agent.approveAction(action.id)
     } catch (error) {
       console.error('Failed to execute action:', error)
+    } finally {
+      setIsLoading(false)
+      setAgentStatus(null)
     }
   }
 
@@ -665,18 +711,15 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
     if (!pendingAction || !agent) return
     const actionId = pendingAction.id
     setPendingAction(null)
-    markPendingActionCard(actionId, 'cancelled')
-    agent.rejectAction(actionId, { silent: true })
+    agent.rejectAction(actionId)
   }
 
   const handleReiterateAction = async (text: string) => {
     if (!pendingAction || !agent) return
     const actionId = pendingAction.id
-    // Cancel the pending action silently (no rejection message)
     agent.rejectAction(actionId, { silent: true })
     setPendingAction(null)
-    markPendingActionCard(actionId, 'revision_requested')
-    // Send the user's reiteration as a new message so the agent can adjust
+    await refreshAgentProfile()
     await agent.processMessage(text)
   }
 
@@ -690,49 +733,37 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
           <p className="text-gray-600 mb-4">
             Go to Settings to configure the framework AI provider before starting a chat.
           </p>
-          <button
-            onClick={onOpenSettings}
-            className="btn btn-primary"
-          >
+          <Button onClick={onOpenSettings}>
             Open Settings
-          </button>
+          </Button>
         </div>
       </div>
     )
   }
 
-  // Render connection status banner
   const renderConnectionStatus = () => {
     if (mcpConnectionState === 'connected') return null
-    
+
     if (mcpConnectionState === 'connecting') {
       return (
-        <div className="bg-neutral-50 border-b border-neutral-200 px-4 py-2">
-          <div className="max-w-3xl mx-auto flex items-center gap-2 text-neutral-700 text-sm">
-            <LoadingSpinner />
-            <span>Connecting to connector...</span>
-          </div>
-        </div>
+        <ChatBanner
+          variant="info"
+          message="Connecting to connector..."
+        />
       )
     }
-    
+
     if (mcpConnectionState === 'error') {
       return (
-        <div className="bg-red-50 border-b border-red-200 px-4 py-2">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <span className="text-red-700 text-sm">Connector connection failed</span>
-            <button 
-              onClick={() => mcp.connect()}
-              className="text-sm text-red-600 hover:text-red-800 font-medium"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
+        <ChatBanner
+          variant="error"
+          message="Connector connection failed"
+          actionLabel="Retry"
+          onAction={() => mcp.connect()}
+        />
       )
     }
-    
-    // disconnected state - only show if user has configured MCP before
+
     return null
   }
 
@@ -745,50 +776,15 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
       <div className="flex-1 overflow-y-auto page-shell">
         <div className="content-shell space-y-4">
           {messages.length === 0 ? (
-            <div className="text-center py-12">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-2">
-                How can I help you today?
-              </h2>
-              <p className="text-gray-500 mb-8">
-                Ask me anything, work with your files, or use any configured connector.
-              </p>
-              <div className="grid grid-cols-2 gap-3 max-w-lg mx-auto">
-                {[
-                  'Show me open records',
-                  'Summarize this workspace',
-                  'Generate a status report',
-                  'List connected scopes',
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    className="p-3 text-sm text-left bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-neutral-300 transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ChatEmptyState onSuggestionClick={setInput} />
           ) : (
             messages.map((message) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                onApproveAction={handleApproveAction}
-                onRejectAction={handleRejectAction}
-                activePendingActionId={pendingAction?.id || null}
-              />
+              <ChatMessage key={message.id} message={message} />
             ))
           )}
 
           {isLoading && (
-            <div className="pl-11 flex items-center gap-2 text-gray-400 text-xs">
-              <div className="loading-dots">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </div>
+            <ChatActivityIndicator status={agentStatus} />
           )}
 
           <div ref={messagesEndRef} />
@@ -805,13 +801,22 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         onDrop={handleDrop}
       >
         <div className="content-shell">
+          {pendingAction && (
+            <WriteActionConfirmModule
+              action={pendingAction}
+              onApprove={handleApproveAction}
+              onReject={handleRejectAction}
+              className="mb-3"
+            />
+          )}
+
           {/* Attached Files Preview */}
           {attachedFiles.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
               {attachedFiles.map((f, index) => (
                 <div 
                   key={`${f.name}-${index}`}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg text-sm"
+                  className="ui-chat-attachment"
                 >
                   <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -833,7 +838,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
 
           {/* Drag overlay */}
           {isDragging && (
-            <div className="mb-3 p-4 border-2 border-dashed border-neutral-400 rounded-lg bg-neutral-50 text-center">
+            <div className="ui-chat-dropzone">
               <p className="text-neutral-700 font-medium">Drop files here to attach</p>
               <p className="text-sm text-neutral-500">Max 10MB per file</p>
             </div>
@@ -868,7 +873,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
               onKeyDown={handleKeyDown}
               placeholder={mcpConnectionState === 'connecting' ? 'Connecting to connector...' : 'Ask me anything...'}
               rows={1}
-              className="chat-input pl-12" 
+              className="ui-chat-input pl-12"
               disabled={isLoading || mcpConnectionState === 'connecting'}
             />
             {isLoading ? (
@@ -902,14 +907,14 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
               <div className="mt-2 flex flex-wrap gap-2">
                 {managedProjects.map(project => (
                   <button
-                    key={project.id || project.key}
+                    key={project.scopeId || project.key}
                     type="button"
                     onClick={() => {
                       const prefix = `/ "${project.name}" `
                       setInput(current => current.startsWith(prefix) ? current : `${prefix}${current}`)
                       textareaRef.current?.focus()
                     }}
-                    className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700 hover:border-neutral-300 hover:text-neutral-950"
+                    className="ui-chat-scope-chip text-xs"
                     title={`Use ${project.name} for this message`}
                   >
                     {project.avatarUrl && <img src={project.avatarUrl} alt="" className="h-4 w-4 rounded" />}
