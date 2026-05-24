@@ -13,6 +13,8 @@ import {
   getJiraScratchpadNote,
   getJiraToolEntry,
   invalidateJiraCacheAfterWrite,
+  getJiraScopeForSourceMemory,
+  buildJiraSourceMemoryLeaf,
 } from './formatters'
 
 export const jiraConnector: ConnectorDefinition<JiraMetadataStore> = {
@@ -33,5 +35,7 @@ export const jiraConnector: ConnectorDefinition<JiraMetadataStore> = {
   formatToolResultForAI: formatJiraToolResultForAI,
   getScratchpadNote: getJiraScratchpadNote,
   invalidateCacheAfterWrite: invalidateJiraCacheAfterWrite,
+  getScopeForSourceMemory: getJiraScopeForSourceMemory,
+  buildSourceMemoryLeaf: buildJiraSourceMemoryLeaf,
   approveAction: approveJiraAction,
 }

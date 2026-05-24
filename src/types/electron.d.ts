@@ -76,7 +76,8 @@ export interface ElectronAPI {
     chatStream: (
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
@@ -85,7 +86,8 @@ export interface ElectronAPI {
     chatReasoningStream: (
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
@@ -96,7 +98,7 @@ export interface ElectronAPI {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
     disconnect: () => Promise<{ success: boolean }>
     status: () => Promise<{ connected: boolean; mode: 'api' | 'mcp' | null }>
-    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'connected' | 'error'; connected: boolean }>
+    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
     getProjects: () => Promise<{ success: boolean; data?: unknown; error?: string }>
     getProjectIssueTypes: (projectKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
@@ -158,6 +160,15 @@ export interface ElectronAPI {
     deleteGeneral: (id: string) => Promise<{ success: boolean; error?: string }>
     deleteLexicon: (id: string) => Promise<{ success: boolean; error?: string }>
     updateEntry: (category: 'general' | 'lexicon', id: string, content: string) => Promise<{ success: boolean; error?: string }>
+    appendSourceLeaf: (leaf: {
+      connectorId: string
+      scopeId: string
+      kind: 'write_outcome' | 'scope_sync' | 'user_pin'
+      toolName: string
+      summary: string
+    }) => Promise<{ success: boolean; error?: string }>
+    readSource: (connectorId: string, scopeId: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
+    listSources: () => Promise<{ success: boolean; data?: unknown; error?: string }>
   }
 }
 

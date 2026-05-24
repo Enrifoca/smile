@@ -10,6 +10,8 @@ import { ModelCatalogService } from './services/model-catalog'
 import { AIConfig, ModelProvider, getDefaultModelId } from '../src/shared/modelCatalog'
 import { getAtlassianMCPService, AtlassianMCPService } from './services/atlassian-mcp'
 import { getMemoryService, MemoryService } from './services/memory'
+import { getSourceMemoryService } from './services/sourceMemory'
+import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
 import { getJiraAttachmentService, JiraAttachmentService, isJiraAttachmentConfigured } from './services/jira-attachment'
 
 // Services
@@ -24,7 +26,7 @@ let modelCatalogService: ModelCatalogService | null = null
 
 let mainWindow: BrowserWindow | null = null
 let mcpKeepAliveInterval: NodeJS.Timeout | null = null
-let mcpConnectionState: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected'
+let mcpConnectionState: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error' = 'disconnected'
 let memoryService: MemoryService | null = null
 
 // Keep-alive interval in milliseconds (10 minutes)
@@ -117,10 +119,40 @@ async function initializeServices() {
     // Initialize memory service with workspace
     memoryService = getMemoryService()
     memoryService.setWorkspace(workspace)
+    getSourceMemoryService().setWorkspace(workspace)
   }
 
   void modelCatalogService.refreshAll().catch(error => {
     console.warn('[ModelCatalog] Startup refresh failed:', error instanceof Error ? error.message : error)
+  })
+}
+
+function attachMcpServiceListeners(service: AtlassianMCPService) {
+  service.removeAllListeners('oauth-started')
+  service.removeAllListeners('disconnected')
+  service.removeAllListeners('error')
+
+  service.on('oauth-started', () => {
+    sendMcpConnectionState('oauth_pending')
+  })
+
+  service.on('disconnected', () => {
+    if (mcpConnectionState === 'connecting' || mcpConnectionState === 'oauth_pending') {
+      sendMcpConnectionState(
+        'error',
+        'MCP connection closed before setup finished. Complete OAuth in the browser if it opened, then reconnect.',
+      )
+      return
+    }
+    if (mcpConnectionState === 'connected') {
+      sendMcpConnectionState('disconnected')
+    }
+  })
+
+  service.on('error', (err: Error) => {
+    if (mcpConnectionState === 'connecting' || mcpConnectionState === 'oauth_pending') {
+      sendMcpConnectionState('error', err.message)
+    }
   })
 }
 
@@ -161,6 +193,7 @@ async function autoConnectMcp() {
 
   try {
     mcpService = getAtlassianMCPService()
+    attachMcpServiceListeners(mcpService)
     mcpService.setPreferredSiteUrl(getConfiguredJiraSiteUrl())
     const result = await mcpService.connect()
     
@@ -361,6 +394,9 @@ ipcMain.handle('file:selectWorkspace', async () => {
     const workspacePath = result.filePaths[0]
     await storageService.setWorkspacePath(workspacePath)
     fileService = new FileService(workspacePath, getConfiguredOcrService)
+    memoryService = getMemoryService()
+    memoryService.setWorkspace(workspacePath)
+    getSourceMemoryService().setWorkspace(workspacePath)
     return { success: true, path: workspacePath }
   }
   return { success: false }
@@ -582,7 +618,10 @@ ipcMain.on('ai:chat:stream', async (event, messages: Array<{ role: 'system' | 'u
       tools as Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
       (token: string) => {
         if (!event.sender.isDestroyed()) event.sender.send('ai:stream:token', token)
-      }
+      },
+      (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send('ai:stream:progress', progress)
+      },
     )
     if (!event.sender.isDestroyed()) event.sender.send('ai:stream:done', response)
   } catch (error) {
@@ -609,7 +648,10 @@ ipcMain.on('ai:reasoning:stream', async (event, messages: Array<{ role: 'system'
       tools as Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
       (token: string) => {
         if (!event.sender.isDestroyed()) event.sender.send('ai:reasoning:stream:token', token)
-      }
+      },
+      (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send('ai:reasoning:stream:progress', progress)
+      },
     )
     if (!event.sender.isDestroyed()) event.sender.send('ai:reasoning:stream:done', response)
   } catch (error) {
@@ -625,10 +667,12 @@ ipcMain.on('ai:reasoning:stream', async (event, messages: Array<{ role: 'system'
 
 ipcMain.handle('mcp:connect', async (_, options?: { forceReauth?: boolean }) => {
   try {
+    stopMcpKeepAlive()
     sendMcpConnectionState('connecting')
     mcpService = getAtlassianMCPService()
+    attachMcpServiceListeners(mcpService)
     mcpService.setPreferredSiteUrl(getConfiguredJiraSiteUrl())
-    const result = await mcpService.connect({ forceReauth: options?.forceReauth ?? true })
+    const result = await mcpService.connect({ forceReauth: options?.forceReauth ?? false })
     if (result.success) {
       storageService.setJiraConnectionMode('mcp')
       sendMcpConnectionState('connected')
@@ -650,7 +694,7 @@ ipcMain.handle('mcp:disconnect', async () => {
   storageService.setJiraConnectionMode(null)
   storageService.setMonitoredProjects([])
   if (mcpService) {
-    mcpService.disconnect()
+    await mcpService.disconnect()
     mcpService = null
   }
   return { success: true }
@@ -860,7 +904,10 @@ ipcMain.handle('memory:addGeneral', async (_, content: string, source?: 'learned
     }
   }
   try {
-    await memoryService.addGeneralMemory(content, source || 'learned')
+    const saved = await memoryService.addGeneralMemory(content, source || 'learned')
+    if (!saved) {
+      return { success: false, error: 'Learned note rejected. Save a short preference, not tool output or JSON.' }
+    }
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to add memory' }
@@ -878,7 +925,10 @@ ipcMain.handle('memory:addLexicon', async (_, content: string, source?: 'learned
     }
   }
   try {
-    await memoryService.addLexiconEntry(content, source || 'learned')
+    const saved = await memoryService.addLexiconEntry(content, source || 'learned')
+    if (!saved) {
+      return { success: false, error: 'Learned note rejected. Save a short preference, not tool output or JSON.' }
+    }
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to add lexicon' }
@@ -999,6 +1049,43 @@ ipcMain.handle('memory:updateEntry', async (_, category: 'general' | 'lexicon', 
   }
 })
 
+ipcMain.handle('memory:appendSourceLeaf', async (_, leaf: SourceMemoryLeafInput) => {
+  const workspace = await storageService.getWorkspacePath()
+  if (!workspace) return { success: false, error: 'Workspace not configured' }
+  try {
+    getSourceMemoryService().setWorkspace(workspace)
+    const saved = getSourceMemoryService().appendLeaf(leaf)
+    return saved ? { success: true } : { success: false, error: 'Failed to save source leaf' }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to save source leaf' }
+  }
+})
+
+ipcMain.handle('memory:readSource', async (_, connectorId: string, scopeId: string) => {
+  const workspace = await storageService.getWorkspacePath()
+  if (!workspace) return { success: false, error: 'Workspace not configured' }
+  try {
+    getSourceMemoryService().setWorkspace(workspace)
+    const data = getSourceMemoryService().readSource(connectorId, scopeId)
+    if (!data) return { success: true, data: null }
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to read source memory' }
+  }
+})
+
+ipcMain.handle('memory:listSources', async () => {
+  const workspace = await storageService.getWorkspacePath()
+  if (!workspace) return { success: false, error: 'Workspace not configured' }
+  try {
+    getSourceMemoryService().setWorkspace(workspace)
+    const data = getSourceMemoryService().listScopes()
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to list source memory' }
+  }
+})
+
 // App lifecycle
 app.whenReady().then(async () => {
   await initializeServices()
@@ -1025,6 +1112,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   stopMcpKeepAlive()
   if (mcpService) {
-    mcpService.disconnect()
+    void mcpService.disconnect()
   }
 })

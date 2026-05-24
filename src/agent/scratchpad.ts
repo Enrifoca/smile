@@ -21,6 +21,10 @@ export function getCoreScratchpadNote(
 
   if (toolName === 'file_list') return 'Listed workspace files'
 
+  if (toolName === 'report_write') {
+    return `Report saved: ${str(args.title)} (${str(args.path) || '.smile/reports/'})`
+  }
+
   return ''
 }
 

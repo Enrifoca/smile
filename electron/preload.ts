@@ -91,10 +91,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     chatStream: (
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ): Promise<{ success: boolean; data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }; error?: string }> => {
       return new Promise((resolve) => {
         const onTokenListener = (_: Electron.IpcRendererEvent, token: string) => onToken(token)
+        const onProgressListener = (_: Electron.IpcRendererEvent, event: { toolName: string; title?: string }) => onProgress?.(event)
         const onDone = (_: Electron.IpcRendererEvent, response: unknown) => {
           cleanup()
           resolve({ success: true, data: response as { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> } })
@@ -105,10 +107,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         }
         const cleanup = () => {
           ipcRenderer.removeListener('ai:stream:token', onTokenListener)
+          ipcRenderer.removeListener('ai:stream:progress', onProgressListener)
           ipcRenderer.removeListener('ai:stream:done', onDone)
           ipcRenderer.removeListener('ai:stream:error', onError)
         }
         ipcRenderer.on('ai:stream:token', onTokenListener)
+        ipcRenderer.on('ai:stream:progress', onProgressListener)
         ipcRenderer.on('ai:stream:done', onDone)
         ipcRenderer.on('ai:stream:error', onError)
         ipcRenderer.send('ai:chat:stream', messages, tools)
@@ -117,10 +121,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     chatReasoningStream: (
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ): Promise<{ success: boolean; data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }; error?: string }> => {
       return new Promise((resolve) => {
         const onTokenListener = (_: Electron.IpcRendererEvent, token: string) => onToken(token)
+        const onProgressListener = (_: Electron.IpcRendererEvent, event: { toolName: string; title?: string }) => onProgress?.(event)
         const onDone = (_: Electron.IpcRendererEvent, response: unknown) => {
           cleanup()
           resolve({ success: true, data: response as { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> } })
@@ -131,10 +137,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         }
         const cleanup = () => {
           ipcRenderer.removeListener('ai:reasoning:stream:token', onTokenListener)
+          ipcRenderer.removeListener('ai:reasoning:stream:progress', onProgressListener)
           ipcRenderer.removeListener('ai:reasoning:stream:done', onDone)
           ipcRenderer.removeListener('ai:reasoning:stream:error', onError)
         }
         ipcRenderer.on('ai:reasoning:stream:token', onTokenListener)
+        ipcRenderer.on('ai:reasoning:stream:progress', onProgressListener)
         ipcRenderer.on('ai:reasoning:stream:done', onDone)
         ipcRenderer.on('ai:reasoning:stream:error', onError)
         ipcRenderer.send('ai:reasoning:stream', messages, tools)
@@ -222,6 +230,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteLexicon: (id: string) => ipcRenderer.invoke('memory:deleteLexicon', id),
     updateEntry: (category: 'general' | 'lexicon', id: string, content: string) =>
       ipcRenderer.invoke('memory:updateEntry', category, id, content),
+    appendSourceLeaf: (leaf: {
+      connectorId: string
+      scopeId: string
+      kind: 'write_outcome' | 'scope_sync' | 'user_pin'
+      toolName: string
+      summary: string
+    }) => ipcRenderer.invoke('memory:appendSourceLeaf', leaf),
+    readSource: (connectorId: string, scopeId: string) =>
+      ipcRenderer.invoke('memory:readSource', connectorId, scopeId),
+    listSources: () => ipcRenderer.invoke('memory:listSources'),
   },
 })
 
@@ -287,7 +305,8 @@ export interface ElectronAPI {
     chatStream: (
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
@@ -296,7 +315,8 @@ export interface ElectronAPI {
     chatReasoningStream: (
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
-      onToken: (token: string) => void
+      onToken: (token: string) => void,
+      onProgress?: (event: { toolName: string; title?: string }) => void,
     ) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
@@ -307,7 +327,7 @@ export interface ElectronAPI {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
     disconnect: () => Promise<{ success: boolean }>
     status: () => Promise<{ connected: boolean; mode: 'api' | 'mcp' | null }>
-    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'connected' | 'error'; connected: boolean }>
+    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
     getProjects: () => Promise<{ success: boolean; data?: unknown; error?: string }>
     getProjectIssueTypes: (projectKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
@@ -369,6 +389,15 @@ export interface ElectronAPI {
     deleteGeneral: (id: string) => Promise<{ success: boolean; error?: string }>
     deleteLexicon: (id: string) => Promise<{ success: boolean; error?: string }>
     updateEntry: (category: 'general' | 'lexicon', id: string, content: string) => Promise<{ success: boolean; error?: string }>
+    appendSourceLeaf: (leaf: {
+      connectorId: string
+      scopeId: string
+      kind: 'write_outcome' | 'scope_sync' | 'user_pin'
+      toolName: string
+      summary: string
+    }) => Promise<{ success: boolean; error?: string }>
+    readSource: (connectorId: string, scopeId: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
+    listSources: () => Promise<{ success: boolean; data?: unknown; error?: string }>
   }
 }
 

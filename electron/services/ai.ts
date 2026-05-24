@@ -1,5 +1,9 @@
 // AI Service - Runs in Electron main process to avoid CORS issues
 import { AIConfig, AIProvider, getDefaultModelId, isReasoningModelId } from '../../src/shared/modelCatalog'
+import { notifyToolDraftProgress, type AIStreamProgressEvent } from '../../src/shared/streamProgress'
+import { getRetryWaitMs, isRetryableAIError } from '../../src/shared/aiErrors'
+
+type StreamProgressCallback = (event: AIStreamProgressEvent) => void
 
 /**
  * Robustly parse tool call arguments from a model response.
@@ -52,7 +56,7 @@ function safeParseToolArgs(raw: string): Record<string, unknown> {
   }
 
   // Try to rescue common fields
-  for (const field of ['path', 'content', 'name', 'executionPlan', 'prompt', 'cronExpression', 'cronLabel',
+  for (const field of ['path', 'content', 'title', 'name', 'executionPlan', 'prompt', 'cronExpression', 'cronLabel',
     'summary', 'description', 'projectKey', 'issueType', 'issueIdOrKey', 'jql']) {
     const val = extractField(field)
     if (val !== undefined) rescued[field] = val
@@ -78,11 +82,8 @@ function isReasoningModel(provider: string, model: string): boolean {
   return isReasoningModelId(provider as AIProvider, model)
 }
 
-function parseRetryAfterMs(errorMessage: string): number {
-  const match = errorMessage.match(/try again in ([\d.]+)ms/i)
-  if (match) return Math.ceil(parseFloat(match[1]))
-  if (errorMessage.toLowerCase().includes('rate limit')) return 1000
-  return 0
+function parseRetryAfterMs(errorMessage: string, attempt = 0): number {
+  return getRetryWaitMs(errorMessage, attempt)
 }
 
 function sleep(ms: number): Promise<void> {
@@ -172,7 +173,8 @@ export class AIService {
   async chatStream(
     messages: Message[],
     tools: ToolDefinition[] | undefined,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    onProgress?: StreamProgressCallback,
   ): Promise<AIResponse> {
     const { provider, apiKey, model } = this.config
     switch (provider) {
@@ -181,7 +183,7 @@ export class AIService {
         if (isReasoningModel('openai', model || '')) {
           return this.callOpenAI(apiKey, model || getDefaultModelId('openai', 'reasoning'), messages, tools)
         }
-        return this.streamOpenAI(apiKey, model || getDefaultModelId('openai', 'chat'), messages, tools, onToken)
+        return this.streamOpenAI(apiKey, model || getDefaultModelId('openai', 'chat'), messages, tools, onToken, onProgress)
       case 'mistral':
         return this.streamOpenAICompat(
           'https://api.mistral.ai/v1/chat/completions',
@@ -189,10 +191,11 @@ export class AIService {
           model || getDefaultModelId('mistral', 'chat'),
           messages,
           tools,
-          onToken
+          onToken,
+          onProgress,
         )
       case 'groq':
-        return this.streamGroq(apiKey, model || getDefaultModelId('groq', 'chat'), messages, tools, onToken)
+        return this.streamGroq(apiKey, model || getDefaultModelId('groq', 'chat'), messages, tools, onToken, onProgress)
       case 'moonshot':
         return this.streamOpenAICompat(
           'https://api.moonshot.ai/v1/chat/completions',
@@ -200,7 +203,8 @@ export class AIService {
           model || getDefaultModelId('moonshot', 'chat'),
           messages,
           tools,
-          onToken
+          onToken,
+          onProgress,
         )
       case 'deepseek':
         return this.streamOpenAICompat(
@@ -209,10 +213,11 @@ export class AIService {
           model || getDefaultModelId('deepseek', 'reasoning'),
           messages,
           tools,
-          onToken
+          onToken,
+          onProgress,
         )
       case 'anthropic':
-        return this.streamAnthropic(apiKey, model || getDefaultModelId('anthropic', 'chat'), messages, tools, onToken)
+        return this.streamAnthropic(apiKey, model || getDefaultModelId('anthropic', 'chat'), messages, tools, onToken, onProgress)
       default:
         throw new Error(`Unsupported AI provider: ${provider}`)
     }
@@ -225,7 +230,8 @@ export class AIService {
     model: string,
     messages: Message[],
     tools: ToolDefinition[] | undefined,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    onProgress?: StreamProgressCallback,
   ): Promise<AIResponse> {
     const body: Record<string, unknown> = { model, messages, max_tokens: 8000, stream: true }
     if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'auto' }
@@ -245,9 +251,9 @@ export class AIService {
             const errData = await response.json() as { error?: { message?: string } }
             errMsg = errData.error?.message || errMsg
           } catch { /* ignore */ }
-          if (errMsg.toLowerCase().includes('rate limit') && attempt < MAX_RETRIES) {
-            const waitMs = parseRetryAfterMs(errMsg) || (1000 * (attempt + 1))
-            console.warn(`[AI/stream] Rate limit, retrying in ${waitMs}ms`)
+          if (isRetryableAIError(errMsg) && attempt < MAX_RETRIES) {
+            const waitMs = parseRetryAfterMs(errMsg, attempt) || (1000 * (attempt + 1))
+            console.warn(`[AI/stream] Retryable error, retrying in ${waitMs}ms:`, errMsg)
             await sleep(waitMs); lastError = new Error(errMsg); continue
           }
           throw new Error(errMsg)
@@ -259,6 +265,7 @@ export class AIService {
         let contentAccum = ''
         // Tool call accumulators: index → { id, name, arguments }
         const toolCallMap: Record<number, { id: string; name: string; arguments: string }> = {}
+        const progressNotified = new Map<number, string>()
         let buffer = ''
 
         while (true) {
@@ -292,6 +299,11 @@ export class AIService {
                   if (tc.function?.name) toolCallMap[idx].name += tc.function.name
                   if (tc.function?.arguments) toolCallMap[idx].arguments += tc.function.arguments
                 }
+                notifyToolDraftProgress(
+                  Object.values(toolCallMap),
+                  onProgress,
+                  progressNotified,
+                )
               }
             } catch { /* skip malformed chunk */ }
           }
@@ -304,8 +316,9 @@ export class AIService {
         return { content: contentAccum, toolCalls }
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e))
-        if (lastError.message.toLowerCase().includes('rate limit') && attempt < MAX_RETRIES) {
-          const waitMs = parseRetryAfterMs(lastError.message) || (1000 * (attempt + 1))
+        if (isRetryableAIError(lastError.message) && attempt < MAX_RETRIES) {
+          const waitMs = parseRetryAfterMs(lastError.message, attempt) || (1000 * (attempt + 1))
+          console.warn(`[AI/stream] Retryable error, retrying in ${waitMs}ms:`, lastError.message)
           await sleep(waitMs); continue
         }
         throw lastError
@@ -314,12 +327,26 @@ export class AIService {
     throw lastError || new Error('Streaming failed after retries')
   }
 
-  private streamOpenAI(apiKey: string, model: string, messages: Message[], tools: ToolDefinition[] | undefined, onToken: (t: string) => void) {
-    return this.streamOpenAICompat('https://api.openai.com/v1/chat/completions', apiKey, model, messages, tools, onToken)
+  private streamOpenAI(
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools: ToolDefinition[] | undefined,
+    onToken: (t: string) => void,
+    onProgress?: StreamProgressCallback,
+  ) {
+    return this.streamOpenAICompat('https://api.openai.com/v1/chat/completions', apiKey, model, messages, tools, onToken, onProgress)
   }
 
-  private streamGroq(apiKey: string, model: string, messages: Message[], tools: ToolDefinition[] | undefined, onToken: (t: string) => void) {
-    return this.streamOpenAICompat('https://api.groq.com/openai/v1/chat/completions', apiKey, model, messages, tools, onToken)
+  private streamGroq(
+    apiKey: string,
+    model: string,
+    messages: Message[],
+    tools: ToolDefinition[] | undefined,
+    onToken: (t: string) => void,
+    onProgress?: StreamProgressCallback,
+  ) {
+    return this.streamOpenAICompat('https://api.groq.com/openai/v1/chat/completions', apiKey, model, messages, tools, onToken, onProgress)
   }
 
   /** Shared non-streaming logic for all OpenAI-compatible APIs */
@@ -498,7 +525,8 @@ export class AIService {
     model: string,
     messages: Message[],
     tools: ToolDefinition[] | undefined,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    onProgress?: StreamProgressCallback,
   ): Promise<AIResponse> {
     const { body, headers } = this.buildAnthropicBody(model, messages, tools, true)
     headers['x-api-key'] = apiKey
@@ -523,6 +551,7 @@ export class AIService {
     type BlockType = 'text' | 'thinking' | 'tool_use' | null
     let currentBlockType: BlockType = null
     const toolCallMap: Record<number, { id: string; name: string; input: string }> = {}
+    const progressNotified = new Map<number, string>()
     let currentToolIdx = -1
 
     while (true) {
@@ -551,6 +580,11 @@ export class AIService {
           } else if (blk.type === 'tool_use') {
             currentToolIdx++
             toolCallMap[currentToolIdx] = { id: blk.id || '', name: blk.name || '', input: '' }
+            notifyToolDraftProgress(
+              Object.values(toolCallMap).map(tc => ({ name: tc.name, arguments: tc.input })),
+              onProgress,
+              progressNotified,
+            )
           }
         } else if (type === 'content_block_delta') {
           const delta = (evt.delta as { type: string; text?: string; thinking?: string; partial_json?: string }) || {}
@@ -562,6 +596,11 @@ export class AIService {
             contentAccum += delta.text
           } else if (currentBlockType === 'tool_use' && delta.partial_json) {
             if (toolCallMap[currentToolIdx]) toolCallMap[currentToolIdx].input += delta.partial_json
+            notifyToolDraftProgress(
+              Object.values(toolCallMap).map(tc => ({ name: tc.name, arguments: tc.input })),
+              onProgress,
+              progressNotified,
+            )
           }
         } else if (type === 'content_block_stop') {
           if (currentBlockType === 'thinking') {

@@ -20,7 +20,16 @@ flowchart TD
 - `src/prompts` owns core Markdown prompts and prompt assembly.
 - `src/connectors` owns connector contracts and connector modules.
 - `src/components` owns generic UI. Connector-specific UI should move into connector folders or be contributed through connector registries.
-- `electron` owns desktop services and IPC boundaries.
+- `electron` owns desktop services and IPC boundaries. Connector modules call into optional **transport services** under `electron/services/` when OAuth, MCP, or secure API access is required. See [electron/services/README.md](../electron/services/README.md).
+
+## Connector module vs transport service
+
+| Location | Purpose |
+| --- | --- |
+| `src/connectors/<id>/` | Agent tools, prompts, formatters, thin `runtime.ts` (required for every connector) |
+| `electron/services/<name>.ts` | Main-process auth and API/MCP transport (optional; e.g. `atlassian-mcp.ts` for Jira) |
+
+The agent never imports desktop services directly. Only `runtime.ts` (via preload IPC) talks to them.
 
 ## Data Flow
 

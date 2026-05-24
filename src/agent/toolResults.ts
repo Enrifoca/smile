@@ -9,6 +9,19 @@ export function unwrapToolResult(result: unknown): string {
 }
 
 export function formatCoreToolResultForAI(toolName: string, result: unknown): string {
+  const data = result as { success?: boolean; data?: unknown; error?: string; path?: string; title?: string }
+  if (data.success === false) {
+    const error = data.error || 'Unknown error'
+    if (toolName === 'file_read' && /pdf|file_read_ocr|ocr/i.test(error)) {
+      return `Error: ${error} Next step: call file_read_ocr with the same path.`
+    }
+    return `Error: ${error}`
+  }
+
+  if (toolName === 'report_write' && typeof data.data === 'string') {
+    return data.data
+  }
+
   const raw = unwrapToolResult(result)
 
   if (toolName === 'file_search' || toolName === 'file_list') {

@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from 'uuid'
-import { Message, PendingAction, ToolEntry } from './types'
+import { Message, PendingAction, ToolEntry, UserProfile } from './types'
 import { AIResponse, AgentConfig } from './config'
+import { shouldAdmitSourceLeaf } from '../memory/sourceAdmission'
+import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
 import { getSystemPrompt } from './prompts'
 import { toolDefinitions } from './tools'
 import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
@@ -9,6 +11,15 @@ import { zodToJsonSchema } from './jsonSchema'
 import { formatScratchpadNote, getCoreScratchpadNote } from './scratchpad'
 import { getCoreToolEntry } from './toolEntries'
 import { formatCoreToolResultForAI } from './toolResults'
+import { isFailedToolResult } from './toolErrors'
+import { compressToolResult } from './compression'
+import type { MarkdownArtifact } from './artifacts'
+import type { AIStreamProgressEvent } from '../shared/streamProgress'
+import { formatAgentErrorMessage, isRetryableAIError } from '../shared/aiErrors'
+
+const THINK_OPEN = '<think>'
+const THINK_CLOSE = '</think>'
+const THINK_BLOCK_REGEX = new RegExp(`${THINK_OPEN}[\\s\\S]*?${THINK_CLOSE.replace('/', '\\/')}`, 'gi')
 
 // Re-export types and utilities
 export * from './types'
@@ -44,8 +55,69 @@ export class Agent {
   // Reset each processMessage call; used at most once to avoid loops.
   private actionFirstNudgedThisTurn = false
 
+  private setAgentStatus(status: string | null): void {
+    this.config.onAgentStatus?.(status)
+  }
+
+  private handleStreamProgress(event: AIStreamProgressEvent): void {
+    if (event.toolName === 'report_write') {
+      this.setAgentStatus(
+        event.title ? `Drafting report: ${event.title}…` : 'Drafting markdown report…',
+      )
+      return
+    }
+
+    const entry = this.getToolEntry(event.toolName, event.title ? { title: event.title } : {})
+    this.setAgentStatus(`Preparing: ${entry.label}…`)
+  }
+
+  private getLikelyReportDraftStatus(): string | null {
+    const lastUser = [...this.conversationHistory]
+      .reverse()
+      .find(message => message.role === 'user' && !message.content.startsWith('[SYSTEM]'))
+
+    if (!lastUser) return null
+
+    const text = lastUser.content.toLowerCase()
+    if (/\b(report|markdown|\.md|plan|spec|batch|summary|piano|rapporto)\b/.test(text)) {
+      return 'Drafting markdown report…'
+    }
+
+    return null
+  }
+
+  /** What to show while waiting for the model between loop steps (not during tool execution). */
+  private getStatusBeforeModelCall(useReasoning: boolean): string {
+    const reportHint = this.getLikelyReportDraftStatus()
+    if (reportHint) return reportHint
+
+    if (useReasoning) return 'Reasoning about next step…'
+
+    const lastToolResult = [...this.conversationHistory]
+      .reverse()
+      .find(message => message.content.startsWith('[tool_result:'))
+
+    if (!lastToolResult) return 'Working on your request…'
+
+    const toolName = lastToolResult.content.match(/\[tool_result:\s*([^\]\s]+)/i)?.[1] || ''
+    if (toolName === 'report_write') return 'Summarizing report…'
+    if (toolName.startsWith('file_read') || toolName === 'file_read_ocr') {
+      return 'Analyzing file contents…'
+    }
+    if (toolName.startsWith('file_')) return 'Analyzing workspace results…'
+    if (toolName.startsWith('memory_')) return 'Analyzing memory…'
+    if (this.getConnectorForTool(toolName)) {
+      return 'Analyzing connector data…'
+    }
+    return 'Analyzing results…'
+  }
+
   constructor(config: AgentConfig) {
     this.config = config
+  }
+
+  updateUserProfile(profile: UserProfile | null): void {
+    this.config.userProfile = profile
   }
 
   private getConnectorForTool(toolName: string): ConnectorRuntime | undefined {
@@ -64,7 +136,15 @@ export class Agent {
   }
 
   private requiresConfirmation(toolName: string): boolean {
-    return this.getToolDefinition(toolName)?.requiresConfirmation ?? false
+    const tool = this.getToolDefinition(toolName)
+    if (!tool?.requiresConfirmation) return false
+
+    const isConnectorWrite = tool.category === 'connector-write' || tool.category === 'connector-attachment'
+    if (isConnectorWrite && this.config.userProfile?.confirmAllConnectorActions === false) {
+      return false
+    }
+
+    return true
   }
 
   private getToolEntry(name: string, args: Record<string, unknown>): ToolEntry {
@@ -99,13 +179,21 @@ export class Agent {
     this.conversationHistory.push(userMsg)
     this.config.onMessage(userMsg)
 
+    if (this.config.loadMemory) {
+      try {
+        this.config.memory = await this.config.loadMemory()
+      } catch (error) {
+        console.warn('[Agent] Failed to refresh memory before turn:', error)
+      }
+    }
+
     try {
       await this.runAgentLoop()
     } catch (error) {
       const errorMsg: Message = {
         id: uuidv4(),
         role: 'assistant',
-        content: `I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}. Please check your API configuration in Settings.`,
+        content: formatAgentErrorMessage(error),
         timestamp: new Date().toISOString(),
       }
       this.conversationHistory.push(errorMsg)
@@ -120,6 +208,7 @@ export class Agent {
     let consecutiveErrors = 0
     const maxConsecutiveErrors = 2
 
+    try {
     while (!hasLimit || iterations < maxIterations) {
       // Check abort flag at the top of every iteration
       if (this.abortFlag) {
@@ -131,7 +220,7 @@ export class Agent {
       iterations++
       console.log(`[Agent] Loop iteration ${iterations}${hasLimit ? `/${maxIterations}` : ''}`)
 
-      const { response, wasStreamed } = await this.callAI()
+      const { response, wasStreamed, assistantPreamble } = await this.callAI()
       if (!response) throw new Error('No response from AI')
 
       if (response.toolCalls && response.toolCalls.length > 0) {
@@ -140,6 +229,13 @@ export class Agent {
 
         for (const toolCall of response.toolCalls) {
           console.log('[Agent] Tool call:', toolCall.name, toolCall.arguments)
+          const toolEntry = this.getToolEntry(toolCall.name, toolCall.arguments)
+          if (toolCall.name === 'report_write') {
+            const title = String(toolCall.arguments.title || '').trim()
+            this.setAgentStatus(title ? `Saving report: ${title}…` : 'Saving report…')
+          } else {
+            this.setAgentStatus(`Running: ${toolEntry.label}…`)
+          }
 
           if (!this.scratchpadWrittenThisTurn) {
             const plannedNote = this.getConnectorForTool(toolCall.name)?.definition.getScratchpadNote?.(toolCall.name, toolCall.arguments, '')
@@ -161,13 +257,12 @@ export class Agent {
             }
             this.pendingActions.set(toolCall.id, pendingAction)
             this.config.onPendingAction(pendingAction)
-            this.config.onMessage({
-              id: uuidv4(),
-              role: 'assistant',
-              content: pendingAction.description,
-              timestamp: new Date().toISOString(),
+            this.emitPendingActionChatMessage(
               pendingAction,
-            })
+              assistantPreamble,
+              response.content,
+            )
+            this.setAgentStatus(null)
             return
           }
 
@@ -187,8 +282,7 @@ export class Agent {
             const result = await this.executeTool(toolCall.name, toolCall.arguments)
             formattedResult = this.formatToolResultForAI(toolCall.name, result)
 
-            const resultData = result as { success?: boolean; error?: string }
-            const isError = resultData.success === false || formattedResult.startsWith('Error:') || formattedResult.includes('MCP error')
+            const isError = isFailedToolResult(result, formattedResult)
             if (isError) {
               hadError = true
               console.log('[Agent] Tool error:', formattedResult.substring(0, 200))
@@ -199,11 +293,15 @@ export class Agent {
               this.invalidateCacheAfterWrite(toolCall.name, toolCall.arguments)
               // Auto-populate scratchpad with a note about what was done
               this.updateScratchpadAfterTool(toolCall.name, toolCall.arguments, formattedResult)
+              void this.persistSourceMemoryAfterWrite(toolCall.name, toolCall.arguments, formattedResult)
+              if (toolCall.name === 'report_write' && !isFromCache) {
+                this.emitArtifactMessageFromResult(toolCall.name, toolCall.arguments, result)
+              }
             }
           }
 
           // Record tool entry for the summary block (UI only — not in history)
-          toolEntries.push(this.getToolEntry(toolCall.name, toolCall.arguments))
+          toolEntries.push(toolEntry)
 
           // Add result to history so AI has the data next iteration.
           // Prefix with [tool_result:] (lowercase, colon) so the AI sees it as
@@ -252,7 +350,7 @@ export class Agent {
       // Strip any <think>...</think> blocks that were already shown as
       // collapsible thinking messages; they should not appear as regular text.
       const rawContent = response.content?.trim() || ''
-      const strippedContent = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+      const strippedContent = rawContent.replace(THINK_BLOCK_REGEX, '').trim()
 
       if (
         !wasStreamed &&
@@ -316,6 +414,9 @@ export class Agent {
       this.conversationHistory.push(timeoutMsg)
       this.config.onMessage(timeoutMsg)
     }
+    } finally {
+      this.setAgentStatus(null)
+    }
   }
 
   /**
@@ -325,27 +426,26 @@ export class Agent {
    *  - content outside → streamed normally to the response bubble
    * Returns wasStreamed=true when the response was already pushed to UI and history.
    */
-  private async callAI(): Promise<{ response: AIResponse | null; wasStreamed: boolean }> {
+  private async callAI(): Promise<{ response: AIResponse | null; wasStreamed: boolean; assistantPreamble?: string }> {
     // Append the live session scratchpad to the system prompt so the agent
     // always knows what it has already done this turn — even if old tool result
     // messages have been pushed out of the 40-message context window.
     const scratchpadSection = this.sessionScratchpad
       ? `\n\n## Session Scratchpad — What You've Done This Turn\n${this.sessionScratchpad}\n\nDo NOT re-read files or re-run searches that are already listed above. Use their results from context.`
       : ''
-    if (this.config.loadMemory) {
-      try {
-        this.config.memory = await this.config.loadMemory()
-      } catch (error) {
-        console.warn('[Agent] Failed to refresh memory before prompt:', error)
-      }
-    }
-    const systemPrompt = getSystemPrompt(this.config.userProfile, this.getConnectorPromptSections(), this.config.memory) + scratchpadSection
+    const systemPrompt = getSystemPrompt(
+      this.config.userProfile,
+      this.getConnectorPromptSections(),
+      this.config.memory,
+      undefined,
+      this.config.monitoredScopes || [],
+    ) + scratchpadSection
 
     // Simple chronological window — last 40 messages in order.
     // tool_summary messages are UI-only artifacts (grouped icons bar) and carry
     // no reasoning value, so they are excluded from what the model sees.
     const relevantHistory = this.conversationHistory
-      .filter(m => m.type !== 'tool_summary')
+      .filter(m => m.type !== 'tool_summary' && m.type !== 'artifact')
       .slice(-40)
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -374,10 +474,12 @@ export class Agent {
       ? this.config.callAIReasoning
       : this.config.callAI
 
+    this.setAgentStatus(this.getStatusBeforeModelCall(useReasoning))
+
     // ── Streaming path ────────────────────────────────────────────────────────
     if (effectiveCallAIStream && this.config.onUpdateMessage) {
-      const THINK_OPEN = '<think>'
-      const THINK_CLOSE = '</think>'
+      const THINK_OPEN_TAG = THINK_OPEN
+      const THINK_CLOSE_TAG = THINK_CLOSE
 
       // Robust parser: buffer until we either confirm a <think> block or rule it out.
       // Handles leading whitespace (e.g. "\n<think>") correctly.
@@ -404,6 +506,9 @@ export class Agent {
 
       const flushToResponse = (text: string) => {
         if (!text) return
+        if (!responseStarted) {
+          this.setAgentStatus('Writing response…')
+        }
         responseContent += text
         if (!responseStarted) {
           responseStarted = true
@@ -419,17 +524,18 @@ export class Agent {
         if (phase === 'scan') {
           // Strip leading whitespace to find out if this starts with <think>
           const trimmed = buffer.trimStart()
-          if (trimmed.startsWith(THINK_OPEN)) {
+          if (trimmed.startsWith(THINK_OPEN_TAG)) {
             // Confirmed: this response opens with <think>
             phase = 'in_think'
             thinkTimerStart = Date.now()
+            this.setAgentStatus('Thinking…')
             // The content so far (after <think>) goes into the think buffer
-            buffer = trimmed.slice(THINK_OPEN.length)
+            buffer = trimmed.slice(THINK_OPEN_TAG.length)
             return
           }
           // If the trimmed buffer is longer than THINK_OPEN and doesn't start with it
           // → this is a direct response, switch to streaming mode
-          if (trimmed.length > THINK_OPEN.length && !THINK_OPEN.startsWith(trimmed.slice(0, THINK_OPEN.length))) {
+          if (trimmed.length > THINK_OPEN_TAG.length && !THINK_OPEN_TAG.startsWith(trimmed.slice(0, THINK_OPEN_TAG.length))) {
             phase = 'response'
             flushToResponse(buffer)
             buffer = ''
@@ -440,10 +546,10 @@ export class Agent {
         }
 
         if (phase === 'in_think') {
-          if (buffer.includes(THINK_CLOSE)) {
-            const closeIdx = buffer.indexOf(THINK_CLOSE)
+          if (buffer.includes(THINK_CLOSE_TAG)) {
+            const closeIdx = buffer.indexOf(THINK_CLOSE_TAG)
             const thinkContent = buffer.slice(0, closeIdx)
-            const afterThink = buffer.slice(closeIdx + THINK_CLOSE.length)
+            const afterThink = buffer.slice(closeIdx + THINK_CLOSE_TAG.length)
             emitThinkingBlock(thinkContent, Date.now() - thinkTimerStart)
             phase = 'response'
             buffer = ''
@@ -458,7 +564,17 @@ export class Agent {
         buffer = ''
       }
 
-      const result = await effectiveCallAIStream(messages, tools, onToken)
+      let result = await effectiveCallAIStream(messages, tools, onToken, event => this.handleStreamProgress(event))
+      if (
+        !result.success
+        && useReasoning
+        && this.config.callAIStream
+        && isRetryableAIError(result.error || '')
+      ) {
+        console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
+        this.setAgentStatus('Reasoning model busy — using chat model…')
+        result = await this.config.callAIStream(messages, tools, onToken, event => this.handleStreamProgress(event))
+      }
       if (!result.success) throw new Error(result.error || 'AI request failed')
       const response = result.data || null
 
@@ -475,9 +591,37 @@ export class Agent {
 
       if (response) {
         if (response.toolCalls && response.toolCalls.length > 0) {
-          // Tool-call round — remove streaming placeholder if one was started
-          if (responseStarted) this.config.onUpdateMessage!(responseMsgId, '', false)
-          return { response, wasStreamed: false }
+          const firstTool = response.toolCalls[0]
+          const firstEntry = this.getToolEntry(firstTool.name, firstTool.arguments)
+          if (firstTool.name === 'report_write') {
+            const title = String(firstTool.arguments.title || '').trim()
+            this.setAgentStatus(title ? `Saving report: ${title}…` : 'Saving report…')
+          } else {
+            this.setAgentStatus(
+              response.toolCalls.length > 1
+                ? `Preparing ${response.toolCalls.length} actions…`
+                : `Preparing: ${firstEntry.label}…`,
+            )
+          }
+
+          let assistantPreamble: string | undefined
+          if (responseStarted && responseContent.trim()) {
+            const finalContent = responseContent.trim()
+            this.config.onUpdateMessage!(responseMsgId, finalContent, false)
+            const preambleMsg: Message = {
+              id: responseMsgId,
+              role: 'assistant',
+              content: finalContent,
+              timestamp: new Date().toISOString(),
+            }
+            this.conversationHistory.push(preambleMsg)
+            assistantPreamble = finalContent
+          } else if (responseStarted) {
+            this.config.onUpdateMessage!(responseMsgId, '', false)
+          } else if (response.content?.trim()) {
+            assistantPreamble = response.content.trim()
+          }
+          return { response, wasStreamed: false, assistantPreamble }
         } else {
           // Final text response — set the clean final content and push to history
           if (responseStarted) {
@@ -502,25 +646,149 @@ export class Agent {
     }
 
     // ── Fallback: non-streaming ───────────────────────────────────────────────
-    const result = await effectiveCallAI(messages, tools)
+    let result = await effectiveCallAI(messages, tools)
+    if (
+      !result.success
+      && useReasoning
+      && isRetryableAIError(result.error || '')
+    ) {
+      console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
+      this.setAgentStatus('Reasoning model busy — using chat model…')
+      result = await this.config.callAI(messages, tools)
+    }
     if (!result.success) throw new Error(result.error || 'AI request failed')
     const response = result.data || null
 
     // Extract all <think>...</think> blocks from non-streaming responses,
     // emit each as a collapsible thinking message, and strip them from content.
     if (response?.content) {
-      const thinkRegex = /<think>([\s\S]*?)<\/think>/gi
       let match: RegExpExecArray | null
+      const thinkRegex = new RegExp(`${THINK_OPEN}([\\s\\S]*?)${THINK_CLOSE.replace('/', '\\/')}`, 'gi')
       while ((match = thinkRegex.exec(response.content)) !== null) {
         const thinkContent = match[1].trim()
         if (thinkContent) {
           this.config.onMessage({ id: uuidv4(), role: 'assistant', content: thinkContent, timestamp: new Date().toISOString(), type: 'thinking', thinkingMs: 0 })
         }
       }
-      response.content = response.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+      response.content = response.content.replace(THINK_BLOCK_REGEX, '').trim()
     }
 
-    return { response, wasStreamed: false }
+    return { response, wasStreamed: false, assistantPreamble: response?.content?.trim() || undefined }
+  }
+
+  private emitPendingActionChatMessage(
+    pendingAction: PendingAction,
+    assistantPreamble?: string,
+    responseContent?: string,
+  ): void {
+    const content = this.composePendingActionChatContent(pendingAction, assistantPreamble, responseContent)
+    const lastMsg = this.conversationHistory[this.conversationHistory.length - 1]
+    if (lastMsg?.role === 'assistant' && lastMsg.content === content) return
+
+    const msg: Message = {
+      id: uuidv4(),
+      role: 'assistant',
+      content,
+      timestamp: new Date().toISOString(),
+    }
+    this.conversationHistory.push(msg)
+    this.config.onMessage(msg)
+  }
+
+  private composePendingActionChatContent(
+    pendingAction: PendingAction,
+    assistantPreamble?: string,
+    responseContent?: string,
+  ): string {
+    const structured = this.buildPendingActionChatFallback(pendingAction)
+    const modelText = (assistantPreamble || responseContent || '').trim()
+
+    if (!modelText) return structured
+
+    const title = pendingAction.confirmation?.title
+    const preview = pendingAction.confirmation?.preview || pendingAction.preview
+    const itemCount = pendingAction.confirmation?.items?.length || 0
+    const numberedLines = modelText.match(/^\d+\./gm)
+    if (itemCount > 0 && numberedLines && numberedLines.length >= Math.min(itemCount, 2)) {
+      return modelText
+    }
+
+    const includesStructured =
+      (title && modelText.includes(title))
+      || (preview && modelText.includes(preview))
+      || modelText.includes(structured.split('\n')[0])
+
+    if (includesStructured && modelText.length >= 60) return modelText
+
+    return `${modelText}\n\n${structured}`
+  }
+
+  private buildPendingActionChatFallback(pendingAction: PendingAction): string {
+    const confirmation = pendingAction.confirmation
+    const parts: string[] = []
+
+    if (confirmation?.title) {
+      parts.push(`**${confirmation.title}**`)
+    }
+    if (confirmation?.preview) {
+      parts.push(confirmation.preview)
+    }
+    if (confirmation?.description) {
+      parts.push(confirmation.description)
+    }
+
+    const prompt = this.getActionConfirmationPrompt(pendingAction.type, pendingAction.data)
+    const skipPromptList = confirmation?.items?.length
+      && pendingAction.type === 'jira_batch_create_issues'
+    if (prompt && prompt !== `Action: ${pendingAction.type}` && !skipPromptList) {
+      parts.push(prompt)
+    }
+
+    if (confirmation?.fields?.length) {
+      parts.push(
+        confirmation.fields.map(field => `- **${field.label}:** ${field.value}`).join('\n'),
+      )
+    }
+
+    if (confirmation?.items?.length) {
+      parts.push(
+        confirmation.items.map((item, index) => {
+          const badge = item.badge ? `[${item.badge}] ` : ''
+          const subtitle = item.subtitle ? ` (${item.subtitle})` : ''
+          return `${index + 1}. ${badge}${item.title}${subtitle}`
+        }).join('\n'),
+      )
+    }
+
+    const criteria = confirmation?.acceptanceCriteria
+    if (criteria?.length) {
+      parts.push(criteria.map(item => `- ${item}`).join('\n'))
+    }
+
+    return parts.filter(Boolean).join('\n\n').trim() || pendingAction.description
+  }
+
+  private emitArtifactMessageFromResult(
+    toolName: string,
+    _args: Record<string, unknown>,
+    result: unknown,
+  ): void {
+    if (toolName !== 'report_write') return
+    const data = result as { success?: boolean; path?: string; title?: string; error?: string }
+    if (!data.success || !data.path || !data.title) return
+
+    this.emitArtifactMessage({ path: data.path, title: data.title })
+  }
+
+  private emitArtifactMessage(artifact: MarkdownArtifact): void {
+    this.config.onMessage({
+      id: uuidv4(),
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      type: 'artifact',
+      artifact,
+    })
   }
 
   /**
@@ -541,7 +809,7 @@ export class Agent {
       this.toolResultCache.delete(key)
     }
     // file_write → drop cached read for that exact path
-    if (toolName === 'file_write') {
+    if (toolName === 'file_write' || toolName === 'report_write') {
       const writtenPath = (args.path as string) || ''
       for (const key of this.toolResultCache.keys()) {
         if (key.startsWith('file_read:') && key.includes(writtenPath)) {
@@ -579,7 +847,7 @@ export class Agent {
     const connector = this.getConnectorForTool(name)
     if (connector) {
       return connector.executeTool(name, args)
-    } else if (name.startsWith('file_')) {
+    } else if (name === 'report_write' || name.startsWith('file_')) {
       return this.config.executeFileTool(name, args)
     } else if (name.startsWith('memory_')) {
       return this.config.executeMemoryTool(name, args)
@@ -609,9 +877,19 @@ export class Agent {
 
     if (data.success === false) return `Error: ${data.error || 'Unknown error'}`
 
-    const connectorFormatted = this.getConnectorForTool(toolName)?.definition.formatToolResultForAI?.(toolName, result)
-    if (connectorFormatted !== null && connectorFormatted !== undefined) return connectorFormatted
-    return formatCoreToolResultForAI(toolName, result)
+    const connector = this.getConnectorForTool(toolName)
+    const connectorFormatted = connector?.definition.formatToolResultForAI?.(toolName, result)
+    const formatted = connectorFormatted !== null && connectorFormatted !== undefined
+      ? connectorFormatted
+      : formatCoreToolResultForAI(toolName, result)
+
+    const tool = this.getToolDefinition(toolName)
+    return compressToolResult({
+      toolName,
+      category: tool?.category,
+      connectorId: connector?.definition.id,
+      text: formatted,
+    }).text
   }
 
   /**
@@ -644,6 +922,16 @@ export class Agent {
       }
       this.conversationHistory.push(completionMsg)
       this.config.onMessage(completionMsg)
+
+      if (connectorApproval.resumeAgent) {
+        this.conversationHistory.push({
+          id: uuidv4(),
+          role: 'user',
+          content: '[SYSTEM] The write action returned recoverable errors. Read the message above, fix the arguments (field formats, required values), and retry the write tool. Do not ask the user to fix API formatting unless the error is auth or permission related.',
+          timestamp: new Date().toISOString(),
+        })
+        await this.runAgentLoop()
+      }
       return
     }
 
@@ -660,6 +948,7 @@ export class Agent {
     })
     this.updateScratchpadAfterTool(action.type, action.data, formattedResult)
     this.invalidateCacheAfterWrite(action.type, action.data)
+    void this.persistSourceMemoryAfterWrite(action.type, action.data, formattedResult)
 
     // Resume the agent loop — it will decide what to do next (more tasks,
     // a follow-up, or simply confirm done if there's nothing left).
@@ -707,6 +996,44 @@ export class Agent {
   private getActionConfirmationPrompt(toolName: string, args: Record<string, unknown>): string {
     return this.getConnectorForTool(toolName)?.definition.getActionConfirmationPrompt?.(toolName, args)
       || `Action: ${toolName}`
+  }
+
+  private async persistSourceMemoryAfterWrite(
+    toolName: string,
+    args: Record<string, unknown>,
+    formattedResult: string,
+  ): Promise<void> {
+    if (!this.config.appendSourceMemory) return
+
+    const tool = this.getToolDefinition(toolName)
+    if (!tool || !shouldAdmitSourceLeaf({ reason: 'write_outcome', toolCategory: tool.category })) {
+      return
+    }
+
+    const connector = this.getConnectorForTool(toolName)
+    const scope = connector?.definition.getScopeForSourceMemory?.(toolName, args)
+    if (!connector || !scope) return
+
+    const isMonitored = (this.config.monitoredScopes || []).some(
+      monitored => monitored.connectorId === scope.connectorId && monitored.scopeId === scope.scopeId,
+    )
+    if (!isMonitored) return
+
+    const draft = connector.definition.buildSourceMemoryLeaf?.(toolName, args, formattedResult)
+      ?? buildDefaultWriteSourceLeaf({
+        connectorId: scope.connectorId,
+        scopeId: scope.scopeId,
+        toolName,
+        formattedResult,
+      })
+
+    await this.config.appendSourceMemory({
+      connectorId: scope.connectorId,
+      scopeId: scope.scopeId,
+      kind: draft.kind,
+      toolName: draft.toolName,
+      summary: draft.summary,
+    })
   }
 
 

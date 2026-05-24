@@ -25,6 +25,8 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
       const verb = ext === 'html' ? 'Generated' : ext === 'csv' ? 'Exported' : 'Wrote'
       return { tool: name, label: `${verb} ${fname}`, group: 'file' }
     }
+    case 'report_write':
+      return { tool: name, label: `Report: ${str(args.title) || 'untitled'}`, group: 'file' }
     case 'file_search':
       return { tool: name, label: `Searched for "${str(args.pattern)}"`, group: 'file' }
     case 'file_mkdir':

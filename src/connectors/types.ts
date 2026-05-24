@@ -32,6 +32,14 @@ export interface ConnectorDefinition<TContext = unknown> {
   formatToolResultForAI?: (name: string, result: unknown) => string | null
   getScratchpadNote?: (name: string, args: Record<string, unknown>, formattedResult: string) => string | null
   invalidateCacheAfterWrite?: (name: string, args: Record<string, unknown>, cacheKeys: string[]) => string[]
+  /** Map a write tool call to a monitored connector scope for source memory. */
+  getScopeForSourceMemory?: (name: string, args: Record<string, unknown>) => { connectorId: string; scopeId: string } | null
+  /** Optional override for the source memory leaf summary on writes. */
+  buildSourceMemoryLeaf?: (
+    name: string,
+    args: Record<string, unknown>,
+    formattedResult: string,
+  ) => { kind: 'write_outcome'; toolName: string; summary: string } | null
   approveAction?: (input: {
     actionType: string
     data: Record<string, unknown>
@@ -40,7 +48,7 @@ export interface ConnectorDefinition<TContext = unknown> {
     updateScratchpadAfterTool: (name: string, args: Record<string, unknown>, formattedResult: string) => void
     invalidateCacheAfterWrite: (name: string, args: Record<string, unknown>) => void
     cacheToolResult: (name: string, args: Record<string, unknown>, formattedResult: string) => void
-  }) => Promise<{ handled: boolean; message?: string }>
+  }) => Promise<{ handled: boolean; message?: string; resumeAgent?: boolean }>
 }
 
 export interface ConnectorRuntime<TContext = any> {

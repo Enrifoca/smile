@@ -57,7 +57,7 @@ On first launch, the app will guide you through:
 ## Framework Pillars
 
 - **Multi models** - Main model, reasoning model, and OCR model are configured independently.
-- **Human in the loop** - Connector write actions use confirmation cards before execution.
+- **Human in the loop** - Connector write actions show Accept/Refuse above the composer before execution.
 - **Craftable modules** - Connectors contribute tools, prompt sections, auth, preview labels, and approval copy.
 - **Memory management** - User memory is authoritative; learned notes are lower priority; scratchpad is per-turn.
 
@@ -93,6 +93,88 @@ The bundled Jira code is being kept as the first example connector while the fra
 ## Repository Direction
 
 The project is being refactored from a project-management assistant into a reusable framework. The target structure is inspired by agent-first open-source repos: clear docs, explicit agent instructions, connector boundaries, and simple setup for contributors and downstream users.
+
+## Documentation
+
+All framework docs live in the repo as Markdown. Use this map to find the right guide.
+
+### Start here
+
+| Doc | Purpose |
+| --- | --- |
+| [README.md](README.md) | Project overview, setup, and this index |
+| [AGENTS.md](AGENTS.md) | Instructions for coding agents (boundaries, where to edit) |
+| [docs/repository-map.md](docs/repository-map.md) | Where to add features by area |
+| [docs/architecture.md](docs/architecture.md) | Layers, data flow, connector vs core rules |
+
+### Guides (`docs/`)
+
+| Doc | Purpose |
+| --- | --- |
+| [docs/creating-a-connector.md](docs/creating-a-connector.md) | End-to-end connector authoring (tools, runtime, UI, auth) |
+| [docs/prompts.md](docs/prompts.md) | Core vs connector prompts, assembly rules |
+| [docs/memory.md](docs/memory.md) | User memory, learned notes, source memory, admission |
+
+### Electron (desktop shell)
+
+| Doc | Purpose |
+| --- | --- |
+| [electron/README.md](electron/README.md) | Main process, preload, IPC responsibilities |
+| [electron/services/README.md](electron/services/README.md) | **Connector transport services** (OAuth, MCP, REST) — when to add a file like `atlassian-mcp.ts`, wiring checklist |
+
+### Agent runtime (`src/agent/`)
+
+| Doc | Purpose |
+| --- | --- |
+| [src/agent/README.md](src/agent/README.md) | Connector-neutral agent loop, core tools, file map |
+| [src/agent/compression/README.md](src/agent/compression/README.md) | Tool result compression before model context |
+
+### Prompts (`src/prompts/`)
+
+| Doc | Purpose |
+| --- | --- |
+| [src/prompts/README.md](src/prompts/README.md) | Editing `core/system.md`, planner, assembly |
+| `src/prompts/core/system.md` | Live core system prompt (Markdown) |
+| `src/prompts/core/planner.md` | Live planner prompt (Markdown) |
+
+### Connectors (`src/connectors/`)
+
+| Doc | Purpose |
+| --- | --- |
+| [src/connectors/README.md](src/connectors/README.md) | Connector contract, folder shape, auth guidance |
+| [src/connectors/jira/README.md](src/connectors/jira/README.md) | **Reference connector** — tools, formatters, runtime |
+| [src/connectors/jira/ui/README.md](src/connectors/jira/ui/README.md) | Reference connector settings UI wiring |
+
+### UI (`src/components/` + theme)
+
+| Doc | Purpose |
+| --- | --- |
+| [src/components/README.md](src/components/README.md) | Generic React UI overview, what belongs where |
+| [src/components/ui/README.md](src/components/ui/README.md) | **UI kit** — buttons, forms, panels, tokens |
+| [src/components/chat/README.md](src/components/chat/README.md) | Write bar, activity status, chat modules |
+| [src/components/chat/artifacts/README.md](src/components/chat/artifacts/README.md) | Markdown report cards (`report_write`) |
+| [src/components/connectors/README.md](src/components/connectors/README.md) | Reusable connector setup modules (MCP, API, scopes) |
+| [src/theme/README.md](src/theme/README.md) | Design tokens (`tokens.css`) |
+
+### Memory (`src/memory/`)
+
+| Doc | Purpose |
+| --- | --- |
+| [src/memory/README.md](src/memory/README.md) | Memory layers, learned-note budget (framework code) |
+
+### Quick paths by task
+
+| I want to… | Read |
+| --- | --- |
+| Add a new connector | [docs/creating-a-connector.md](docs/creating-a-connector.md) → [src/connectors/README.md](src/connectors/README.md) |
+| Add OAuth / MCP / REST for a provider | [electron/services/README.md](electron/services/README.md) |
+| Change agent behavior (core) | [src/prompts/core/system.md](src/prompts/core/system.md), [docs/prompts.md](docs/prompts.md) |
+| Change connector agent behavior | `src/connectors/<id>/prompt.md` |
+| Customize write approval UI | [src/components/chat/README.md](src/components/chat/README.md) + connector `formatters.ts` |
+| Add markdown report cards | [src/components/chat/artifacts/README.md](src/components/chat/artifacts/README.md) |
+| Rebrand the UI | [src/theme/README.md](src/theme/README.md) → [src/components/ui/README.md](src/components/ui/README.md) |
+| Understand memory rules | [docs/memory.md](docs/memory.md) → [src/memory/README.md](src/memory/README.md) |
+| Work as a coding agent | [AGENTS.md](AGENTS.md) |
 
 ## License
 

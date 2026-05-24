@@ -3,7 +3,8 @@ import { ElectronAPI } from '../types/electron'
 import { createJiraRuntime, normalizeJiraMetadata } from './jira/runtime'
 
 export interface ConnectorScope {
-  id: string
+  connectorId: string
+  scopeId: string
   key: string
   name: string
   avatarUrl?: string
@@ -16,9 +17,16 @@ export interface LoadedConnectors {
 
 export async function loadEnabledConnectors(electron: ElectronAPI): Promise<LoadedConnectors> {
   const metadata = normalizeJiraMetadata(await electron.jiraMetadata.get())
+  const jiraScopes = metadata.monitoredProjects.map(project => ({
+    connectorId: 'jira',
+    scopeId: project.key,
+    key: project.key,
+    name: project.name,
+    avatarUrl: project.avatarUrl,
+  }))
 
   return {
     runtimes: [createJiraRuntime(electron, metadata)],
-    scopes: metadata.monitoredProjects,
+    scopes: jiraScopes,
   }
 }

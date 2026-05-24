@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useElectron } from '../hooks/useElectron'
+import { useActionFeedback } from '../hooks/useActionFeedback'
+import {
+  ActionRow,
+  Badge,
+  Button,
+  Callout,
+  StatusText,
+  Toggle,
+} from './ui'
 import { UserProfile } from '../agent/types'
 import {
   AIConfig,
@@ -20,12 +29,6 @@ import {
 interface SettingsViewProps {
   onResetOnboarding: () => void
 }
-
-const CheckIcon = () => (
-  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-  </svg>
-)
 
 const FolderIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -56,14 +59,13 @@ const defaultUserProfile: UserProfile = {
 export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   const [aiConfig, setAIConfig] = useState<AIConfig | null>(null)
   const [workspace, setWorkspace] = useState<string | null>(null)
-  const [isSaving, setIsSaving] = useState(false)
+  const aiSave = useActionFeedback()
   
   // Agent behavior
   const [maxIterations, setMaxIterations] = useState<number>(10)
-  const [savingMaxIter, setSavingMaxIter] = useState(false)
+  const maxIterSave = useActionFeedback()
   const [agentProfile, setAgentProfile] = useState<UserProfile>(defaultUserProfile)
-  const [savingAgentProfile, setSavingAgentProfile] = useState(false)
-  const [agentProfileSaveStatus, setAgentProfileSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const agentProfileSave = useActionFeedback({ resetMs: 2000 })
 
   // Reasoning model
   const [reasoningForm, setReasoningForm] = useState({
@@ -73,8 +75,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     useSameKey: true,
   })
   const [reasoningConfigured, setReasoningConfigured] = useState(false)
-  const [savingReasoning, setSavingReasoning] = useState(false)
-  const [reasoningSaveStatus, setReasoningSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const reasoningSave = useActionFeedback()
 
   // OCR model
   const [ocrForm, setOcrForm] = useState({
@@ -83,8 +84,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     model: '',
   })
   const [ocrConfigured, setOcrConfigured] = useState(false)
-  const [savingOcr, setSavingOcr] = useState(false)
-  const [ocrSaveStatus, setOcrSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const ocrSave = useActionFeedback()
 
   // Form state
   const [aiForm, setAIForm] = useState({
@@ -98,6 +98,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   const [modelRefreshStatus, setModelRefreshStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
   const { storage, models: modelCatalogAPI, file } = useElectron()
+  const canUseSameReasoningKey = !!aiConfig && aiConfig.provider === reasoningForm.provider
 
   useEffect(() => {
     loadSettings()
@@ -196,11 +197,12 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     }
   }
 
-  const saveAIConfig = async () => {
-    if (!aiForm.provider || !aiForm.apiKey) return
-
-    setIsSaving(true)
-    try {
+  const saveAIConfig = () => {
+    if (!aiForm.provider || !aiForm.apiKey) {
+      aiSave.markError()
+      return
+    }
+    void aiSave.run(async () => {
       const config: AIConfig = {
         provider: aiForm.provider,
         apiKey: aiForm.apiKey === '••••••••'
@@ -208,23 +210,16 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
           : aiForm.apiKey,
         model: aiForm.model || undefined,
       }
-
       await storage.setSecure('aiConfig', JSON.stringify(config))
       setAIConfig(config)
       const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
       if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
-    } catch (error) {
-      console.error('Failed to save AI config:', error)
-    } finally {
-      setIsSaving(false)
-    }
+    })
   }
 
-  const saveReasoningConfig = async () => {
-    setSavingReasoning(true)
-    try {
+  const saveReasoningConfig = () => {
+    void reasoningSave.run(async () => {
       let apiKey = reasoningForm.apiKey
-
       if (canUseSameReasoningKey && reasoningForm.useSameKey) {
         const chatConfigStr = await storage.getSecure('aiConfig')
         if (chatConfigStr) apiKey = JSON.parse(chatConfigStr).apiKey
@@ -233,92 +228,53 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
           || await storage.getSecure('plannerConfig')
         if (existing) apiKey = JSON.parse(existing).apiKey
       }
-
       if (!apiKey) {
-        setReasoningSaveStatus('error')
-        setTimeout(() => setReasoningSaveStatus('idle'), 3000)
-        return
+        reasoningSave.markError()
+        throw new Error('Missing API key')
       }
-
       const config = { provider: reasoningForm.provider, apiKey, model: reasoningForm.model || undefined }
       await storage.setSecure('reasoningConfig', JSON.stringify(config))
       const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
       if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
       setReasoningConfigured(true)
-      setReasoningSaveStatus('success')
-      setTimeout(() => setReasoningSaveStatus('idle'), 3000)
-    } catch {
-      setReasoningSaveStatus('error')
-      setTimeout(() => setReasoningSaveStatus('idle'), 3000)
-    } finally {
-      setSavingReasoning(false)
-    }
+    })
   }
 
-  const saveOcrConfig = async () => {
-    setSavingOcr(true)
-    setOcrSaveStatus('idle')
-
-    try {
+  const saveOcrConfig = () => {
+    void ocrSave.run(async () => {
       let apiKey = ocrForm.apiKey
-
       if (apiKey === '••••••••') {
         const existing = await storage.getSecure('ocrConfig')
         if (existing) apiKey = (JSON.parse(existing) as OCRConfig).apiKey
       }
-
       if (!apiKey) {
-        setOcrSaveStatus('error')
-        setTimeout(() => setOcrSaveStatus('idle'), 3000)
-        return
+        ocrSave.markError()
+        throw new Error('Missing API key')
       }
-
       const config: OCRConfig = {
         provider: ocrForm.provider,
         apiKey,
         model: ocrForm.model || undefined,
       }
-
       await storage.setSecure('ocrConfig', JSON.stringify(config))
       const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
       if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
       setOcrConfigured(true)
       setOcrForm(prev => ({ ...prev, apiKey: '••••••••' }))
-      setOcrSaveStatus('success')
-      setTimeout(() => setOcrSaveStatus('idle'), 3000)
-    } catch (error) {
-      console.error('Failed to save OCR config:', error)
-      setOcrSaveStatus('error')
-      setTimeout(() => setOcrSaveStatus('idle'), 3000)
-    } finally {
-      setSavingOcr(false)
-    }
+    })
   }
 
-  const saveMaxIterations = async (value: number) => {
-    setSavingMaxIter(true)
-    try {
+  const saveMaxIterations = (value: number) => {
+    void maxIterSave.run(async () => {
       await storage.set('agentMaxIterations', value)
-    } finally {
-      setSavingMaxIter(false)
-    }
+    })
   }
 
   const saveAgentProfile = async (nextProfile: UserProfile) => {
-    setSavingAgentProfile(true)
-    setAgentProfileSaveStatus('idle')
-    try {
+    await agentProfileSave.run(async () => {
       await storage.set('userProfile', nextProfile)
       setAgentProfile(nextProfile)
-      setAgentProfileSaveStatus('success')
-      setTimeout(() => setAgentProfileSaveStatus('idle'), 2000)
-    } catch (error) {
-      console.error('Failed to save agent profile:', error)
-      setAgentProfileSaveStatus('error')
-      setTimeout(() => setAgentProfileSaveStatus('idle'), 3000)
-    } finally {
-      setSavingAgentProfile(false)
-    }
+    })
   }
 
   const updateAgentProfile = (updates: Partial<UserProfile>) => {
@@ -339,7 +295,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
         commentStyle: sample,
       },
     }))
-    setAgentProfileSaveStatus('idle')
+    agentProfileSave.reset()
   }
 
   const selectWorkspace = async () => {
@@ -368,8 +324,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     return 'Using bundled defaults'
   }
 
-  const canUseSameReasoningKey = !!aiConfig && aiConfig.provider === reasoningForm.provider
-
   return (
     <div className="h-full overflow-y-auto">
       <div className="content-shell page-shell">
@@ -387,25 +341,22 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-800">AI Provider</h2>
               <div className="flex items-center gap-3">
-                {modelRefreshStatus === 'success' && <span className="text-sm text-green-600">Models refreshed</span>}
-                {modelRefreshStatus === 'error' && <span className="text-sm text-red-600">Refresh failed</span>}
-                <button
+                <StatusText
+                  status={modelRefreshStatus}
+                  successMessage="Models refreshed"
+                  errorMessage="Refresh failed"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => loadModelCatalog(true)}
                   disabled={refreshingModels}
-                  className="btn btn-secondary flex items-center gap-2"
+                  loading={refreshingModels}
+                  loadingLabel="Refreshing..."
                 >
-                  {refreshingModels ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-600 border-t-transparent"></div>
-                      Refreshing...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshIcon />
-                      Refresh Models
-                    </>
-                  )}
-                </button>
+                  <RefreshIcon />
+                  Refresh Models
+                </Button>
               </div>
             </div>
 
@@ -460,13 +411,15 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(aiForm.provider, 'chat')}</p>
               </div>
 
-              <button
-                onClick={saveAIConfig}
-                disabled={isSaving}
-                className="btn btn-primary"
-              >
-                {isSaving ? 'Saving...' : 'Save'}
-              </button>
+              <ActionRow
+                label="Save"
+                busy={aiSave.busy}
+                status={aiSave.status}
+                onAction={saveAIConfig}
+                size="sm"
+                successMessage="Saved!"
+                errorMessage="Failed — check API key."
+              />
             </div>
           </section>
 
@@ -479,20 +432,16 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
                 </div>
               </div>
-              {reasoningConfigured && (
-                <span className="flex items-center gap-1.5 text-sm font-medium text-green-600">
-                  <CheckIcon /> Active
-                </span>
-              )}
+              {reasoningConfigured && <Badge tone="success">Active</Badge>}
             </div>
             <p className="text-sm text-gray-500 mb-2">
               A dedicated model for complex, multi-step tasks. When configured, it takes over automatically whenever the agent needs to plan deeply, such as analyzing documents, creating multiple connector records, or reasoning through ambiguous requests.
             </p>
-            <div className="snippet-info mb-5">
+            <Callout className="mb-5">
               <p className="text-xs">
                 <strong>Best picks:</strong> Claude 3.7 Sonnet (extended thinking), o4-mini / o3-mini (OpenAI reasoning), or DeepSeek-R1 on Groq (free, native chain-of-thought). If you leave this empty, the main model handles everything.
               </p>
-            </div>
+            </Callout>
 
             <div className="space-y-4">
               <div>
@@ -559,17 +508,16 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(reasoningForm.provider, 'reasoning')}</p>
               </div>
 
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={saveReasoningConfig}
-                  disabled={savingReasoning || ((!canUseSameReasoningKey || !reasoningForm.useSameKey) && !reasoningForm.apiKey)}
-                  className="btn btn-primary"
-                >
-                  {savingReasoning ? 'Saving…' : 'Save Reasoning Model'}
-                </button>
-                {reasoningSaveStatus === 'success' && <span className="text-sm text-green-600">Saved!</span>}
-                {reasoningSaveStatus === 'error' && <span className="text-sm text-red-600">Failed — check API key.</span>}
-              </div>
+              <ActionRow
+                label="Save Reasoning Model"
+                busy={reasoningSave.busy}
+                status={reasoningSave.status}
+                disabled={(!canUseSameReasoningKey || !reasoningForm.useSameKey) && !reasoningForm.apiKey}
+                onAction={saveReasoningConfig}
+                size="sm"
+                successMessage="Saved!"
+                errorMessage="Failed — check API key."
+              />
             </div>
           </section>
 
@@ -580,21 +528,17 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 <h2 className="text-lg font-semibold text-gray-800">OCR Model</h2>
                 <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
               </div>
-              {ocrConfigured && (
-                <span className="flex items-center gap-1.5 text-sm font-medium text-green-600">
-                  <CheckIcon /> Active
-                </span>
-              )}
+              {ocrConfigured && <Badge tone="success">Active</Badge>}
             </div>
             <p className="text-sm text-gray-500 mb-5">
               A specialist model for scanned PDFs and image-based documents. When configured, the agent will automatically use OCR if normal PDF text extraction returns nothing or unreadable text.
             </p>
 
-            <div className="snippet-info mb-5">
+            <Callout className="mb-5">
               <p className="text-xs">
                 <strong>Provider notes:</strong> Mistral uses the official OCR API. DeepSeek uses the DeepSeek-OCR model through DeepInfra, so use a DeepInfra API token for that option.
               </p>
-            </div>
+            </Callout>
 
             <div className="space-y-4">
               <div>
@@ -637,17 +581,16 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(ocrForm.provider, 'ocr')}</p>
               </div>
 
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={saveOcrConfig}
-                  disabled={savingOcr || !ocrForm.apiKey}
-                  className="btn btn-primary"
-                >
-                  {savingOcr ? 'Saving…' : 'Save OCR Model'}
-                </button>
-                {ocrSaveStatus === 'success' && <span className="text-sm text-green-600">Saved!</span>}
-                {ocrSaveStatus === 'error' && <span className="text-sm text-red-600">Failed — check API key.</span>}
-              </div>
+              <ActionRow
+                label="Save OCR Model"
+                busy={ocrSave.busy}
+                status={ocrSave.status}
+                disabled={!ocrForm.apiKey}
+                onAction={saveOcrConfig}
+                size="sm"
+                successMessage="Saved!"
+                errorMessage="Failed — check API key."
+              />
             </div>
           </section>
 
@@ -666,12 +609,9 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   {workspace || 'No folder selected'}
                 </span>
               </div>
-              <button
-                onClick={selectWorkspace}
-                className="btn btn-secondary"
-              >
+              <Button variant="secondary" size="sm" onClick={selectWorkspace}>
                 {workspace ? 'Change' : 'Select Folder'}
-              </button>
+              </Button>
             </div>
           </section>
 
@@ -696,7 +636,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     setMaxIterations(val)
                     saveMaxIterations(val)
                   }}
-                  disabled={savingMaxIter}
+                  disabled={maxIterSave.busy}
                   className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-neutral-300"
                 >
                   <option value={5}>5</option>
@@ -705,7 +645,13 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                   <option value={20}>20</option>
                   <option value={0}>No limit</option>
                 </select>
-                {savingMaxIter && <span className="text-xs text-gray-400">Saving…</span>}
+                <StatusText
+                  busy={maxIterSave.busy}
+                  status={maxIterSave.status}
+                  busyMessage="Saving…"
+                  successMessage="Saved"
+                  size="sm"
+                />
               </div>
             </div>
 
@@ -726,7 +672,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     <button
                       key={style}
                       onClick={() => updateAgentProfile({ style })}
-                      disabled={savingAgentProfile}
+                      disabled={agentProfileSave.busy}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
                         agentProfile.style === style
                           ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
@@ -748,7 +694,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     <button
                       key={verbosity}
                       onClick={() => updateAgentProfile({ verbosity })}
-                      disabled={savingAgentProfile}
+                      disabled={agentProfileSave.busy}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
                         agentProfile.verbosity === verbosity
                           ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
@@ -770,7 +716,7 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     <button
                       key={tone}
                       onClick={() => updateAgentProfile({ tone })}
-                      disabled={savingAgentProfile}
+                      disabled={agentProfileSave.busy}
                       className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
                         agentProfile.tone === tone
                           ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
@@ -790,12 +736,11 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     Ask before the agent creates, edits, sends, uploads, or otherwise writes through a connector.
                   </p>
                 </div>
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={agentProfile.confirmAllConnectorActions}
                   onChange={event => updateAgentProfile({ confirmAllConnectorActions: event.target.checked })}
-                  disabled={savingAgentProfile}
-                  className="mt-1"
+                  disabled={agentProfileSave.busy}
+                  label="Confirm connector write actions"
                 />
               </label>
 
@@ -813,9 +758,14 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
               </div>
 
               <div className="h-5">
-                {savingAgentProfile && <span className="text-xs text-gray-400">Saving behavior settings…</span>}
-                {agentProfileSaveStatus === 'success' && <span className="text-xs text-green-600">Behavior settings saved</span>}
-                {agentProfileSaveStatus === 'error' && <span className="text-xs text-red-600">Could not save behavior settings</span>}
+                <StatusText
+                  busy={agentProfileSave.busy}
+                  status={agentProfileSave.status}
+                  busyMessage="Saving behavior settings…"
+                  successMessage="Behavior settings saved"
+                  errorMessage="Could not save behavior settings"
+                  size="sm"
+                />
               </div>
             </div>
             </div>
@@ -833,12 +783,9 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     Go through the setup process again
                   </p>
                 </div>
-                <button
-                  onClick={onResetOnboarding}
-                  className="btn btn-secondary"
-                >
+                <Button variant="secondary" size="sm" onClick={onResetOnboarding}>
                   Reset
-                </button>
+                </Button>
               </div>
 
               <hr className="border-gray-200" />
@@ -850,7 +797,9 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     Delete all stored data including credentials and chat history
                   </p>
                 </div>
-                <button
+                <Button
+                  variant="danger"
+                  size="sm"
                   onClick={async () => {
                     if (confirm('Are you sure? This will delete all your data including credentials and chat history.')) {
                       await storage.set('chatHistory', [])
@@ -859,10 +808,9 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                       onResetOnboarding()
                     }
                   }}
-                  className="btn btn-danger"
                 >
                   Clear Data
-                </button>
+                </Button>
               </div>
             </div>
           </section>

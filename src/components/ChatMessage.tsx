@@ -1,12 +1,9 @@
 import { useState, useCallback } from 'react'
 import { Message, ToolEntry } from '../agent/types'
-import ActionConfirm from './ActionConfirm'
+import { MarkdownArtifactCard } from './chat/artifacts'
 
 interface ChatMessageProps {
   message: Message
-  onApproveAction?: () => void
-  onRejectAction?: () => void
-  activePendingActionId?: string | null
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -44,7 +41,7 @@ function summariseEntries(entries: ToolEntry[]): string {
   const fileSearch  = count(e => e.tool === 'file_search')
   const connectorReads = count(e => e.group !== 'file' && e.group !== 'memory' && !e.tool.includes('create') && !e.tool.includes('update') && !e.tool.includes('comment') && !e.tool.includes('transition') && !e.tool.includes('upload'))
   const connectorWrites = count(e => e.group !== 'file' && e.group !== 'memory' && (e.tool.includes('create') || e.tool.includes('update') || e.tool.includes('comment') || e.tool.includes('transition') || e.tool.includes('upload')))
-  const fileWrite   = count(e => ['file_write','file_mkdir'].includes(e.tool))
+  const fileWrite   = count(e => ['file_write', 'report_write', 'file_mkdir'].includes(e.tool))
   const memRead     = count(e => e.tool === 'memory_read')
   const memWrite    = count(e => e.tool === 'memory_update')
   const memDelete   = count(e => e.tool === 'memory_delete')
@@ -85,7 +82,7 @@ function ThinkingBlock({ message }: { message: Message }) {
     : content
 
   return (
-    <div className="pl-11 mb-2 animate-slide-in">
+    <div className="ui-chat-thinking">
       {/* Header row */}
       <button
         onClick={() => hasMore && setExpanded(v => !v)}
@@ -145,7 +142,7 @@ function ToolSummaryBlock({ entries }: { entries: ToolEntry[] }) {
   const summary = summariseEntries(entries)
 
   return (
-    <div className="pl-11 mb-2 animate-slide-in">
+    <div className="ui-chat-tool-summary">
       <button
         onClick={toggle}
         className="flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-500 transition-colors"
@@ -169,7 +166,7 @@ function ToolSummaryBlock({ entries }: { entries: ToolEntry[] }) {
 
 // ─── Main message renderer ────────────────────────────────────────────────────
 
-export default function ChatMessage({ message, onApproveAction, onRejectAction, activePendingActionId }: ChatMessageProps) {
+export default function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
 
   // Thinking block
@@ -177,23 +174,18 @@ export default function ChatMessage({ message, onApproveAction, onRejectAction, 
     return <ThinkingBlock message={message} />
   }
 
+  // Markdown report artifact
+  if (message.type === 'artifact' && message.artifact) {
+    return (
+      <div className="ui-chat-artifact animate-slide-in">
+        <MarkdownArtifactCard artifact={message.artifact} />
+      </div>
+    )
+  }
+
   // Tool summary block
   if (message.type === 'tool_summary' && message.toolEntries) {
     return <ToolSummaryBlock entries={message.toolEntries} />
-  }
-
-  if (message.pendingAction) {
-    const isActive = message.pendingAction.id === activePendingActionId
-    return (
-      <div className="pl-11 animate-slide-in">
-        <ActionConfirm
-          action={message.pendingAction}
-          status={message.pendingActionStatus || (isActive ? 'active' : 'cancelled')}
-          onApprove={isActive ? (onApproveAction || (() => undefined)) : (() => undefined)}
-          onReject={isActive ? (onRejectAction || (() => undefined)) : (() => undefined)}
-        />
-      </div>
-    )
   }
 
   // Render rich content
@@ -217,7 +209,7 @@ export default function ChatMessage({ message, onApproveAction, onRejectAction, 
         )
       }
       return (
-        <div key={i} className="prose-chat">
+        <div key={i} className="ui-prose-chat">
           {part.split('\n').map((line, j) => {
             line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             line = line.replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -252,19 +244,19 @@ export default function ChatMessage({ message, onApproveAction, onRejectAction, 
     new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   return (
-    <div className={`flex gap-3 animate-slide-in ${isUser ? 'flex-row-reverse' : ''}`}>
-      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isUser ? 'bg-neutral-950 text-white' : 'bg-gray-200 text-gray-600'}`}>
+    <div className={`ui-chat-message ${isUser ? 'ui-chat-message--user' : ''}`}>
+      <div className={`ui-chat-avatar ${isUser ? 'ui-chat-avatar--user' : 'ui-chat-avatar--assistant'}`}>
         {isUser ? <UserIcon /> : <BotIcon />}
       </div>
       <div className={`max-w-[80%] ${isUser ? 'text-right' : ''}`}>
-        <div className={`px-4 py-3 ${isUser ? 'message-user' : 'message-assistant'}`}>
+        <div className={`px-4 py-3 ${isUser ? 'ui-chat-bubble-user' : 'ui-chat-bubble-assistant'}`}>
           {renderContent(message.content)}
           {message.isStreaming && (
             <span className="inline-block w-2 h-4 ml-0.5 bg-gray-400 rounded-sm animate-pulse align-text-bottom" />
           )}
         </div>
         {!message.isStreaming && (
-          <p className={`text-xs text-gray-400 mt-1 ${isUser ? 'text-right' : ''}`}>
+          <p className={`ui-chat-meta ${isUser ? 'text-right' : ''}`}>
             {formatTime(message.timestamp)}
           </p>
         )}

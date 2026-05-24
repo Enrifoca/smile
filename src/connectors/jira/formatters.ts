@@ -130,6 +130,11 @@ export function getJiraActionConfirmation(actionType: string, details: Record<st
         description: 'Review the issues before they are created.',
         risk: 'medium',
         approveLabel: `Create all ${issues.length} issues`,
+        acceptanceCriteria: [
+          'Project and issue type are correct for each row',
+          'Summaries match what you asked for',
+          'No duplicate issues in the batch',
+        ],
         items: issues.map(issue => ({
           title: String(issue.summary || '(untitled)'),
           subtitle: issue.projectKey ? String(issue.projectKey) : undefined,
@@ -144,6 +149,11 @@ export function getJiraActionConfirmation(actionType: string, details: Record<st
         preview: String(details.summary || ''),
         risk: 'medium',
         approveLabel: 'Create issue',
+        acceptanceCriteria: [
+          'Project and issue type are correct',
+          'Summary matches your request',
+          'Description does not expose secrets or credentials',
+        ],
         fields: [
           { label: 'Project', value: String(details.projectKey || '') },
           { label: 'Type', value: String(details.issueType || details.issueTypeName || '') },
@@ -226,6 +236,18 @@ export function getJiraActionPreview(name: string, args: Record<string, unknown>
 
 export function formatJiraToolResultForAI(name: string, result: unknown): string {
   const raw = unwrapToolResult(result)
+  const failure = getFailureMessage(result, raw)
+  if (failure) {
+    const hint = /priority/i.test(failure)
+      ? ' Pass priority as a name string (e.g. "Low"); the connector converts it for Jira.'
+      : ''
+    return `Error: ${failure}${hint}`
+  }
+
+  if (name === 'jira_create_issue' || name === 'jira_batch_create_issues') {
+    const keyMatch = raw.match(/[A-Z]+-\d+/)
+    if (keyMatch) return `Created ${keyMatch[0]}`
+  }
 
   if (name === 'jira_search_issues') {
     try {
@@ -348,9 +370,49 @@ export const approveJiraAction: NonNullable<ConnectorDefinition['approveAction']
   const errors = failed.length > 0
     ? ` ${created.length > 0 ? 'Stopped after an error' : 'Action blocked'}: ${failed[0]}${failed.length > 1 ? ` (${failed.length} total failures)` : ''}.`
     : ''
+  const recoverable = failed.length > 0 && !isSystemicFailure(failed[0])
 
   return {
     handled: true,
     message: summary + errors || 'No issues were created.',
+    resumeAgent: recoverable,
+  }
+}
+
+function extractJiraProjectKey(args: Record<string, unknown>): string | null {
+  const direct = str(args.projectKey)
+  if (direct) return direct.toUpperCase()
+
+  const issueKey = str(args.issueIdOrKey || args.issueKey)
+  const fromIssue = issueKey.match(/^([A-Z][A-Z0-9]+)-\d+$/)
+  if (fromIssue) return fromIssue[1].toUpperCase()
+
+  const batch = (args.issues as Array<Record<string, unknown>>) || []
+  const batchKey = str(batch[0]?.projectKey)
+  return batchKey ? batchKey.toUpperCase() : null
+}
+
+export function getJiraScopeForSourceMemory(
+  name: string,
+  args: Record<string, unknown>,
+): { connectorId: string; scopeId: string } | null {
+  void name
+  const scopeId = extractJiraProjectKey(args)
+  if (!scopeId) return null
+  return { connectorId: 'jira', scopeId }
+}
+
+export function buildJiraSourceMemoryLeaf(
+  name: string,
+  args: Record<string, unknown>,
+  formattedResult: string,
+): { kind: 'write_outcome'; toolName: string; summary: string } {
+  const projectKey = extractJiraProjectKey(args)
+  const prefix = projectKey ? `[${projectKey}] ` : ''
+  const firstLine = formattedResult.split('\n').find(line => line.trim()) || formattedResult
+  return {
+    kind: 'write_outcome',
+    toolName: name,
+    summary: `${prefix}${firstLine}`.slice(0, 500),
   }
 }

@@ -18,6 +18,12 @@ export const fileWriteSchema = z.object({
   content: z.string().describe('Content to write'),
 })
 
+export const reportWriteSchema = z.object({
+  title: z.string().describe('Human-readable report title shown on the chat card (e.g. "Batch create plan — Q2 rollout")'),
+  content: z.string().describe('Full markdown body. Use for detailed plans, tables, record specs, fields, and descriptions.'),
+  path: z.string().optional().describe('Optional relative .md path. Defaults to .smile/reports/<date>_<slug>.md'),
+})
+
 export const fileMkdirSchema = z.object({
   path: z.string().describe('Relative path of the directory to create (creates all intermediate directories automatically)'),
 })
@@ -34,8 +40,12 @@ export const fileDeleteSchema = z.object({
 // ============ MEMORY TOOLS ============
 
 export const memoryReadSchema = z.object({
-  section: z.enum(['all', 'learned', 'style']).optional().default('all')
-    .describe('Which memory area to read. Use "all" to read User Memory plus Learned Notes.'),
+  section: z.enum(['all', 'learned', 'style', 'source']).optional().default('all')
+    .describe('Which memory area to read. Use "all" for User Memory + Learned Notes. Use "source" for connector scope evidence.'),
+  connectorId: z.string().optional()
+    .describe('Connector id when section is "source", e.g. "jira" or your connector id.'),
+  scopeId: z.string().optional()
+    .describe('Scope id when section is "source", e.g. a project key or workspace id.'),
 })
 
 export const memoryUpdateSchema = z.object({
@@ -88,6 +98,13 @@ export const toolDefinitions: ToolDefinition[] = [
     category: 'file-write',
   },
   {
+    name: 'report_write',
+    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates.',
+    schema: reportWriteSchema,
+    requiresConfirmation: false,
+    category: 'file-write',
+  },
+  {
     name: 'file_mkdir',
     description: 'Create a directory (and all parent directories) in the workspace. Use this when you need to create a folder structure before writing files, or when explicitly asked to create a folder.',
     schema: fileMkdirSchema,
@@ -105,7 +122,7 @@ export const toolDefinitions: ToolDefinition[] = [
   // Memory Tools
   {
     name: 'memory_read',
-    description: 'Read User Memory and Learned Notes. Use only when you need exact entries before deleting, deduplicating, or resolving a memory conflict.',
+    description: 'Read User Memory, Learned Notes (full learned.md content), or connector source memory for a monitored scope. Use "source" with connectorId and scopeId to read sealed connector evidence.',
     schema: memoryReadSchema,
     requiresConfirmation: false,
     category: 'memory',
