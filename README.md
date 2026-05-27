@@ -28,8 +28,12 @@ It gives you the reusable structure: a local desktop shell, multi-model agent lo
 # Install dependencies
 npm install
 
-# Run in development mode
+# Run in development mode (starts Vite + Electron)
 npm run electron:dev
+# same as: npm run dev
+```
+
+If the window is blank after launch, your shell may have `ELECTRON_RUN_AS_NODE` set (common in Electron-based editors). The dev scripts clear it automatically; you can also run `unset ELECTRON_RUN_AS_NODE` before starting.
 ```
 
 ### Building

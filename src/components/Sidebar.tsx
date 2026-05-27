@@ -14,7 +14,24 @@ interface SidebarProps {
   onNewChat: () => void
   currentChatId: string | null
   collapsed: boolean
+  onToggleCollapsed: () => void
 }
+
+const SidebarCollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
+  <svg className="transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    {collapsed ? (
+      <>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 5l7 7-7 7" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7" />
+      </>
+    ) : (
+      <>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 19l-7-7 7-7" />
+      </>
+    )}
+  </svg>
+)
 
 // Icons as simple SVG components
 const ChatIcon = () => (
@@ -66,14 +83,21 @@ export default function Sidebar({
   onNewChat,
   currentChatId,
   collapsed,
+  onToggleCollapsed,
 }: SidebarProps) {
   const [chatHistoryOpen, setChatHistoryOpen] = useState(true)
   const [chats, setChats] = useState<Chat[]>([])
-  const { storage } = useElectron()
+  const [logoHovered, setLogoHovered] = useState(false)
+  const { storage, platform } = useElectron()
+  const isMac = platform === 'darwin'
 
   useEffect(() => {
     loadChats()
   }, [currentChatId])
+
+  useEffect(() => {
+    if (!collapsed) setLogoHovered(false)
+  }, [collapsed])
 
   const loadChats = async () => {
     try {
@@ -111,9 +135,40 @@ export default function Sidebar({
 
   return (
     <aside className={`app-sidebar ${collapsed ? 'collapsed' : ''} relative bg-white border-r-2 border-neutral-950 flex flex-col h-full transition-[width] duration-200`}>
-      {/* Drag region for macOS */}
-      <div className="h-7 drag-region border-b-2 border-neutral-950 px-2 text-center text-sm font-medium flex items-center justify-center">
-        <span className="truncate">{collapsed ? ':D' : 'smile:D'}</span>
+      <div
+        className={`sidebar-brand h-7 border-b-2 border-neutral-950 px-2 text-sm font-medium flex items-center ${
+          isMac ? '' : 'drag-region'
+        } ${collapsed ? 'justify-center' : ''}`}
+        onMouseEnter={() => collapsed && setLogoHovered(true)}
+        onMouseLeave={() => collapsed && setLogoHovered(false)}
+      >
+        {collapsed && logoHovered ? (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="sidebar-collapse-button no-drag"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <SidebarCollapseIcon collapsed />
+          </button>
+        ) : collapsed ? (
+          <span className="truncate select-none">:D</span>
+        ) : (
+          <>
+            <div className="sidebar-brand-spacer shrink-0" aria-hidden="true" />
+            <span className="truncate flex-1 text-center">smile:D</span>
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              className="sidebar-collapse-button no-drag shrink-0"
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+            >
+              <SidebarCollapseIcon collapsed={false} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* New Chat Button */}
