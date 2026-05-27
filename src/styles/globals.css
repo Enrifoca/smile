@@ -565,8 +565,24 @@ input:focus, textarea:focus, select:focus {
   z-index: 30;
 }
 
+.mac-titlebar {
+  box-sizing: border-box;
+  height: var(--mac-titlebar-height);
+  background-color: var(--mac-titlebar-bg);
+  border-bottom: 2px solid var(--color-border-strong);
+}
+
 .app-sidebar.collapsed {
   width: var(--sidebar-collapsed-width);
+}
+
+.app-sidebar.collapsed .sidebar-brand {
+  min-width: var(--sidebar-collapse-button-size);
+}
+
+.sidebar-brand-spacer {
+  width: var(--sidebar-collapse-button-size);
+  height: var(--sidebar-collapse-button-size);
 }
 
 .sidebar-collapse-button {
@@ -575,8 +591,6 @@ input:focus, textarea:focus, select:focus {
   height: var(--sidebar-collapse-button-size);
   align-items: center;
   justify-content: center;
-  align-self: flex-start;
-  margin-top: 0.125rem;
   border-radius: 0.5rem;
   background: transparent;
   color: var(--sidebar-collapse-button-color);
@@ -611,10 +625,21 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* Chat input */
+.ui-chat-input-shell {
+  @apply flex items-center rounded-xl border border-gray-200 bg-white;
+  @apply focus-within:border-neutral-400 focus-within:ring-2 focus-within:ring-neutral-100;
+}
+
+.ui-chat-input-action {
+  @apply shrink-0 flex items-center justify-center p-2 transition-colors;
+  -webkit-app-region: no-drag;
+}
+
 .ui-chat-input,
 .chat-input {
-  @apply w-full resize-none rounded-xl border border-gray-200 px-4 py-3 pr-12 text-gray-800 placeholder-gray-400;
-  @apply focus:border-neutral-400 focus:ring-2 focus:ring-neutral-100;
+  @apply flex-1 min-h-[2.75rem] max-h-[9.375rem] resize-none border-0 bg-transparent px-1 py-3 text-gray-800 placeholder-gray-400;
+  @apply focus:outline-none focus:ring-0;
+  overflow-y: hidden;
 }
 
 .ui-chat-empty {
