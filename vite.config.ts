@@ -10,9 +10,6 @@ export default defineConfig({
     electron([
       {
         entry: 'electron/main.ts',
-        onstart(options) {
-          options.startup()
-        },
         vite: {
           build: {
             outDir: 'dist-electron',
@@ -24,8 +21,15 @@ export default defineConfig({
       },
       {
         entry: 'electron/preload.ts',
-        onstart(options) {
-          options.reload()
+        onstart({ startup, reload }) {
+          const env = { ...process.env }
+          delete env.ELECTRON_RUN_AS_NODE
+          const spawnOptions = { env }
+          if (process.electronApp) {
+            reload()
+          } else {
+            startup(['.', '--no-sandbox'], spawnOptions)
+          }
         },
         vite: {
           build: {

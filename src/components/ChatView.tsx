@@ -22,9 +22,20 @@ type McpConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 /** Returns a specific, human-readable label for a tool call based on its arguments */
 
+const PaperclipIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+    />
+  </svg>
+)
+
 const SendIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14m-7-7l7 7-7 7" />
   </svg>
 )
 
@@ -203,12 +214,18 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Auto-resize textarea
+  const CHAT_INPUT_MAX_HEIGHT_PX = 150
+
+  // Auto-resize textarea; scrollbar only when content exceeds visible height
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`
-    }
+    const el = textareaRef.current
+    if (!el) return
+
+    el.style.height = 'auto'
+    const scrollHeight = el.scrollHeight
+    const nextHeight = Math.min(scrollHeight, CHAT_INPUT_MAX_HEIGHT_PX)
+    el.style.height = `${nextHeight}px`
+    el.style.overflowY = scrollHeight > nextHeight ? 'auto' : 'hidden'
   }, [input])
 
   const initializeAgent = async () => {
@@ -844,8 +861,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
             </div>
           )}
 
-          <div className="relative">
-            {/* Hidden file input */}
+          <div className="ui-chat-input-shell">
             <input
               ref={fileInputRef}
               type="file"
@@ -853,19 +869,18 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
               onChange={handleFileSelect}
               className="hidden"
             />
-            
-            {/* Attach button */}
+
             <button
+              type="button"
               onClick={openFilePicker}
               disabled={isLoading || mcpConnectionState === 'connecting'}
-              className="absolute left-3 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 disabled:text-gray-300 transition-colors"
+              className="ui-chat-input-action text-gray-400 hover:text-gray-600 disabled:text-gray-300"
               title="Attach files"
+              aria-label="Attach files"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-              </svg>
+              <PaperclipIcon />
             </button>
-            
+
             <textarea
               ref={textareaRef}
               value={input}
@@ -873,33 +888,45 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
               onKeyDown={handleKeyDown}
               placeholder={mcpConnectionState === 'connecting' ? 'Connecting to connector...' : 'Ask me anything...'}
               rows={1}
-              className="ui-chat-input pl-12"
+              className="ui-chat-input"
               disabled={isLoading || mcpConnectionState === 'connecting'}
             />
+
             {isLoading ? (
               <button
+                type="button"
                 onClick={() => agent?.abort()}
                 title="Stop"
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-red-500 hover:text-red-600 transition-colors"
+                aria-label="Stop"
+                className="ui-chat-input-action text-red-500 hover:text-red-600"
               >
                 <StopIcon />
               </button>
             ) : (
               <button
+                type="button"
                 onClick={handleSend}
                 disabled={!input.trim() || mcpConnectionState === 'connecting'}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-neutral-700 hover:text-neutral-950 disabled:text-gray-300 transition-colors"
+                className="ui-chat-input-action text-neutral-700 hover:text-neutral-950 disabled:text-gray-300"
+                title="Send message"
+                aria-label="Send message"
               >
                 <SendIcon />
               </button>
             )}
           </div>
           <p className="text-xs text-gray-400 mt-2 text-center">
-            {mcpConnectionState === 'connecting' 
-              ? 'Please wait while connecting to connector...'
-              : 'Press Enter to send, Shift+Enter for new line. Drop files or click 📎 to attach.'}
+            {mcpConnectionState === 'connecting' ? (
+              'Please wait while connecting to connector...'
+            ) : (
+              <span className="inline-flex items-center justify-center gap-1 flex-wrap">
+                <span>Press Enter to send, Shift+Enter for new line. Drop files or click</span>
+                <PaperclipIcon className="w-3.5 h-3.5 shrink-0" />
+                <span>to attach.</span>
+              </span>
+            )}
           </p>
-          {managedProjects.length > 0 && (
+          {managedProjects.length > 0 && mcpConnectionState !== 'connected' && (
             <details className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
               <summary className="cursor-pointer select-none font-medium text-gray-700">
                 Scope this message with / "scope name" or a connector key. Connected scopes ({managedProjects.length})
