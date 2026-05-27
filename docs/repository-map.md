@@ -9,7 +9,7 @@
 
 ## `src`
 
-- `src/agent`: connector-neutral agent runtime.
+- `src/agent`: connector-neutral agent runtime — [README](../src/agent/README.md), [HELPERS](../src/agent/HELPERS.md) (loop guards, errors), [taskContinuity](../src/agent/taskContinuity.md).
 - `src/prompts`: Markdown prompts and prompt assembly.
 - `src/connectors`: connector contract, registry, and connector modules.
 - `src/components`: generic React UI.

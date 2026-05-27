@@ -42,7 +42,7 @@ After a tool summary row (e.g. “Explored 1 file”), the next step is always a
 
 ## Markdown report artifacts
 
-When the agent calls `report_write`, a **report card** appears in chat (Manus-style). Click to open the full markdown in a modal. Modules live in `src/components/chat/artifacts/`. See `src/components/chat/artifacts/README.md`.
+When the agent calls `report_write`, a **report card** appears in chat (Manus-style). Click to open the full markdown in a modal. The same report is also pinned above the composer as an **active report pill** (dismiss with × to ask unrelated questions). Modules live in `src/components/chat/artifacts/`. See `src/components/chat/artifacts/README.md`.
 
 ## Other chat modules
 
@@ -51,6 +51,7 @@ When the agent calls `report_write`, a **report card** appears in chat (Manus-st
 | `ChatBanner` | Connector connection status above the transcript |
 | `ChatActivityIndicator` | Live status while the agent is working — wired from `src/agent/index.ts` via `onAgentStatus` |
 | `ChatEmptyState` | Empty transcript placeholder |
+| `ActiveReportPill` | Latest report chip above composer — see artifacts README |
 
 Agent-side status labels and task continuity: [src/agent/taskContinuity.md](../../agent/taskContinuity.md).
 

@@ -14,13 +14,13 @@ This folder contains the connector-neutral runtime.
 | `toolResults.ts` | Format core tool results for model context |
 | `toolErrors.ts` | Detect failed tool results for retry / error loops |
 | `scratchpad.ts` | Auto scratchpad notes after tools |
-| `actionGuards.ts` | Nudge model toward tools on actionable requests |
-| `taskContinuity.ts` | Turn intent, read→write nudges, report grounding — [taskContinuity.md](./taskContinuity.md) |
+| `actionGuards.ts` | Action-first guard — [HELPERS.md § Loop guards](./HELPERS.md#loop-guards) |
+| `taskContinuity.ts` | Read→write nudges, report grounding — [taskContinuity.md](./taskContinuity.md) |
 | `artifacts.ts` | Markdown report paths and tool result copy |
 | `jsonSchema.ts` | Zod → JSON Schema for tool calling |
 | `compression/` | Tool result size caps — [compression/README.md](./compression/README.md) |
 
-More detail on helpers: [HELPERS.md](./HELPERS.md).
+More detail: [HELPERS.md](./HELPERS.md) (guards, errors, artifacts, streaming). Task continuity: [taskContinuity.md](./taskContinuity.md).
 
 ## Rules
 

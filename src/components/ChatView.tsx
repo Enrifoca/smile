@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
 import { Agent, Message, PendingAction, UserProfile } from '../agent'
@@ -6,11 +6,11 @@ import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
 import { formatSourceMemoryListing, formatSourceMemoryRead } from '../memory/promptSections'
 import { SourceMemoryReadResult, SourceMemoryScopeListing } from '../memory/sourceTypes'
-import { buildReportPath, buildReportToolResult } from '../agent/artifacts'
+import { buildReportPath, buildReportToolResult, getActiveReportFromMessages } from '../agent/artifacts'
 import { loadEnabledConnectors, ConnectorScope } from '../connectors/registry'
 import ChatMessage from './ChatMessage'
 import { Button } from './ui/Button'
-import { ChatBanner, ChatEmptyState, ChatActivityIndicator, WriteActionConfirmModule } from './chat'
+import { ChatBanner, ChatEmptyState, ChatActivityIndicator, WriteActionConfirmModule, ActiveReportPill } from './chat'
 
 interface ChatViewProps {
   chatId: string | null
@@ -57,6 +57,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; path: string; size: number }>>([])
   const [managedProjects, setManagedProjects] = useState<ConnectorScope[]>([])
   const [isDragging, setIsDragging] = useState(false)
+  const [dismissedReportMessageId, setDismissedReportMessageId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Streaming content accumulator (keyed by message id)
   const streamingContentRef = useRef<Map<string, string>>(new Map())
@@ -77,6 +78,9 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const electron = useElectron()
   const { storage, mcp, file, ai, memory: memoryAPI } = electron
+
+  const activeReport = useMemo(() => getActiveReportFromMessages(messages), [messages])
+  const showActiveReport = activeReport && activeReport.messageId !== dismissedReportMessageId
 
   const loadMemoryForAgent = async (): Promise<MemoryStore | null> => {
     try {
@@ -207,6 +211,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
       setMessages([])
       agent?.clearHistory()
     }
+    setDismissedReportMessageId(null)
   }, [chatId, agent])
 
   // Auto-scroll to bottom when messages update
@@ -827,6 +832,15 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
             />
           )}
 
+          {showActiveReport && (
+            <ActiveReportPill
+              artifact={activeReport.artifact}
+              messageId={activeReport.messageId}
+              onDismiss={() => setDismissedReportMessageId(activeReport.messageId)}
+              className="mb-3"
+            />
+          )}
+
           {/* Attached Files Preview */}
           {attachedFiles.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
@@ -886,7 +900,13 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={mcpConnectionState === 'connecting' ? 'Connecting to connector...' : 'Ask me anything...'}
+              placeholder={
+                mcpConnectionState === 'connecting'
+                  ? 'Connecting to connector...'
+                  : showActiveReport
+                    ? 'Ask about this report, or dismiss it to chat about something else…'
+                    : 'Ask me anything...'
+              }
               rows={1}
               className="ui-chat-input"
               disabled={isLoading || mcpConnectionState === 'connecting'}

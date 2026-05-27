@@ -42,12 +42,12 @@ User message
 | `toolResults.ts` | Appends grounding hints after `file_read` |
 | `artifacts.ts` | Report tool result text (same-path revise rules) |
 | `toolErrors.ts` | Detect failed tool results for retry loops |
+| `actionGuards.ts` | Action-first guard — [HELPERS.md § Loop guards](./HELPERS.md#loop-guards) |
 | `../prompts/core/system.md` | Reports section — grounding + same-path overwrite |
 | `../components/chat/artifacts/README.md` | Report card UI |
 
 ## Customization
 
-- **Intent keywords:** extend `inferTurnIntent()` (e.g. Italian: `aggiorna`, `modifica`).
 - **New workflow types:** add a `TurnIntentKind` + nudge in `buildIncompleteWorkflowNudge`.
 - **Connector read/write detection:** uses `ToolDefinition.category` from `src/connectors/types.ts` — no connector ids in this module.
 
@@ -56,3 +56,4 @@ User message
 - Do not add connector-specific tool name lists here — use categories.
 - Do not put user-facing copy in this file; nudges are `[SYSTEM]` messages for the model.
 - Prompt-level behavior belongs in `src/prompts/core/system.md`.
+- Keep keyword lists **English only** — smile:D framework copy and intent heuristics are English; do not add locale-specific phrases to core code.

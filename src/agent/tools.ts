@@ -92,7 +92,7 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'file_write',
-    description: 'Write content to a file in the workspace. Automatically creates parent directories if they do not exist — you do NOT need to create them first.',
+    description: 'Write content to a file in the workspace. Automatically creates parent directories if they do not exist. For chat-visible markdown reports (plans, specs, batch lists), use report_write instead — it shows a report card and composer pill in the UI.',
     schema: fileWriteSchema,
     requiresConfirmation: false,
     category: 'file-write',

@@ -18,7 +18,7 @@ smile:D is a framework for building vertical AI agents in a desktop app.
 - Memory taxonomy and admission rules: `docs/memory.md`
 - Repository map: `docs/repository-map.md`
 - Agent loop: `src/agent/index.ts`
-- Runtime helpers: `src/agent/*.ts` — overview [HELPERS.md](src/agent/HELPERS.md), task continuity [taskContinuity.md](src/agent/taskContinuity.md)
+- Runtime helpers and loop guards: [HELPERS.md](src/agent/HELPERS.md) — task continuity: [taskContinuity.md](src/agent/taskContinuity.md)
 - Prompt assembly: `src/prompts/index.ts`
 - Core prompts: `src/prompts/core/*.md`
 - Tool definitions: `src/agent/tools.ts`

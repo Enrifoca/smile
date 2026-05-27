@@ -4,11 +4,19 @@ import { Button } from '../../ui/Button'
 
 export interface MarkdownArtifactModalProps {
   artifact: MarkdownArtifact
-  content: string
+  content: string | null
+  loading?: boolean
+  error?: string | null
   onClose: () => void
 }
 
-export function MarkdownArtifactModal({ artifact, content, onClose }: MarkdownArtifactModalProps) {
+export function MarkdownArtifactModal({
+  artifact,
+  content,
+  loading = false,
+  error = null,
+  onClose,
+}: MarkdownArtifactModalProps) {
   return (
     <div className="ui-artifact-modal-backdrop" onClick={onClose} role="presentation">
       <div
@@ -28,7 +36,15 @@ export function MarkdownArtifactModal({ artifact, content, onClose }: MarkdownAr
           </Button>
         </div>
         <div className="ui-artifact-modal-body">
-          <MarkdownRenderer content={content} />
+          {loading ? (
+            <p className="ui-artifact-card-loading">Loading report…</p>
+          ) : error ? (
+            <p className="ui-artifact-card-error">{error}</p>
+          ) : content ? (
+            <MarkdownRenderer content={content} />
+          ) : (
+            <p className="ui-artifact-card-loading">Report is empty</p>
+          )}
         </div>
       </div>
     </div>
