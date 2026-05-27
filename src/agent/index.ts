@@ -12,6 +12,14 @@ import { formatScratchpadNote, getCoreScratchpadNote } from './scratchpad'
 import { getCoreToolEntry } from './toolEntries'
 import { formatCoreToolResultForAI } from './toolResults'
 import { isFailedToolResult } from './toolErrors'
+import {
+  buildIncompleteWorkflowNudge,
+  formatTurnIntentForScratchpad,
+  inferTurnIntent,
+  shouldNudgeIncompleteWorkflow,
+  type TurnIntent,
+  type ToolRunRecord,
+} from './taskContinuity'
 import { compressToolResult } from './compression'
 import type { MarkdownArtifact } from './artifacts'
 import type { AIStreamProgressEvent } from '../shared/streamProgress'
@@ -54,6 +62,9 @@ export class Agent {
   // Prevents action requests from turning into long prose instead of tool calls.
   // Reset each processMessage call; used at most once to avoid loops.
   private actionFirstNudgedThisTurn = false
+  private taskContinuationNudgedThisTurn = false
+  private turnIntent: TurnIntent = { kind: 'general', summary: '' }
+  private toolsRunThisTurn: ToolRunRecord[] = []
 
   private setAgentStatus(status: string | null): void {
     this.config.onAgentStatus?.(status)
@@ -170,6 +181,14 @@ export class Agent {
     this.scratchpadWrittenThisTurn = false
     this.scratchpadToolWrittenThisTurn = false
     this.actionFirstNudgedThisTurn = false
+    this.taskContinuationNudgedThisTurn = false
+    this.toolsRunThisTurn = []
+    this.turnIntent = inferTurnIntent(userMessage)
+    const intentNote = formatTurnIntentForScratchpad(this.turnIntent)
+    if (intentNote) {
+      this.sessionScratchpad = formatScratchpadNote(intentNote)
+      this.scratchpadWrittenThisTurn = true
+    }
     const userMsg: Message = {
       id: uuidv4(),
       role: 'user',
@@ -229,6 +248,10 @@ export class Agent {
 
         for (const toolCall of response.toolCalls) {
           console.log('[Agent] Tool call:', toolCall.name, toolCall.arguments)
+          this.toolsRunThisTurn.push({
+            name: toolCall.name,
+            category: this.getToolDefinition(toolCall.name)?.category,
+          })
           const toolEntry = this.getToolEntry(toolCall.name, toolCall.arguments)
           if (toolCall.name === 'report_write') {
             const title = String(toolCall.arguments.title || '').trim()
@@ -280,7 +303,7 @@ export class Agent {
             console.log(`[Agent] Cache hit — skipping re-execution of ${toolCall.name}`)
           } else {
             const result = await this.executeTool(toolCall.name, toolCall.arguments)
-            formattedResult = this.formatToolResultForAI(toolCall.name, result)
+            formattedResult = this.formatToolResultForAI(toolCall.name, result, toolCall.arguments)
 
             const isError = isFailedToolResult(result, formattedResult)
             if (isError) {
@@ -384,6 +407,21 @@ export class Agent {
         continue
       }
 
+      if (
+        !this.taskContinuationNudgedThisTurn &&
+        shouldNudgeIncompleteWorkflow(this.turnIntent, this.toolsRunThisTurn, strippedContent || rawContent)
+      ) {
+        console.log('[Agent] Incomplete workflow — nudging model to finish read→write task')
+        this.taskContinuationNudgedThisTurn = true
+        this.conversationHistory.push({
+          id: uuidv4(),
+          role: 'user',
+          content: buildIncompleteWorkflowNudge(this.turnIntent),
+          timestamp: new Date().toISOString(),
+        })
+        continue
+      }
+
       if (!wasStreamed && strippedContent) {
         const assistantMsg: Message = { id: uuidv4(), role: 'assistant', content: strippedContent, timestamp: new Date().toISOString() }
         this.conversationHistory.push(assistantMsg)
@@ -430,6 +468,9 @@ export class Agent {
     // Append the live session scratchpad to the system prompt so the agent
     // always knows what it has already done this turn — even if old tool result
     // messages have been pushed out of the 40-message context window.
+    const intentSection = this.turnIntent.kind !== 'general' && this.turnIntent.summary
+      ? `\n\n## User Goal This Turn\n${this.turnIntent.summary}\n\nDo not stop after read-only steps if a write is still required.`
+      : ''
     const scratchpadSection = this.sessionScratchpad
       ? `\n\n## Session Scratchpad — What You've Done This Turn\n${this.sessionScratchpad}\n\nDo NOT re-read files or re-run searches that are already listed above. Use their results from context.`
       : ''
@@ -439,7 +480,7 @@ export class Agent {
       this.config.memory,
       undefined,
       this.config.monitoredScopes || [],
-    ) + scratchpadSection
+    ) + intentSection + scratchpadSection
 
     // Simple chronological window — last 40 messages in order.
     // tool_summary messages are UI-only artifacts (grouped icons bar) and carry
@@ -828,7 +869,15 @@ export class Agent {
     let note = getCoreScratchpadNote(toolName, args, formattedResult)
     note = note || this.getConnectorForTool(toolName)?.definition.getScratchpadNote?.(toolName, args, formattedResult) || ''
     if (note) {
-      this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + formatScratchpadNote(note)
+      let line = formatScratchpadNote(note)
+      if (
+        (toolName === 'file_read' || toolName === 'file_read_ocr')
+        && (this.turnIntent.kind === 'update_report' || this.turnIntent.kind === 'update_file')
+      ) {
+        const path = String(args.path || '')
+        line += `\n✓ Pending: ${this.turnIntent.kind === 'update_report' ? 'report_write' : 'file_write'} to ${path || 'same path'} with user's edits (grounded in file content)`
+      }
+      this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + line
     }
   }
 
@@ -872,7 +921,7 @@ export class Agent {
    * Format tool result for AI context.
    * Converts tool JSON into compact readable text to minimise tokens per loop.
    */
-  private formatToolResultForAI(toolName: string, result: unknown): string {
+  private formatToolResultForAI(toolName: string, result: unknown, args?: Record<string, unknown>): string {
     const data = result as { success?: boolean; data?: unknown; error?: string }
 
     if (data.success === false) return `Error: ${data.error || 'Unknown error'}`
@@ -881,7 +930,7 @@ export class Agent {
     const connectorFormatted = connector?.definition.formatToolResultForAI?.(toolName, result)
     const formatted = connectorFormatted !== null && connectorFormatted !== undefined
       ? connectorFormatted
-      : formatCoreToolResultForAI(toolName, result)
+      : formatCoreToolResultForAI(toolName, result, args)
 
     const tool = this.getToolDefinition(toolName)
     return compressToolResult({
@@ -937,7 +986,7 @@ export class Agent {
 
     // ── Single-tool approval (create, update, comment, transition, etc.) ──
     const result = await this.executeTool(action.type, action.data)
-    const formattedResult = this.formatToolResultForAI(action.type, result)
+    const formattedResult = this.formatToolResultForAI(action.type, result, action.data)
 
     // Persist the result in history so the agent has full context when it resumes
     this.conversationHistory.push({

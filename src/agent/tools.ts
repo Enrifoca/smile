@@ -20,8 +20,8 @@ export const fileWriteSchema = z.object({
 
 export const reportWriteSchema = z.object({
   title: z.string().describe('Human-readable report title shown on the chat card (e.g. "Batch create plan — Q2 rollout")'),
-  content: z.string().describe('Full markdown body. Use for detailed plans, tables, record specs, fields, and descriptions.'),
-  path: z.string().optional().describe('Optional relative .md path. Defaults to .smile/reports/<date>_<slug>.md'),
+  path: z.string().optional().describe('Optional relative .md path. When updating an existing report, pass the same path from file_read to overwrite it.'),
+  content: z.string().describe('Full markdown body. When revising after file_read, start from that file and apply only the user\'s edits — do not invent facts, tasks, or counts.'),
 })
 
 export const fileMkdirSchema = z.object({
@@ -99,7 +99,7 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'report_write',
-    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates.',
+    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates.',
     schema: reportWriteSchema,
     requiresConfirmation: false,
     category: 'file-write',

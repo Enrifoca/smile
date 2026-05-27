@@ -18,7 +18,7 @@
 - `src/hooks`: renderer hooks for desktop APIs.
 - `src/types`: shared TypeScript types.
 - `src/utils`: migration or cross-cutting utilities.
-- `src/shared`: shared static data.
+- `src/shared`: shared static data and cross-layer helpers (`aiErrors.ts`, `streamProgress.ts`, model catalog).
 
 ## `electron`
 

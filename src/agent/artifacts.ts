@@ -29,5 +29,7 @@ export function buildReportToolResult(path: string, title: string): string {
     '- Match the report exactly: same item count and same titles (no extras, no omissions, no renames)',
     '- Stay short — one paragraph pointing to the report; do not restate tables or duplicate the spec in chat',
     '- Use file_read on this path when the user wants to revise the report',
+    '- When revising, call report_write with the **same path** to overwrite',
+    '- Content must be grounded in file_read results or user input — never invent details',
   ].join('\n')
 }

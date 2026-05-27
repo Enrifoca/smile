@@ -49,6 +49,9 @@ When the agent calls `report_write`, a **report card** appears in chat (Manus-st
 | Module | Use |
 | --- | --- |
 | `ChatBanner` | Connector connection status above the transcript |
-| `ChatActivityIndicator` | Live status while the agent is working (`Planning next step…`, `Running: …`) |
+| `ChatActivityIndicator` | Live status while the agent is working — wired from `src/agent/index.ts` via `onAgentStatus` |
+| `ChatEmptyState` | Empty transcript placeholder |
+
+Agent-side status labels and task continuity: [src/agent/taskContinuity.md](../../agent/taskContinuity.md).
 
 Legacy import: `./ActionConfirm` re-exports `WriteActionConfirmModule`.
