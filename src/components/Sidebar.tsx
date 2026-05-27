@@ -17,9 +17,15 @@ interface SidebarProps {
   onToggleCollapsed: () => void
 }
 
-const SidebarCollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
-  <svg className="transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    {collapsed ? (
+const SidebarCollapseIcon = ({ expand }: { expand: boolean }) => (
+  <svg
+    className="sidebar-collapse-icon"
+    fill="none"
+    stroke="currentColor"
+    viewBox="0 0 24 24"
+    aria-hidden
+  >
+    {expand ? (
       <>
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 5l7 7-7 7" />
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7" />
@@ -87,17 +93,12 @@ export default function Sidebar({
 }: SidebarProps) {
   const [chatHistoryOpen, setChatHistoryOpen] = useState(true)
   const [chats, setChats] = useState<Chat[]>([])
-  const [logoHovered, setLogoHovered] = useState(false)
   const { storage, platform } = useElectron()
   const isMac = platform === 'darwin'
 
   useEffect(() => {
     loadChats()
   }, [currentChatId])
-
-  useEffect(() => {
-    if (!collapsed) setLogoHovered(false)
-  }, [collapsed])
 
   const loadChats = async () => {
     try {
@@ -135,41 +136,38 @@ export default function Sidebar({
 
   return (
     <aside className={`app-sidebar ${collapsed ? 'collapsed' : ''} relative bg-white border-r-2 border-neutral-950 flex flex-col h-full transition-[width] duration-200`}>
-      <div
-        className={`sidebar-brand h-7 border-b-2 border-neutral-950 px-2 text-sm font-medium flex items-center ${
-          isMac ? '' : 'drag-region'
-        } ${collapsed ? 'justify-center' : ''}`}
-        onMouseEnter={() => collapsed && setLogoHovered(true)}
-        onMouseLeave={() => collapsed && setLogoHovered(false)}
-      >
-        {collapsed && logoHovered ? (
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="sidebar-brand sidebar-brand--collapsed h-7 border-b-2 border-neutral-950 text-sm font-medium no-drag"
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
+        >
+          <span className="sidebar-brand-mark">:D</span>
+          <span className="sidebar-brand-expand-icon" aria-hidden="true">
+            <SidebarCollapseIcon expand />
+          </span>
+        </button>
+      ) : (
+        <div
+          className={`sidebar-brand h-7 border-b-2 border-neutral-950 px-2 text-sm font-medium flex items-center ${
+            isMac ? '' : 'drag-region'
+          }`}
+        >
+          <div className="sidebar-brand-spacer shrink-0" aria-hidden="true" />
+          <span className="sidebar-brand-title truncate flex-1 text-center">smile:D</span>
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="sidebar-collapse-button no-drag"
-            title="Expand sidebar"
-            aria-label="Expand sidebar"
+            className="sidebar-collapse-button no-drag shrink-0"
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
           >
-            <SidebarCollapseIcon collapsed />
+            <SidebarCollapseIcon expand={false} />
           </button>
-        ) : collapsed ? (
-          <span className="truncate select-none">:D</span>
-        ) : (
-          <>
-            <div className="sidebar-brand-spacer shrink-0" aria-hidden="true" />
-            <span className="truncate flex-1 text-center">smile:D</span>
-            <button
-              type="button"
-              onClick={onToggleCollapsed}
-              className="sidebar-collapse-button no-drag shrink-0"
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
-            >
-              <SidebarCollapseIcon collapsed={false} />
-            </button>
-          </>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* New Chat Button */}
       <div className="p-4 pb-3">

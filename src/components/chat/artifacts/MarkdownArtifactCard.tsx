@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { MarkdownArtifact } from '../../../agent/types'
-import { useElectron } from '../../../hooks/useElectron'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { MarkdownArtifactModal } from './MarkdownArtifactModal'
 import { joinClasses } from '../../ui/classNames'
+import { useArtifactContent } from './useArtifactContent'
 
 export interface MarkdownArtifactCardProps {
   artifact: MarkdownArtifact
@@ -17,26 +17,8 @@ const DocIcon = () => (
 )
 
 export function MarkdownArtifactCard({ artifact, className }: MarkdownArtifactCardProps) {
-  const { file } = useElectron()
-  const [content, setContent] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { content, error, loading } = useArtifactContent(artifact.path)
   const [open, setOpen] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    setError(null)
-    file.read(artifact.path).then(result => {
-      if (cancelled) return
-      if (result.success && result.data) {
-        setContent(result.data)
-      } else {
-        setError(result.error || 'Could not load report')
-      }
-    }).catch(() => {
-      if (!cancelled) setError('Could not load report')
-    })
-    return () => { cancelled = true }
-  }, [artifact.path, file])
 
   return (
     <>
@@ -52,15 +34,17 @@ export function MarkdownArtifactCard({ artifact, className }: MarkdownArtifactCa
           ) : content ? (
             <MarkdownRenderer content={content} />
           ) : (
-            <p className="ui-artifact-card-loading">Loading report…</p>
+            <p className="ui-artifact-card-loading">{loading ? 'Loading report…' : 'Report is empty'}</p>
           )}
         </div>
       </div>
 
-      {open && content ? (
+      {open ? (
         <MarkdownArtifactModal
           artifact={artifact}
           content={content}
+          loading={loading}
+          error={error}
           onClose={() => setOpen(false)}
         />
       ) : null}

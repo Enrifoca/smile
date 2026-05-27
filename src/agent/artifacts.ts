@@ -4,12 +4,42 @@ export interface MarkdownArtifact {
   title: string
 }
 
+/** Latest report artifact in a chat transcript (for composer context pill). */
+export interface ActiveReportRef {
+  artifact: MarkdownArtifact
+  messageId: string
+}
+
+export function getActiveReportFromMessages(
+  messages: Array<{ id: string; type?: string; artifact?: MarkdownArtifact }>,
+): ActiveReportRef | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.type === 'artifact' && message.artifact) {
+      return { artifact: message.artifact, messageId: message.id }
+    }
+  }
+  return null
+}
+
 export function slugifyReportTitle(title: string): string {
   return title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 60) || 'report'
+}
+
+export function titleFromReportPath(reportPath: string): string {
+  const fileName = reportPath.split('/').pop()?.replace(/\.md$/i, '') || 'Report'
+  const withoutDate = fileName.replace(/^\d{4}-\d{2}-\d{2}_/, '')
+  const words = withoutDate.replace(/_/g, ' ').trim()
+  return words ? words.replace(/\b\w/g, char => char.toUpperCase()) : 'Report'
+}
+
+export function isReportArtifactPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/')
+  return normalized.includes('.smile/reports/') && normalized.endsWith('.md')
 }
 
 export function buildReportPath(title: string, explicitPath?: string): string {

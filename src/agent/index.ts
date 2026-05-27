@@ -22,6 +22,7 @@ import {
 } from './taskContinuity'
 import { compressToolResult } from './compression'
 import type { MarkdownArtifact } from './artifacts'
+import { isReportArtifactPath, titleFromReportPath } from './artifacts'
 import type { AIStreamProgressEvent } from '../shared/streamProgress'
 import { formatAgentErrorMessage, isRetryableAIError } from '../shared/aiErrors'
 
@@ -62,6 +63,7 @@ export class Agent {
   // Prevents action requests from turning into long prose instead of tool calls.
   // Reset each processMessage call; used at most once to avoid loops.
   private actionFirstNudgedThisTurn = false
+  private reportWriteSucceededThisTurn = false
   private taskContinuationNudgedThisTurn = false
   private turnIntent: TurnIntent = { kind: 'general', summary: '' }
   private toolsRunThisTurn: ToolRunRecord[] = []
@@ -90,7 +92,7 @@ export class Agent {
     if (!lastUser) return null
 
     const text = lastUser.content.toLowerCase()
-    if (/\b(report|markdown|\.md|plan|spec|batch|summary|piano|rapporto)\b/.test(text)) {
+    if (/\b(report|markdown|\.md|plan|spec|batch|summary)\b/.test(text)) {
       return 'Drafting markdown report…'
     }
 
@@ -181,6 +183,7 @@ export class Agent {
     this.scratchpadWrittenThisTurn = false
     this.scratchpadToolWrittenThisTurn = false
     this.actionFirstNudgedThisTurn = false
+    this.reportWriteSucceededThisTurn = false
     this.taskContinuationNudgedThisTurn = false
     this.toolsRunThisTurn = []
     this.turnIntent = inferTurnIntent(userMessage)
@@ -310,6 +313,9 @@ export class Agent {
               hadError = true
               console.log('[Agent] Tool error:', formattedResult.substring(0, 200))
             } else {
+              if (toolCall.name === 'report_write') {
+                this.reportWriteSucceededThisTurn = true
+              }
               // Only cache and post-process successful results
               this.toolResultCache.set(cacheKey, formattedResult)
               // Invalidate stale reads after write operations
@@ -317,7 +323,7 @@ export class Agent {
               // Auto-populate scratchpad with a note about what was done
               this.updateScratchpadAfterTool(toolCall.name, toolCall.arguments, formattedResult)
               void this.persistSourceMemoryAfterWrite(toolCall.name, toolCall.arguments, formattedResult)
-              if (toolCall.name === 'report_write' && !isFromCache) {
+              if (!isFromCache) {
                 this.emitArtifactMessageFromResult(toolCall.name, toolCall.arguments, result)
               }
             }
@@ -811,14 +817,22 @@ export class Agent {
 
   private emitArtifactMessageFromResult(
     toolName: string,
-    _args: Record<string, unknown>,
+    args: Record<string, unknown>,
     result: unknown,
   ): void {
-    if (toolName !== 'report_write') return
     const data = result as { success?: boolean; path?: string; title?: string; error?: string }
-    if (!data.success || !data.path || !data.title) return
 
-    this.emitArtifactMessage({ path: data.path, title: data.title })
+    if (toolName === 'report_write') {
+      if (!data.success || !data.path || !data.title) return
+      this.emitArtifactMessage({ path: data.path, title: data.title })
+      return
+    }
+
+    if (toolName === 'file_write' && data.success !== false) {
+      const path = String(data.path || args.path || '').replace(/\\/g, '/')
+      if (!isReportArtifactPath(path)) return
+      this.emitArtifactMessage({ path, title: titleFromReportPath(path) })
+    }
   }
 
   private emitArtifactMessage(artifact: MarkdownArtifact): void {
@@ -887,7 +901,9 @@ export class Agent {
       .find(m => m.role === 'user' && !m.content.startsWith('[SYSTEM]'))?.content
       ?.toLowerCase() || ''
 
-    return shouldNudgeActionFirst(latestUser, responseText)
+    return shouldNudgeActionFirst(latestUser, responseText, {
+      reportWriteSucceededThisTurn: this.reportWriteSucceededThisTurn,
+    })
   }
 
   private async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {

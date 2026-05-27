@@ -580,6 +580,58 @@ input:focus, textarea:focus, select:focus {
   min-width: var(--sidebar-collapse-button-size);
 }
 
+.sidebar-brand--collapsed {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background-color 150ms ease;
+}
+
+.sidebar-brand-mark,
+.sidebar-brand-title {
+  @apply select-none;
+}
+
+.sidebar-brand-mark {
+  @apply transition-opacity duration-150;
+}
+
+.sidebar-brand-expand-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+  color: var(--sidebar-collapse-button-color);
+}
+
+.sidebar-brand--collapsed:hover {
+  background: var(--color-muted-surface);
+}
+
+.sidebar-brand--collapsed:hover .sidebar-brand-mark {
+  opacity: 0;
+}
+
+.sidebar-brand--collapsed:hover .sidebar-brand-expand-icon {
+  opacity: 1;
+  color: var(--color-border-strong);
+}
+
 .sidebar-brand-spacer {
   width: var(--sidebar-collapse-button-size);
   height: var(--sidebar-collapse-button-size);
@@ -603,7 +655,13 @@ input:focus, textarea:focus, select:focus {
   color: var(--color-border-strong);
 }
 
-.app-sidebar svg {
+.sidebar-collapse-icon {
+  width: var(--sidebar-collapse-icon-size);
+  height: var(--sidebar-collapse-icon-size);
+  flex-shrink: 0;
+}
+
+.app-sidebar svg:not(.sidebar-collapse-icon) {
   width: var(--sidebar-icon-size);
   height: var(--sidebar-icon-size);
   flex-shrink: 0;
@@ -613,11 +671,6 @@ input:focus, textarea:focus, select:focus {
 .app-sidebar.collapsed .new-chat-button svg {
   width: var(--sidebar-collapsed-icon-size);
   height: var(--sidebar-collapsed-icon-size);
-}
-
-.sidebar-collapse-button svg {
-  width: var(--sidebar-collapse-icon-size);
-  height: var(--sidebar-collapse-icon-size);
 }
 
 .sidebar-item.active {
@@ -706,6 +759,38 @@ input:focus, textarea:focus, select:focus {
 
 .ui-chat-attachment {
   @apply flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg text-sm;
+}
+
+.ui-chat-active-report {
+  @apply flex flex-col gap-1;
+}
+
+.ui-chat-active-report-heading {
+  @apply text-[11px] font-semibold uppercase tracking-wide text-gray-500 px-0.5;
+}
+
+.ui-chat-report-pill {
+  @apply flex items-center gap-1 px-1 py-1 bg-white border border-gray-200 rounded-lg text-sm max-w-full transition-colors hover:bg-gray-50;
+}
+
+.ui-chat-report-pill-trigger {
+  @apply flex items-center gap-2 min-w-0 flex-1 px-2 py-1 rounded-md text-left cursor-pointer;
+}
+
+.ui-chat-report-pill-title {
+  @apply text-gray-800 truncate;
+}
+
+.ui-chat-report-pill-status {
+  @apply text-xs text-gray-400 shrink-0;
+}
+
+.ui-chat-report-pill-status-error {
+  @apply text-red-400;
+}
+
+.ui-chat-report-pill-dismiss {
+  @apply flex items-center justify-center p-1.5 mr-0.5 text-gray-400 hover:text-gray-600 shrink-0 rounded-md;
 }
 
 .ui-chat-dropzone {

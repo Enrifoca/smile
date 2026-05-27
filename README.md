@@ -34,7 +34,6 @@ npm run electron:dev
 ```
 
 If the window is blank after launch, your shell may have `ELECTRON_RUN_AS_NODE` set (common in Electron-based editors). The dev scripts clear it automatically; you can also run `unset ELECTRON_RUN_AS_NODE` before starting.
-```
 
 ### Building
 
@@ -131,7 +130,7 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | Doc | Purpose |
 | --- | --- |
 | [src/agent/README.md](src/agent/README.md) | Connector-neutral agent loop, core tools, file map |
-| [src/agent/HELPERS.md](src/agent/HELPERS.md) | Error handling, artifacts, streaming, cross-links |
+| [src/agent/HELPERS.md](src/agent/HELPERS.md) | Loop guards (action-first), errors, artifacts, streaming |
 | [src/agent/taskContinuity.md](src/agent/taskContinuity.md) | Read→write nudges, turn intent, report grounding |
 | [src/agent/compression/README.md](src/agent/compression/README.md) | Tool result compression before model context |
 
@@ -181,6 +180,7 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | Rebrand the UI | [src/theme/README.md](src/theme/README.md) → [src/components/ui/README.md](src/components/ui/README.md) |
 | Understand memory rules | [docs/memory.md](docs/memory.md) → [src/memory/README.md](src/memory/README.md) |
 | Fix agent stopping after file read | [src/agent/taskContinuity.md](src/agent/taskContinuity.md) |
+| Fix model planning in chat instead of tools | [src/agent/HELPERS.md § Loop guards](src/agent/HELPERS.md#loop-guards) |
 | Handle provider overload / retries | [src/agent/HELPERS.md](src/agent/HELPERS.md) → `src/shared/aiErrors.ts` |
 | Work as a coding agent | [AGENTS.md](AGENTS.md) |
 
