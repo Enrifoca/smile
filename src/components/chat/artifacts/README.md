@@ -30,5 +30,14 @@ Styles: `.ui-artifact-*`, `.ui-md-*` in `src/styles/globals.css`.
 - Edit card/modal layout: `MarkdownArtifactCard.tsx`, `MarkdownArtifactModal.tsx`
 - Change default folder: `buildReportPath()` in `src/agent/artifacts.ts`
 - Prompt guidance: `src/prompts/core/system.md` (Reports section)
+- Read→write behavior: [src/agent/taskContinuity.md](../../agent/taskContinuity.md)
+
+## Grounding rules
+
+When the user revises a report:
+
+1. Agent calls `file_read` on the report path.
+2. Agent calls `report_write` with the **same path** and content derived from the read — not invented.
+3. Task continuity nudges the loop if the agent stops after read without write.
 
 Future artifact types can live alongside this folder and use `Message.type: 'artifact'` with a discriminated union.

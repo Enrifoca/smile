@@ -40,6 +40,16 @@ The agent never imports desktop services directly. Only `runtime.ts` (via preloa
 5. Core tools execute through generic handlers; connector tools execute through connector runtimes.
 6. Write tools create pending actions and wait for user approval.
 7. Tool results are compressed before being returned to the model.
+8. **Task continuity** (`src/agent/taskContinuity.ts`) keeps read→write workflows from stopping early and nudges grounded report updates. See [taskContinuity.md](../src/agent/taskContinuity.md).
+
+## Agent loop guards (core)
+
+| Guard | Module | Purpose |
+| --- | --- | --- |
+| Action-first | `actionGuards.ts` | User asked for action; model replied with plan only |
+| Task continuity | `taskContinuity.ts` | User asked to edit file/report; model read but did not write |
+| Tool errors | `toolErrors.ts` + `shared/aiErrors.ts` | Failed tools and provider overload → retry or clear errors |
+| Incomplete think | `index.ts` | Model emitted thinking only → nudge to continue |
 
 ## Core Rule
 

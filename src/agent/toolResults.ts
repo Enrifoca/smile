@@ -1,3 +1,5 @@
+import { buildReportGroundingHint } from './taskContinuity'
+
 export function unwrapToolResult(result: unknown): string {
   const data = result as { success?: boolean; data?: unknown; error?: string }
   if (data.success === false) return `Error: ${data.error || 'Unknown error'}`
@@ -8,7 +10,11 @@ export function unwrapToolResult(result: unknown): string {
   return 'Done.'
 }
 
-export function formatCoreToolResultForAI(toolName: string, result: unknown): string {
+export function formatCoreToolResultForAI(
+  toolName: string,
+  result: unknown,
+  args?: Record<string, unknown>,
+): string {
   const data = result as { success?: boolean; data?: unknown; error?: string; path?: string; title?: string }
   if (data.success === false) {
     const error = data.error || 'Unknown error'
@@ -23,6 +29,12 @@ export function formatCoreToolResultForAI(toolName: string, result: unknown): st
   }
 
   const raw = unwrapToolResult(result)
+
+  if (toolName === 'file_read' || toolName === 'file_read_ocr') {
+    const path = String(args?.path || '')
+    const hint = buildReportGroundingHint(path)
+    return hint ? `${raw}${hint}` : raw
+  }
 
   if (toolName === 'file_search' || toolName === 'file_list') {
     try {
