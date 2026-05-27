@@ -3,6 +3,8 @@ import type { ModelCatalog, ModelProvider } from '../src/shared/modelCatalog'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform: process.platform,
+
   // Storage
   storage: {
     get: (key: string) => ipcRenderer.invoke('storage:get', key),

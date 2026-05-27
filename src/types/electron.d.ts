@@ -10,6 +10,7 @@ export interface JiraUser {
 }
 
 export interface ElectronAPI {
+  platform: NodeJS.Platform
   storage: {
     get: (key: string) => Promise<unknown>
     set: (key: string, value: unknown) => Promise<void>

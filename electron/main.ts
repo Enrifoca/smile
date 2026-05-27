@@ -34,6 +34,20 @@ const MCP_KEEPALIVE_INTERVAL = 10 * 60 * 1000
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
+/** Keep in sync with --mac-titlebar-height in src/theme/tokens.css */
+const MAC_TITLEBAR_HEIGHT_PX = 28
+/** macOS traffic-light cluster height (frameless + hidden title bar). */
+const MAC_TRAFFIC_LIGHT_CLUSTER_HEIGHT_PX = 12
+
+function getMacWindowButtonY(): number {
+  return Math.round((MAC_TITLEBAR_HEIGHT_PX - MAC_TRAFFIC_LIGHT_CLUSTER_HEIGHT_PX) / 2)
+}
+
+function applyMacWindowButtonPosition(win: BrowserWindow) {
+  // Electron 28+ renamed setTrafficLightPosition → setWindowButtonPosition
+  win.setWindowButtonPosition({ x: 16, y: getMacWindowButtonY() })
+}
+
 function getConfiguredOcrService(): OCRService | null {
   const configStr = storageService.getSecure('ocrConfig')
   if (!configStr) return null
@@ -75,8 +89,15 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
-    frame: process.platform === 'darwin' ? true : false,
+    show: false,
+    // Frameless on macOS so button Y aligns with our .mac-titlebar (hiddenInset uses a taller system inset).
+    ...(process.platform === 'darwin'
+      ? {
+          frame: false,
+          titleBarStyle: 'hidden',
+          trafficLightPosition: { x: 16, y: getMacWindowButtonY() },
+        }
+      : { frame: false }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -86,13 +107,25 @@ function createWindow() {
   })
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
+    mainWindow.loadURL(devServerUrl)
     // Open DevTools only when explicitly requested via MIRAI_DEVTOOLS=1
     if (process.env.MIRAI_DEVTOOLS === '1') {
       mainWindow.webContents.openDevTools()
     }
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  }
+
+  if (process.platform === 'darwin' && mainWindow) {
+    mainWindow.once('ready-to-show', () => {
+      if (mainWindow) {
+        applyMacWindowButtonPosition(mainWindow)
+        mainWindow.show()
+      }
+    })
+  } else if (mainWindow) {
+    mainWindow.once('ready-to-show', () => mainWindow?.show())
   }
 
   mainWindow.on('closed', () => {

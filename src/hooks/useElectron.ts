@@ -5,6 +5,7 @@ import { AIConfig, ModelProvider } from '../shared/modelCatalog'
 // Hook to access Electron API from renderer
 export function useElectron() {
   const api = window.electronAPI
+  const platform = api.platform
 
   // Storage operations
   const storage = {
@@ -414,6 +415,7 @@ export function useElectron() {
   }
 
   return {
+    platform,
     storage,
     windowControls,
     models,

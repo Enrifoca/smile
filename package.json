@@ -4,12 +4,12 @@
   "description": "White-label desktop framework for building vertical AI agents",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev-electron.mjs",
     "build": "tsc && vite build && electron-builder",
     "build:win": "tsc && vite build && electron-builder --win",
     "build:mac": "tsc && vite build && electron-builder --mac",
     "preview": "vite preview",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "node scripts/dev-electron.mjs",
     "typecheck": "tsc --noEmit",
     "pdf:memory-flow": "node scripts/generate-mirai-memory-and-agent-loop-flow-pdf.mjs"
   },
