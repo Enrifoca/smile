@@ -1,12 +1,9 @@
 import Store from 'electron-store'
+import { app } from 'electron'
+import fs from 'fs'
+import path from 'path'
 import { EncryptionService } from './encryption'
 import { ModelCatalog } from '../../src/shared/modelCatalog'
-
-interface JiraConfig {
-  baseUrl: string
-  email: string
-  apiToken: string
-}
 
 interface AIConfig {
   provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'
@@ -111,7 +108,6 @@ interface StorageSchema {
   modelCatalog: ModelCatalog | null
   
   // Encrypted data (stored as encrypted strings)
-  'encrypted:jiraConfig': string
   'encrypted:aiConfig': string
   'encrypted:ocrConfig': string
 }
@@ -130,14 +126,33 @@ const defaultUserProfile: UserProfile = {
   onboardingCompleted: false
 }
 
+/**
+ * One-time migration of the persisted store file from the legacy project name
+ * ('mirai-data.json') to the current one ('smile-data.json'). Best-effort: on any
+ * failure we fall back to a fresh store rather than blocking startup.
+ */
+function migrateLegacyStoreFile(): void {
+  try {
+    const userData = app.getPath('userData')
+    const currentPath = path.join(userData, 'smile-data.json')
+    const legacyPath = path.join(userData, 'mirai-data.json')
+    if (!fs.existsSync(currentPath) && fs.existsSync(legacyPath)) {
+      fs.copyFileSync(legacyPath, currentPath)
+    }
+  } catch {
+    // ignore — a fresh store will be created
+  }
+}
+
 export class StorageService {
   private store: Store<StorageSchema>
   private encryption: EncryptionService
 
   constructor(encryption: EncryptionService) {
     this.encryption = encryption
+    migrateLegacyStoreFile()
     this.store = new Store<StorageSchema>({
-      name: 'mirai-data',
+      name: 'smile-data',
       defaults: {
         workspacePath: null,
         userProfile: null,
@@ -152,7 +167,6 @@ export class StorageService {
         },
         jiraConnectionMode: null,
         modelCatalog: null,
-        'encrypted:jiraConfig': '',
         'encrypted:aiConfig': '',
         'encrypted:ocrConfig': ''
       }
@@ -184,23 +198,6 @@ export class StorageService {
     const encryptedKey = `encrypted:${key}` as keyof StorageSchema
     const encrypted = this.encryption.encrypt(value)
     this.store.set(encryptedKey, encrypted)
-  }
-
-  // Jira config
-  async getJiraConfig(): Promise<JiraConfig | null> {
-    const encrypted = this.store.get('encrypted:jiraConfig')
-    if (!encrypted) return null
-    try {
-      const decrypted = this.encryption.decrypt(encrypted)
-      return JSON.parse(decrypted) as JiraConfig
-    } catch {
-      return null
-    }
-  }
-
-  async setJiraConfig(config: JiraConfig): Promise<void> {
-    const encrypted = this.encryption.encrypt(JSON.stringify(config))
-    this.store.set('encrypted:jiraConfig', encrypted)
   }
 
   // AI config
