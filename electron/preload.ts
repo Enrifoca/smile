@@ -27,28 +27,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     refreshProvider: (provider: string) => ipcRenderer.invoke('models:refreshProvider', provider),
   },
 
-  // Jira
-  jira: {
-    configure: (config: { baseUrl: string; email: string; apiToken: string }) => 
-      ipcRenderer.invoke('jira:configure', config),
-    testConnection: () => ipcRenderer.invoke('jira:testConnection'),
-    getProjects: () => ipcRenderer.invoke('jira:getProjects'),
-    searchIssues: (jql: string, maxResults?: number) => 
-      ipcRenderer.invoke('jira:searchIssues', jql, maxResults),
-    getIssue: (issueKey: string) => ipcRenderer.invoke('jira:getIssue', issueKey),
-    createIssue: (issueData: Record<string, unknown>) => 
-      ipcRenderer.invoke('jira:createIssue', issueData),
-    updateIssue: (issueKey: string, updateData: Record<string, unknown>) => 
-      ipcRenderer.invoke('jira:updateIssue', issueKey, updateData),
-    addComment: (issueKey: string, comment: string) => 
-      ipcRenderer.invoke('jira:addComment', issueKey, comment),
-    transitionIssue: (issueKey: string, transitionId: string) => 
-      ipcRenderer.invoke('jira:transitionIssue', issueKey, transitionId),
-    getTransitions: (issueKey: string) => ipcRenderer.invoke('jira:getTransitions', issueKey),
-    getSprints: (boardId: number) => ipcRenderer.invoke('jira:getSprints', boardId),
-    getBoards: () => ipcRenderer.invoke('jira:getBoards'),
-  },
-
   // Files
   file: {
     selectWorkspace: () => ipcRenderer.invoke('file:selectWorkspace'),
@@ -257,20 +235,6 @@ export interface ElectronAPI {
     getCatalog: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
     refresh: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
     refreshProvider: (provider: ModelProvider) => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
-  }
-  jira: {
-    configure: (config: { baseUrl: string; email: string; apiToken: string }) => Promise<{ success: boolean }>
-    testConnection: () => Promise<{ success: boolean; error?: string; user?: unknown }>
-    getProjects: () => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    searchIssues: (jql: string, maxResults?: number) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getIssue: (issueKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    createIssue: (issueData: Record<string, unknown>) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    updateIssue: (issueKey: string, updateData: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>
-    addComment: (issueKey: string, comment: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    transitionIssue: (issueKey: string, transitionId: string) => Promise<{ success: boolean; error?: string }>
-    getTransitions: (issueKey: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    getSprints: (boardId: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    getBoards: () => Promise<{ success: boolean; data?: unknown[]; error?: string }>
   }
   file: {
     selectWorkspace: () => Promise<{ success: boolean; path?: string }>

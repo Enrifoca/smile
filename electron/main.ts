@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'path'
 import { EncryptionService } from './services/encryption'
 import { StorageService } from './services/storage'
-import { JiraService } from './services/jira'
 import { FileService } from './services/files'
 import { AIService } from './services/ai'
 import { OCRConfig, OCRService } from './services/ocr'
@@ -17,7 +16,6 @@ import { getJiraAttachmentService, JiraAttachmentService, isJiraAttachmentConfig
 // Services
 let encryptionService: EncryptionService
 let storageService: StorageService
-let jiraService: JiraService | null = null
 let fileService: FileService | null = null
 let aiService: AIService | null = null
 let mcpService: AtlassianMCPService | null = null
@@ -109,8 +107,8 @@ function createWindow() {
   if (isDev) {
     const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
     mainWindow.loadURL(devServerUrl)
-    // Open DevTools only when explicitly requested via MIRAI_DEVTOOLS=1
-    if (process.env.MIRAI_DEVTOOLS === '1') {
+    // Open DevTools only when explicitly requested via SMILE_DEVTOOLS=1
+    if (process.env.SMILE_DEVTOOLS === '1') {
       mainWindow.webContents.openDevTools()
     }
   } else {
@@ -138,12 +136,6 @@ async function initializeServices() {
   encryptionService = new EncryptionService()
   storageService = new StorageService(encryptionService)
   modelCatalogService = new ModelCatalogService(storageService)
-
-  // Initialize Jira if credentials exist
-  const jiraConfig = await storageService.getJiraConfig()
-  if (jiraConfig) {
-    jiraService = new JiraService(jiraConfig)
-  }
 
   // Initialize File service if workspace is set
   const workspace = await storageService.getWorkspacePath()
@@ -352,68 +344,6 @@ ipcMain.handle('models:refreshProvider', async (_, provider: ModelProvider) => {
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to refresh provider models' }
   }
-})
-
-// Jira
-ipcMain.handle('jira:configure', async (_, config: { baseUrl: string; email: string; apiToken: string }) => {
-  await storageService.setJiraConfig(config)
-  jiraService = new JiraService(config)
-  return { success: true }
-})
-
-ipcMain.handle('jira:testConnection', async () => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.testConnection()
-})
-
-ipcMain.handle('jira:getProjects', async () => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.getProjects()
-})
-
-ipcMain.handle('jira:searchIssues', async (_, jql: string, maxResults?: number) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.searchIssues(jql, maxResults)
-})
-
-ipcMain.handle('jira:getIssue', async (_, issueKey: string) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.getIssue(issueKey)
-})
-
-ipcMain.handle('jira:createIssue', async (_, issueData: Record<string, unknown>) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.createIssue(issueData)
-})
-
-ipcMain.handle('jira:updateIssue', async (_, issueKey: string, updateData: Record<string, unknown>) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.updateIssue(issueKey, updateData)
-})
-
-ipcMain.handle('jira:addComment', async (_, issueKey: string, comment: string) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.addComment(issueKey, comment)
-})
-
-ipcMain.handle('jira:transitionIssue', async (_, issueKey: string, transitionId: string) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.transitionIssue(issueKey, transitionId)
-})
-
-ipcMain.handle('jira:getTransitions', async (_, issueKey: string) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.getTransitions(issueKey)
-})
-
-ipcMain.handle('jira:getSprints', async (_, boardId: number) => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.getSprints(boardId)
-})
-
-ipcMain.handle('jira:getBoards', async () => {
-  if (!jiraService) return { success: false, error: 'Jira not configured' }
-  return jiraService.getBoards()
 })
 
 // File operations

@@ -27,20 +27,6 @@ export interface ElectronAPI {
     refresh: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
     refreshProvider: (provider: ModelProvider) => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
   }
-  jira: {
-    configure: (config: { baseUrl: string; email: string; apiToken: string }) => Promise<{ success: boolean }>
-    testConnection: () => Promise<{ success: boolean; error?: string; user?: unknown }>
-    getProjects: () => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    searchIssues: (jql: string, maxResults?: number) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getIssue: (issueKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    createIssue: (issueData: Record<string, unknown>) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    updateIssue: (issueKey: string, updateData: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>
-    addComment: (issueKey: string, comment: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    transitionIssue: (issueKey: string, transitionId: string) => Promise<{ success: boolean; error?: string }>
-    getTransitions: (issueKey: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    getSprints: (boardId: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    getBoards: () => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-  }
   file: {
     selectWorkspace: () => Promise<{ success: boolean; path?: string }>
     getWorkspace: () => Promise<string | null>

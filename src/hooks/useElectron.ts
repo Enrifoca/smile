@@ -54,57 +54,6 @@ export function useElectron() {
     }, []),
   }
 
-  // Jira operations
-  const jira = {
-    configure: useCallback(async (config: { baseUrl: string; email: string; apiToken: string }) => {
-      return api.jira.configure(config)
-    }, []),
-    
-    testConnection: useCallback(async () => {
-      return api.jira.testConnection()
-    }, []),
-    
-    getProjects: useCallback(async () => {
-      return api.jira.getProjects()
-    }, []),
-    
-    searchIssues: useCallback(async (jql: string, maxResults?: number) => {
-      return api.jira.searchIssues(jql, maxResults)
-    }, []),
-    
-    getIssue: useCallback(async (issueKey: string) => {
-      return api.jira.getIssue(issueKey)
-    }, []),
-    
-    createIssue: useCallback(async (issueData: Record<string, unknown>) => {
-      return api.jira.createIssue(issueData)
-    }, []),
-    
-    updateIssue: useCallback(async (issueKey: string, updateData: Record<string, unknown>) => {
-      return api.jira.updateIssue(issueKey, updateData)
-    }, []),
-    
-    addComment: useCallback(async (issueKey: string, comment: string) => {
-      return api.jira.addComment(issueKey, comment)
-    }, []),
-    
-    transitionIssue: useCallback(async (issueKey: string, transitionId: string) => {
-      return api.jira.transitionIssue(issueKey, transitionId)
-    }, []),
-    
-    getTransitions: useCallback(async (issueKey: string) => {
-      return api.jira.getTransitions(issueKey)
-    }, []),
-    
-    getSprints: useCallback(async (boardId: number) => {
-      return api.jira.getSprints(boardId)
-    }, []),
-    
-    getBoards: useCallback(async () => {
-      return api.jira.getBoards()
-    }, []),
-  }
-
   // File operations
   const file = {
     selectWorkspace: useCallback(async () => {
@@ -419,7 +368,6 @@ export function useElectron() {
     storage,
     windowControls,
     models,
-    jira,
     file,
     ai,
     mcp,
