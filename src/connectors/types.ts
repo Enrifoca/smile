@@ -14,7 +14,13 @@ export type ToolCategory =
 export interface ToolDefinition {
   name: string
   description: string
-  schema: z.ZodObject<z.ZodRawShape>
+  /** Zod schema for core/built-in tools. Omit when `jsonSchema` is provided. */
+  schema?: z.ZodObject<z.ZodRawShape>
+  /**
+   * Precomputed JSON Schema for declarative plugin tools (manifest `inputSchema`).
+   * When present it is sent to the model as-is; otherwise `schema` is converted.
+   */
+  jsonSchema?: Record<string, unknown>
   requiresConfirmation: boolean
   category: ToolCategory
 }

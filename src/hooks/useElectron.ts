@@ -282,6 +282,51 @@ export function useElectron() {
     }, []),
   }
 
+  // Declarative connectors (sandboxed plugins)
+  const connectors = {
+    list: useCallback(async () => {
+      return api.connectors.list()
+    }, []),
+    execute: useCallback(
+      async (
+        connectorId: string,
+        name: string,
+        args: Record<string, unknown>,
+        context?: import('../connectors/contract').ContextEnvelope,
+      ) => {
+        return api.connectors.execute(connectorId, name, args, context)
+      },
+      [],
+    ),
+    approve: useCallback(
+      async (
+        connectorId: string,
+        actionType: string,
+        data: Record<string, unknown>,
+        context?: import('../connectors/contract').ContextEnvelope,
+      ) => {
+        return api.connectors.approve(connectorId, actionType, data, context)
+      },
+      [],
+    ),
+    getKnowledge: useCallback(async (contextId: string, connectorId: string) => {
+      return api.connectors.getKnowledge(contextId, connectorId)
+    }, []),
+  }
+
+  // Project contexts (Context management)
+  const contexts = {
+    list: useCallback(async () => {
+      return api.contexts.list()
+    }, []),
+    save: useCallback(async (context: import('../context/types').ProjectContext) => {
+      return api.contexts.save(context)
+    }, []),
+    delete: useCallback(async (contextId: string) => {
+      return api.contexts.delete(contextId)
+    }, []),
+  }
+
   // Memory operations
   const memory = {
     getAll: useCallback(async () => {
@@ -373,6 +418,8 @@ export function useElectron() {
     mcp,
     jiraMetadata,
     shell,
+    connectors,
+    contexts,
     memory,
     jiraAttachment,
   }

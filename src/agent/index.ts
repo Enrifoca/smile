@@ -502,7 +502,11 @@ export class Agent {
 
     const tools = this.getAllToolDefinitions().map(tool => ({
       type: 'function' as const,
-      function: { name: tool.name, description: tool.description, parameters: zodToJsonSchema(tool.schema) },
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.jsonSchema ?? (tool.schema ? zodToJsonSchema(tool.schema) : { type: 'object', properties: {} }),
+      },
     }))
 
     // ── Choose model ──────────────────────────────────────────────────────────
