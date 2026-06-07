@@ -9,7 +9,8 @@ import { ModelCatalogService } from './services/model-catalog'
 import { AIConfig, ModelProvider, getDefaultModelId } from '../src/shared/modelCatalog'
 import { getAtlassianMCPService, AtlassianMCPService } from './services/atlassian-mcp'
 import { ConnectorsService } from './services/connectors'
-import type { ContextEnvelope } from '../src/connectors/contract'
+import type { ContextEnvelope, ToolResult } from '../src/connectors/contract'
+import { normalizeMcpResult } from '../src/connectors/contract'
 import type { ProjectContext } from '../src/context/types'
 import { getMemoryService, MemoryService } from './services/memory'
 import { getSourceMemoryService } from './services/sourceMemory'
@@ -46,6 +47,50 @@ function resolveMcpServer(serverId: string): McpServerHandle {
   return factory()
 }
 
+async function uploadJiraAttachmentFromWorkspace(issueKey: string, filePath: string): Promise<ToolResult> {
+  if (!fileService) return { success: false, error: 'Workspace not configured' }
+
+  const configStr = await storageService.getSecure('jiraApiConfig')
+  if (!configStr) {
+    return { success: false, error: 'Jira API token not configured. Please add it in Settings to upload attachments.' }
+  }
+
+  let config: { baseUrl?: string; email?: string; apiToken?: string }
+  try {
+    config = JSON.parse(configStr)
+  } catch {
+    return { success: false, error: 'Invalid Jira API configuration' }
+  }
+
+  if (!config.baseUrl || !config.email || !config.apiToken) {
+    const missing = [
+      !config.baseUrl && 'Site URL',
+      !config.email && 'Email',
+      !config.apiToken && 'API Token',
+    ].filter(Boolean)
+    return {
+      success: false,
+      error: `Jira API configuration incomplete. Missing: ${missing.join(', ')}. Please go to Settings and fill in all fields.`,
+    }
+  }
+
+  jiraAttachmentService = getJiraAttachmentService(config)
+  const fullPath = fileService.getFullPath(filePath)
+  return jiraAttachmentService.uploadAttachment(issueKey, fullPath)
+}
+
+/** Stream sandbox `host.log` lines to the Studio Playground in the renderer. */
+function broadcastPlaygroundLog(connectorId: string, level: string, args: unknown[]): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('connectors:playgroundLog', {
+      connectorId,
+      level,
+      args,
+      timestamp: new Date().toISOString(),
+    })
+  }
+}
+
 /** Lazily construct the connector runtime with its capability broker dependencies. */
 function getConnectorsService(): ConnectorsService {
   if (!connectorsService) {
@@ -55,14 +100,18 @@ function getConnectorsService(): ConnectorsService {
           if (!fileService) return { success: false, error: 'Workspace not configured' }
           return fileService.readFile(relativePath) as Promise<{ success: boolean; data?: string; error?: string }>
         },
-        mcpCall: async (serverId: string, toolName: string, args: Record<string, unknown>) =>
-          resolveMcpServer(serverId).callRawTool(toolName, args),
+        mcpCall: async (serverId: string, toolName: string, args: Record<string, unknown>) => {
+          const raw = await resolveMcpServer(serverId).callRawTool(toolName, args)
+          return normalizeMcpResult(raw)
+        },
         getSecret: (connectorId: string, key: string) =>
           storageService.getSecure(`connector:${connectorId}:${key}`),
         saveKnowledge: (contextId: string, connectorId: string, markdown: string) =>
           storageService.setConnectorKnowledge(contextId, connectorId, markdown),
         getKnowledge: (contextId: string, connectorId: string) =>
           storageService.getConnectorKnowledge(contextId, connectorId),
+        jiraUploadAttachment: uploadJiraAttachmentFromWorkspace,
+        onLog: broadcastPlaygroundLog,
       },
       path.join(__dirname, 'connector-sandbox.js'),
     )
@@ -419,6 +468,27 @@ ipcMain.handle('file:getWorkspace', async () => {
   return storageService.getWorkspacePath()
 })
 
+// Pick a folder inside the current workspace, returning a workspace-relative path.
+ipcMain.handle('file:selectFolderInWorkspace', async () => {
+  const workspace = await storageService.getWorkspacePath()
+  if (!workspace) return { success: false, error: 'Workspace not configured' }
+
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: 'Select Folder',
+    defaultPath: workspace,
+  })
+  if (result.canceled || result.filePaths.length === 0) return { success: false }
+
+  const selected = result.filePaths[0]
+  const relative = path.relative(workspace, selected)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return { success: false, error: 'Folder must be inside the workspace' }
+  }
+  // Normalize to forward slashes; empty string means the workspace root.
+  return { success: true, path: relative.split(path.sep).join('/') }
+})
+
 ipcMain.handle('file:list', async (_, relativePath?: string) => {
   if (!fileService) return { success: false, error: 'Workspace not configured' }
   return fileService.listFiles(relativePath)
@@ -474,47 +544,7 @@ ipcMain.handle('file:saveAttachment', async (_, fileName: string, data: ArrayBuf
 // ============================================
 
 ipcMain.handle('jiraAttachment:upload', async (_, issueKey: string, filePath: string) => {
-  if (!fileService) return { success: false, error: 'Workspace not configured' }
-  
-  // Always reload config fresh to pick up any changes from Settings
-  const configStr = await storageService.getSecure('jiraApiConfig')
-  console.log('[JiraAttachment] Config string:', configStr ? 'exists' : 'not found')
-  
-  if (!configStr) {
-    return { success: false, error: 'Jira API token not configured. Please add it in Settings to upload attachments.' }
-  }
-  
-  let config
-  try {
-    config = JSON.parse(configStr)
-    console.log('[JiraAttachment] Loaded config:', { 
-      baseUrl: config.baseUrl || '(empty)', 
-      email: config.email || '(empty)',
-      hasToken: !!config.apiToken 
-    })
-  } catch (e) {
-    console.error('[JiraAttachment] Failed to parse config:', e)
-    return { success: false, error: 'Invalid Jira API configuration' }
-  }
-  
-  if (!config.baseUrl || !config.email || !config.apiToken) {
-    const missing = []
-    if (!config.baseUrl) missing.push('Site URL')
-    if (!config.email) missing.push('Email')
-    if (!config.apiToken) missing.push('API Token')
-    return { 
-      success: false, 
-      error: `Jira API configuration incomplete. Missing: ${missing.join(', ')}. Please go to Settings and fill in all fields.` 
-    }
-  }
-  
-  // Create/update the service with current config
-  jiraAttachmentService = getJiraAttachmentService(config)
-  
-  // Get full path
-  const fullPath = fileService.getFullPath(filePath)
-  console.log('[JiraAttachment] Uploading file:', fullPath, 'to issue:', issueKey)
-  return jiraAttachmentService!.uploadAttachment(issueKey, fullPath)
+  return uploadJiraAttachmentFromWorkspace(issueKey, filePath)
 })
 
 ipcMain.handle('jiraAttachment:isConfigured', async () => {
@@ -880,6 +910,15 @@ ipcMain.handle(
 ipcMain.handle('connectors:getKnowledge', async (_, contextId: string, connectorId: string) => {
   try {
     return { success: true, data: getConnectorsService().getKnowledge(contextId, connectorId) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('connectors:saveKnowledge', async (_, contextId: string, connectorId: string, markdown: string) => {
+  try {
+    storageService.setConnectorKnowledge(contextId, connectorId, markdown)
+    return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }

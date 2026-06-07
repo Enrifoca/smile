@@ -33,8 +33,8 @@ export interface HostBridge {
     fetch(request: HostHttpRequest): Promise<HostHttpResponse>
   }
   mcp: {
-    /** Call a tool on a connected MCP server in permissions.mcp. */
-    call(serverId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>
+    /** Call a tool on a connected MCP server in permissions.mcp. Returns a normalized {@link ToolResult}. */
+    call(serverId: string, toolName: string, args: Record<string, unknown>): Promise<ToolResult>
   }
   file: {
     /** Read a workspace file (requires permissions.file.read). */
@@ -44,6 +44,11 @@ export interface HostBridge {
     /** Read a connector-scoped secret declared in permissions.secrets. */
     get(key: string): Promise<string | null>
   }
+  /**
+   * Host-provided integrations declared in permissions.host (e.g.
+   * `jira.uploadAttachment`). Params shape is integration-specific.
+   */
+  call: (capability: string, params: Record<string, unknown>) => Promise<ToolResult>
   context: {
     /**
      * This connector's resolved configuration for the active context, shaped by

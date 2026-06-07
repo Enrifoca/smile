@@ -29,21 +29,24 @@ export interface LoadedConnector {
   manifest: ConnectorManifest
   dir: string
   promptMarkdown: string
-  handlerSource: string
+  /** Present only when handlerKind is 'code' (default). */
+  handlerSource?: string
 }
 
 /** External services the broker delegates to, injected by main. */
 export interface ConnectorCapabilityDeps {
   /** Read a workspace file. */
   readFile: (relativePath: string) => Promise<ToolResult<string>>
-  /** Call a tool on a connected MCP server. */
-  mcpCall: (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<unknown>
+  /** Call a tool on a connected MCP server. Result is already normalized to {@link ToolResult}. */
+  mcpCall: (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<ToolResult>
   /** Read a connector-scoped secret. */
   getSecret: (connectorId: string, key: string) => string | null
   /** Persist prompt-ready knowledge markdown for a context+connector. */
   saveKnowledge: (contextId: string, connectorId: string, markdown: string) => void
   /** Read previously cached knowledge markdown for a context+connector. */
   getKnowledge: (contextId: string, connectorId: string) => string | null
+  /** Upload a file from the workspace to a Jira issue via REST (Settings API token). */
+  jiraUploadAttachment: (issueKey: string, relativePath: string) => Promise<ToolResult>
   /** Surface connector logs (playground/diagnostics). */
   onLog?: (connectorId: string, level: string, args: unknown[]) => void
 }
@@ -96,8 +99,7 @@ export class ConnectorsService {
       if (!entry.isDirectory()) continue
       const dir = path.join(root, entry.name)
       const manifestPath = path.join(dir, 'manifest.json')
-      const handlerPath = path.join(dir, 'handler.js')
-      if (!fs.existsSync(manifestPath) || !fs.existsSync(handlerPath)) continue
+      if (!fs.existsSync(manifestPath)) continue
 
       let raw: unknown
       try {
@@ -113,11 +115,15 @@ export class ConnectorsService {
         continue
       }
 
+      const handlerKind = validation.manifest.handlerKind ?? 'code'
+      const handlerPath = path.join(dir, 'handler.js')
+      if (handlerKind === 'code' && !fs.existsSync(handlerPath)) continue
+
       const promptPath = path.join(dir, 'prompt.md')
       connectors.push({
         manifest: validation.manifest,
         dir,
-        handlerSource: fs.readFileSync(handlerPath, 'utf-8'),
+        handlerSource: handlerKind === 'code' ? fs.readFileSync(handlerPath, 'utf-8') : undefined,
         promptMarkdown: fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf-8') : '',
       })
     }
@@ -152,7 +158,12 @@ export class ConnectorsService {
     args: Record<string, unknown>,
     context?: ContextEnvelope,
   ): Promise<ToolResult> {
-    const sandbox = await this.ensureSandbox(connectorId)
+    const connector = await this.getConnector(connectorId)
+    if ((connector.manifest.handlerKind ?? 'code') === 'mcp') {
+      return this.executeMcpTool(connector.manifest, name, args)
+    }
+
+    const sandbox = await this.ensureSandbox(connector)
     const callId = `call_${++this.callSeq}`
     const result = await this.sendCall(sandbox, { type: 'execute', callId, name, args }, callId, context)
     return result as ToolResult
@@ -165,10 +176,42 @@ export class ConnectorsService {
     data: Record<string, unknown>,
     context?: ContextEnvelope,
   ): Promise<ApproveActionOutcome> {
-    const sandbox = await this.ensureSandbox(connectorId)
+    const connector = await this.getConnector(connectorId)
+    if ((connector.manifest.handlerKind ?? 'code') === 'mcp') {
+      return { handled: false }
+    }
+
+    const sandbox = await this.ensureSandbox(connector)
     const callId = `call_${++this.callSeq}`
     const result = await this.sendCall(sandbox, { type: 'approve', callId, actionType, data }, callId, context)
     return result as ApproveActionOutcome
+  }
+
+  private async getConnector(connectorId: string): Promise<LoadedConnector> {
+    const { connectors } = await this.discover()
+    const connector = connectors.find(item => item.manifest.id === connectorId)
+    if (!connector) throw new Error(`Connector not found or invalid: ${connectorId}`)
+    return connector
+  }
+
+  private async executeMcpTool(
+    manifest: ConnectorManifest,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolResult> {
+    const tool = manifest.tools.find(item => item.name === name)
+    if (!tool?.mcp) return { success: false, error: `Unknown tool: ${name}` }
+
+    const { serverId, toolName } = tool.mcp
+    if (!(manifest.permissions?.mcp || []).includes(serverId)) {
+      return { success: false, error: `mcp server not allowed: ${serverId}` }
+    }
+
+    try {
+      return await this.deps.mcpCall(serverId, toolName, args)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   private sendCall(
@@ -190,16 +233,21 @@ export class ConnectorsService {
     })
   }
 
-  private async ensureSandbox(connectorId: string): Promise<SandboxInstance> {
+  private async ensureSandbox(connectorOrId: LoadedConnector | string): Promise<SandboxInstance> {
+    const connector = typeof connectorOrId === 'string'
+      ? await this.getConnector(connectorOrId)
+      : connectorOrId
+
+    const connectorId = connector.manifest.id
     const existing = this.sandboxes.get(connectorId)
     if (existing) {
       await existing.ready
       return existing
     }
 
-    const { connectors } = await this.discover()
-    const connector = connectors.find(item => item.manifest.id === connectorId)
-    if (!connector) throw new Error(`Connector not found or invalid: ${connectorId}`)
+    if (!connector.handlerSource) {
+      throw new Error(`Connector ${connectorId} has no handler.js (handlerKind must be "code")`)
+    }
 
     const proc = utilityProcess.fork(this.sandboxModulePath, [], { serviceName: `connector-${connectorId}` })
     const pendingCalls = new Map<string, PendingCall>()
@@ -314,6 +362,19 @@ export class ConnectorsService {
         const key = params[0] as string
         if (!(permissions.secrets || []).includes(key)) throw new Error(`secret not declared: ${key}`)
         return this.deps.getSecret(manifest.id, key)
+      }
+      case 'host.call': {
+        const [capability, callParams] = params as [string, Record<string, unknown>]
+        if (!(permissions.host || []).includes(capability)) {
+          throw new Error(`host capability not permitted: ${capability}`)
+        }
+        if (capability === 'jira.uploadAttachment') {
+          const issueKey = String(callParams.issueKey || '')
+          const filePath = String(callParams.filePath || '')
+          if (!issueKey || !filePath) throw new Error('issueKey and filePath are required')
+          return this.deps.jiraUploadAttachment(issueKey, filePath)
+        }
+        throw new Error(`Unknown host capability: ${capability}`)
       }
       default:
         throw new Error(`Unknown capability: ${method}`)

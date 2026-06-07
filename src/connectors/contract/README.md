@@ -21,7 +21,16 @@ The stable, **language-neutral** boundary that connectors are written against. N
 
 - `manifest.json` — validated by `validateManifest`
 - `prompt.md` — domain prompt section
-- `handler.js` — sandboxed module matching `ConnectorHandlerModule`
+- `handler.js` — sandboxed module matching `ConnectorHandlerModule` (**required when `handlerKind` is `code`**, the default)
+
+### handlerKind
+
+| Kind | Needs `handler.js` | Execution |
+| --- | --- | --- |
+| `code` (default) | yes | Custom logic in sandbox via `host.*` |
+| `mcp` | no | Declarative 1:1 mapping: each tool declares `mcp: { serverId, toolName }`; host calls MCP and normalizes the result |
+
+MCP results are normalized generically by `normalizeMcpResult()` (`structuredContent` → JSON in `content` → text). Connectors never parse raw MCP envelopes.
 
 ## Versioning policy (strict)
 

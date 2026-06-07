@@ -2,6 +2,7 @@
 import { useElectron } from '../hooks/useElectron'
 import { UserProfile } from '../agent/types'
 import { syncMemoryFromJira } from '../utils/memorySync'
+import { syncJiraWorkspaceKnowledge } from '../connectors/jira/syncKnowledge'
 import {
   AIProvider,
   AI_PROVIDER_LABELS,
@@ -94,7 +95,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     confirmAllConnectorActions: true,
   })
 
-  const { storage, models: modelCatalogAPI, mcp, file, jiraMetadata: jiraMetadataAPI } = useElectron()
+  const { storage, models: modelCatalogAPI, mcp, file, jiraMetadata: jiraMetadataAPI, connectors } = useElectron()
 
   const normalizeJiraSiteUrl = (url: string) => url.trim().replace(/\/+$/, '')
 
@@ -361,6 +362,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           }
         }
       }
+
+      await syncJiraWorkspaceKnowledge({ jiraMetadata: jiraMetadataAPI, connectors })
 
       setProfile(prev => ({
         ...prev,

@@ -63,6 +63,10 @@ export function useElectron() {
     getWorkspace: useCallback(async () => {
       return api.file.getWorkspace()
     }, []),
+
+    selectFolderInWorkspace: useCallback(async () => {
+      return api.file.selectFolderInWorkspace()
+    }, []),
     
     list: useCallback(async (relativePath?: string) => {
       return api.file.list(relativePath)
@@ -311,6 +315,12 @@ export function useElectron() {
     ),
     getKnowledge: useCallback(async (contextId: string, connectorId: string) => {
       return api.connectors.getKnowledge(contextId, connectorId)
+    }, []),
+    saveKnowledge: useCallback(async (contextId: string, connectorId: string, markdown: string) => {
+      return api.connectors.saveKnowledge(contextId, connectorId, markdown)
+    }, []),
+    onPlaygroundLog: useCallback((callback: (entry: import('../types/playground').PlaygroundLogEntry) => void) => {
+      return api.connectors.onPlaygroundLog(callback)
     }, []),
   }
 

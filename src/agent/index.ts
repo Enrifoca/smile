@@ -6,6 +6,7 @@ import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
 import { getSystemPrompt } from './prompts'
 import { toolDefinitions } from './tools'
 import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
+import type { ProjectContext } from '../context/types'
 import { shouldNudgeActionFirst } from './actionGuards'
 import { zodToJsonSchema } from './jsonSchema'
 import { formatScratchpadNote, getCoreScratchpadNote } from './scratchpad'
@@ -45,6 +46,8 @@ export class Agent {
   private config: AgentConfig
   private conversationHistory: Message[] = []
   private pendingActions: Map<string, PendingAction> = new Map()
+  // Active project context (sticky for the conversation); null = no context.
+  private activeContext: ProjectContext | null = null
   // Deduplication cache: maps "toolName:JSON(args)" → formatted result string.
   // Cleared at the start of each processMessage call. Write operations trigger
   // targeted invalidation so read-after-write always returns fresh data.
@@ -131,6 +134,45 @@ export class Agent {
 
   updateUserProfile(profile: UserProfile | null): void {
     this.config.userProfile = profile
+  }
+
+  /**
+   * Set the active project context (sticky for the conversation). Propagates a
+   * per-connector {@link ContextEnvelope} so connector tools run scoped to it and
+   * inject the context's knowledge into the prompt. Pass null to clear.
+   */
+  setActiveContext(context: ProjectContext | null): void {
+    this.activeContext = context
+    for (const connector of this.config.connectors || []) {
+      const connectorId = connector.definition.id
+      const envelope = context
+        ? { contextId: context.id, config: context.connectorScopes[connectorId] ?? null }
+        : null
+      connector.setActiveContext?.(envelope)
+    }
+  }
+
+  /** The active project context, or null. */
+  getActiveContext(): ProjectContext | null {
+    return this.activeContext
+  }
+
+  /**
+   * Prompt section announcing the active context: its name and a soft working-dir
+   * hint (file tools stay workspace-wide; this just biases default paths).
+   */
+  private buildActiveContextSection(): string {
+    const context = this.activeContext
+    if (!context) return ''
+
+    const lines = [`\n\n## Active Context: ${context.name}`]
+    lines.push(`The user scoped this conversation to the "${context.name}" project. Keep work within this scope.`)
+    if (context.folder) {
+      lines.push(
+        `Working folder: \`${context.folder}\` (relative to the workspace). Prefer this folder for file operations and treat it as the default working directory unless the user points elsewhere.`,
+      )
+    }
+    return lines.join('\n')
   }
 
   private getConnectorForTool(toolName: string): ConnectorRuntime | undefined {
@@ -480,13 +522,14 @@ export class Agent {
     const scratchpadSection = this.sessionScratchpad
       ? `\n\n## Session Scratchpad — What You've Done This Turn\n${this.sessionScratchpad}\n\nDo NOT re-read files or re-run searches that are already listed above. Use their results from context.`
       : ''
+    const contextSection = this.buildActiveContextSection()
     const systemPrompt = getSystemPrompt(
       this.config.userProfile,
       this.getConnectorPromptSections(),
       this.config.memory,
       undefined,
       this.config.monitoredScopes || [],
-    ) + intentSection + scratchpadSection
+    ) + intentSection + scratchpadSection + contextSection
 
     // Simple chronological window — last 40 messages in order.
     // tool_summary messages are UI-only artifacts (grouped icons bar) and carry

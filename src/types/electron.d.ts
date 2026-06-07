@@ -30,6 +30,7 @@ export interface ElectronAPI {
   file: {
     selectWorkspace: () => Promise<{ success: boolean; path?: string }>
     getWorkspace: () => Promise<string | null>
+    selectFolderInWorkspace: () => Promise<{ success: boolean; path?: string; error?: string }>
     list: (relativePath?: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
     read: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     readOcr: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
@@ -147,6 +148,12 @@ export interface ElectronAPI {
       contextId: string,
       connectorId: string,
     ) => Promise<{ success: boolean; data?: string | null; error?: string }>
+    saveKnowledge: (
+      contextId: string,
+      connectorId: string,
+      markdown: string,
+    ) => Promise<{ success: boolean; error?: string }>
+    onPlaygroundLog: (callback: (entry: import('./playground').PlaygroundLogEntry) => void) => () => void
   }
   contexts: {
     list: () => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>

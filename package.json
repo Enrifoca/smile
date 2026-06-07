@@ -10,7 +10,8 @@
     "build:mac": "tsc && vite build && electron-builder --mac",
     "preview": "vite preview",
     "electron:dev": "node scripts/dev-electron.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "validate:sandbox": "electron scripts/validate-sandbox.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^0.0.55",

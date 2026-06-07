@@ -8,8 +8,8 @@ interface Chat {
 }
 
 interface SidebarProps {
-  currentView: 'chat' | 'memories' | 'connectors' | 'settings'
-  onNavigate: (view: 'chat' | 'memories' | 'connectors' | 'settings') => void
+  currentView: 'chat' | 'memories' | 'connectors' | 'context' | 'studio' | 'settings'
+  onNavigate: (view: 'chat' | 'memories' | 'connectors' | 'context' | 'studio' | 'settings') => void
   onSelectChat: (chatId: string) => void
   onNewChat: () => void
   currentChatId: string | null
@@ -73,6 +73,18 @@ const MemoriesIcon = () => (
 const ConnectorsIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.5 13.5l3-3m-6 1.5l-1.5 1.5a3 3 0 104.243 4.243l1.5-1.5m4.5-4.5l1.5-1.5A3 3 0 1013.5 6l-1.5 1.5" />
+  </svg>
+)
+
+const StudioIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+  </svg>
+)
+
+const ContextIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
   </svg>
 )
 
@@ -200,6 +212,24 @@ export default function Sidebar({
         >
           <ConnectorsIcon />
           {!collapsed && <span>Connectors</span>}
+        </button>
+
+        <button
+          onClick={() => onNavigate('context')}
+          className={`sidebar-item w-full ${collapsed ? 'justify-center px-0' : ''} ${currentView === 'context' ? 'active' : ''}`}
+          title="Context"
+        >
+          <ContextIcon />
+          {!collapsed && <span>Context</span>}
+        </button>
+
+        <button
+          onClick={() => onNavigate('studio')}
+          className={`sidebar-item w-full ${collapsed ? 'justify-center px-0' : ''} ${currentView === 'studio' ? 'active' : ''}`}
+          title="Studio"
+        >
+          <StudioIcon />
+          {!collapsed && <span>Studio</span>}
         </button>
 
         {/* Chat History Accordion */}

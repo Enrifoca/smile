@@ -983,7 +983,12 @@ export class AtlassianMCPService extends EventEmitter {
    * Public generic tool call used by the connector capability broker (host.mcp.call).
    */
   async callRawTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
-    return this.callTool(toolName, args)
+    const enriched = { ...args }
+    if (!enriched.cloudId) {
+      const cloudId = await this.getCloudId()
+      if (cloudId) enriched.cloudId = cloudId
+    }
+    return this.callTool(toolName, enriched)
   }
 
   /**
