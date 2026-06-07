@@ -7,10 +7,14 @@
  * - the per-connector domain (shaped by each connector's `manifest.contextSchema`,
  *   e.g. Jira `{ projectKeys: ["ACME"] }`).
  *
- * The user activates a context in chat with `/progetto <name>` (sticky for the
+ * The user activates a context in chat with `/` + name (sticky for the
  * conversation until changed). The active context drives connector scopes, the
  * prompt knowledge injected per connector, and the working-dir hint.
  */
+
+/** Sentinel context id for workspace-wide connector knowledge (no active context). */
+export const WORKSPACE_KNOWLEDGE_CONTEXT_ID = '__workspace__'
+
 export interface ProjectContext {
   id: string
   name: string

@@ -3,6 +3,13 @@ import type { ModelCatalog, ModelProvider } from '../src/shared/modelCatalog'
 import type { ApproveActionOutcome, ConnectorManifest, ContextEnvelope, ToolResult } from '../src/connectors/contract'
 import type { ProjectContext } from '../src/context/types'
 
+export interface PlaygroundLogEntry {
+  connectorId: string
+  level: string
+  args: unknown[]
+  timestamp: string
+}
+
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
@@ -33,6 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   file: {
     selectWorkspace: () => ipcRenderer.invoke('file:selectWorkspace'),
     getWorkspace: () => ipcRenderer.invoke('file:getWorkspace'),
+    selectFolderInWorkspace: () => ipcRenderer.invoke('file:selectFolderInWorkspace'),
     list: (relativePath?: string) => ipcRenderer.invoke('file:list', relativePath),
     read: (relativePath: string) => ipcRenderer.invoke('file:read', relativePath),
     readOcr: (relativePath: string) => ipcRenderer.invoke('file:readOcr', relativePath),
@@ -192,6 +200,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('connectors:approve', connectorId, actionType, data, context),
     getKnowledge: (contextId: string, connectorId: string) =>
       ipcRenderer.invoke('connectors:getKnowledge', contextId, connectorId),
+    saveKnowledge: (contextId: string, connectorId: string, markdown: string) =>
+      ipcRenderer.invoke('connectors:saveKnowledge', contextId, connectorId, markdown),
+    onPlaygroundLog: (callback: (entry: PlaygroundLogEntry) => void) => {
+      const listener = (_event: unknown, entry: PlaygroundLogEntry) => callback(entry)
+      ipcRenderer.on('connectors:playgroundLog', listener)
+      return () => ipcRenderer.removeListener('connectors:playgroundLog', listener)
+    },
   },
 
   // Project contexts (Context management)
@@ -259,6 +274,7 @@ export interface ElectronAPI {
   file: {
     selectWorkspace: () => Promise<{ success: boolean; path?: string }>
     getWorkspace: () => Promise<string | null>
+    selectFolderInWorkspace: () => Promise<{ success: boolean; path?: string; error?: string }>
     list: (relativePath?: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
     read: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     readOcr: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
@@ -362,6 +378,8 @@ export interface ElectronAPI {
     execute: (connectorId: string, name: string, args: Record<string, unknown>, context?: ContextEnvelope) => Promise<ToolResult>
     approve: (connectorId: string, actionType: string, data: Record<string, unknown>, context?: ContextEnvelope) => Promise<ApproveActionOutcome>
     getKnowledge: (contextId: string, connectorId: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
+    saveKnowledge: (contextId: string, connectorId: string, markdown: string) => Promise<{ success: boolean; error?: string }>
+    onPlaygroundLog: (callback: (entry: PlaygroundLogEntry) => void) => () => void
   }
   contexts: {
     list: () => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>

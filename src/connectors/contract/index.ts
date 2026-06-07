@@ -17,6 +17,8 @@ export type {
   ConnectorManifest,
   ToolManifest,
   ToolConfirmationTemplate,
+  ToolMcpBinding,
+  ConnectorHandlerKind,
   ConnectorAuth,
   ConnectorAuthField,
   ConnectorPermissions,
@@ -51,3 +53,5 @@ export type { ContractMigration } from './migration'
 
 export { validateManifest } from './validate'
 export type { ManifestValidation } from './validate'
+
+export { normalizeMcpResult } from './mcpNormalize'

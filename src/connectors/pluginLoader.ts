@@ -1,13 +1,18 @@
 import { ConnectorDefinition, ConnectorRuntime, ToolDefinition } from './types'
-import { ConnectorManifest, ToolManifest } from './contract'
+import { ConnectorManifest, ContextEnvelope, ToolManifest } from './contract'
 import { ConfirmationViewModel } from '../agent/types'
 import { ElectronAPI } from '../types/electron'
+import { WORKSPACE_KNOWLEDGE_CONTEXT_ID } from '../context/types'
 
 /**
  * Builds a renderer-side {@link ConnectorRuntime} from a discovered declarative
  * connector manifest. Execution (`executeTool`/`approveAction`) is routed over
  * IPC to the sandboxed handler in the main process; everything else (prompt,
  * confirmation, preview) is derived declaratively from the manifest + prompt.md.
+ *
+ * The active project context (if any) is threaded into execution as a
+ * {@link ContextEnvelope} and used to inject cached connector "knowledge" into
+ * the prompt section.
  */
 
 /** Replace `{{key}}` placeholders with the matching tool argument. */
@@ -35,12 +40,24 @@ export function createPluginConnectorRuntime(
 ): ConnectorRuntime<ConnectorManifest> {
   const toolByName = new Map(manifest.tools.map(tool => [tool.name, tool]))
 
+  // Active context envelope + cached knowledge, refreshed via setActiveContext.
+  let activeEnvelope: ContextEnvelope | null = null
+  let knowledge = ''
+  let workspaceKnowledge = ''
+
+  void electron.connectors.getKnowledge(WORKSPACE_KNOWLEDGE_CONTEXT_ID, manifest.id).then(result => {
+    if (result.success && result.data) workspaceKnowledge = result.data
+  }).catch(() => { /* optional */ })
+
   const definition: ConnectorDefinition<ConnectorManifest> = {
     id: manifest.id,
     name: manifest.name,
     description: manifest.description || manifest.name,
     tools: manifest.tools.map(toToolDefinition),
-    getPromptSection: () => promptMarkdown,
+    getPromptSection: () => {
+      const parts = [promptMarkdown, workspaceKnowledge, knowledge].filter(Boolean)
+      return parts.join('\n\n')
+    },
     getActionConfirmation: (name, args) => {
       const tool = toolByName.get(name)
       if (!tool?.confirmation) return null
@@ -60,7 +77,12 @@ export function createPluginConnectorRuntime(
       return tool?.confirmation?.summary ? renderTemplate(tool.confirmation.summary, args) : null
     },
     approveAction: async input => {
-      const outcome = await electron.connectors.approve(manifest.id, input.actionType, input.data)
+      const outcome = await electron.connectors.approve(
+        manifest.id,
+        input.actionType,
+        input.data,
+        activeEnvelope ?? undefined,
+      )
       if (!outcome.handled) return { handled: false }
       for (const write of outcome.writes || []) {
         const formatted = input.formatToolResultForAI(write.name, write.result)
@@ -75,6 +97,20 @@ export function createPluginConnectorRuntime(
   return {
     definition,
     context: manifest,
-    executeTool: (name, args) => electron.connectors.execute(manifest.id, name, args),
+    executeTool: (name, args, context) =>
+      electron.connectors.execute(manifest.id, name, args, context ?? activeEnvelope ?? undefined),
+    setActiveContext: async envelope => {
+      activeEnvelope = envelope
+      if (!envelope) {
+        knowledge = ''
+        return
+      }
+      try {
+        const result = await electron.connectors.getKnowledge(envelope.contextId, manifest.id)
+        knowledge = result.success && result.data ? result.data : ''
+      } catch {
+        knowledge = ''
+      }
+    },
   }
 }

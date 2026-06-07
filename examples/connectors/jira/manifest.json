@@ -1,0 +1,240 @@
+{
+  "apiVersion": "1.0",
+  "id": "jira",
+  "name": "Jira",
+  "version": "1.0.0",
+  "description": "Atlassian Jira work tracking via MCP. OAuth for reads/writes; REST API token for attachments.",
+  "handlerKind": "code",
+  "auth": {
+    "type": "oauth-with-rest-token"
+  },
+  "permissions": {
+    "mcp": ["atlassian"],
+    "file": { "read": true },
+    "host": ["jira.uploadAttachment"]
+  },
+  "ui": {
+    "catalogLabel": "Jira",
+    "connectedLabel": "Atlassian connection",
+    "scopeLabel": "Monitored projects"
+  },
+  "contextSchema": {
+    "type": "object",
+    "properties": {
+      "projectKeys": {
+        "type": "array",
+        "description": "Jira project keys to scope this context (e.g. ACME, WEB)"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "jira_search_issues",
+      "description": "Search Jira issues using JQL. Use one query for lists instead of reading issues one by one.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jql": { "type": "string", "description": "JQL query" },
+          "maxResults": { "type": "integer", "description": "Maximum results (default 20, max 100)" },
+          "fields": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Field names to return"
+          }
+        },
+        "required": ["jql"]
+      }
+    },
+    {
+      "name": "jira_get_issue",
+      "description": "Get detailed information about one Jira issue.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": { "type": "string", "description": "Issue key or id (e.g. PROJ-123)" }
+        },
+        "required": ["issueIdOrKey"]
+      }
+    },
+    {
+      "name": "jira_get_projects",
+      "description": "List Jira projects visible to the connected account.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "jira_get_issue_types",
+      "description": "Get available issue types for a project.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectIdOrKey": { "type": "string", "description": "Project key or id" }
+        },
+        "required": ["projectIdOrKey"]
+      }
+    },
+    {
+      "name": "jira_get_transitions",
+      "description": "Get available workflow transitions for an issue.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": { "type": "string", "description": "Issue key or id" }
+        },
+        "required": ["issueIdOrKey"]
+      }
+    },
+    {
+      "name": "jira_lookup_user",
+      "description": "Find a Jira user by name or email to get their account ID.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "searchString": { "type": "string", "description": "Name or email" }
+        },
+        "required": ["searchString"]
+      }
+    },
+    {
+      "name": "jira_batch_create_issues",
+      "description": "Create multiple Jira issues with one approval.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "projectKey": { "type": "string" },
+                "issueTypeName": { "type": "string" },
+                "summary": { "type": "string" },
+                "description": { "type": "string" },
+                "priority": { "type": "string" }
+              },
+              "required": ["projectKey", "issueTypeName", "summary"]
+            }
+          }
+        },
+        "required": ["issues"]
+      },
+      "confirmation": {
+        "title": "Create multiple Jira issues",
+        "summary": "Review the batch before issues are created in Jira."
+      },
+      "preview": "Create batch of Jira issues"
+    },
+    {
+      "name": "jira_create_issue",
+      "description": "Create a single Jira issue.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectKey": { "type": "string" },
+          "issueTypeName": { "type": "string" },
+          "summary": { "type": "string" },
+          "description": { "type": "string" },
+          "priority": { "type": "string" }
+        },
+        "required": ["projectKey", "issueTypeName", "summary"]
+      },
+      "confirmation": {
+        "title": "Create Jira issue",
+        "summary": "Create {{issueTypeName}} in {{projectKey}}: {{summary}}"
+      },
+      "preview": "Create: {{summary}}"
+    },
+    {
+      "name": "jira_update_issue",
+      "description": "Update fields on an existing Jira issue.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": { "type": "string" },
+          "summary": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "required": ["issueIdOrKey"]
+      },
+      "confirmation": {
+        "title": "Update Jira issue",
+        "summary": "Update {{issueIdOrKey}}"
+      },
+      "preview": "Update: {{issueIdOrKey}}"
+    },
+    {
+      "name": "jira_add_comment",
+      "description": "Add a comment to a Jira issue.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": { "type": "string" },
+          "body": { "type": "string" }
+        },
+        "required": ["issueIdOrKey", "body"]
+      },
+      "confirmation": {
+        "title": "Add Jira comment",
+        "summary": "Comment on {{issueIdOrKey}}"
+      },
+      "preview": "Comment on: {{issueIdOrKey}}"
+    },
+    {
+      "name": "jira_transition_issue",
+      "description": "Transition a Jira issue to another workflow status.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": { "type": "string" },
+          "transitionId": { "type": "string" }
+        },
+        "required": ["issueIdOrKey", "transitionId"]
+      },
+      "confirmation": {
+        "title": "Change Jira status",
+        "summary": "Transition {{issueIdOrKey}}"
+      },
+      "preview": "Transition: {{issueIdOrKey}}"
+    },
+    {
+      "name": "jira_upload_attachment",
+      "description": "Upload a workspace file as an attachment to a Jira issue.",
+      "category": "connector-attachment",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueIdOrKey": { "type": "string" },
+          "filePath": { "type": "string", "description": "Path relative to workspace root" }
+        },
+        "required": ["issueIdOrKey", "filePath"]
+      },
+      "confirmation": {
+        "title": "Upload Jira attachment",
+        "summary": "Attach {{filePath}} to {{issueIdOrKey}}"
+      },
+      "preview": "Attach: {{filePath}}"
+    }
+  ]
+}

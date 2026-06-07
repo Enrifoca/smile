@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ConfirmationViewModel, ToolEntry } from '../agent/types'
+import { ContextEnvelope } from './contract'
 
 export type ToolCategory =
   | 'connector-read'
@@ -60,7 +61,12 @@ export interface ConnectorDefinition<TContext = unknown> {
 export interface ConnectorRuntime<TContext = any> {
   definition: ConnectorDefinition<TContext>
   context?: TContext | null
-  executeTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
+  executeTool: (name: string, args: Record<string, unknown>, context?: ContextEnvelope) => Promise<unknown>
+  /**
+   * Set the active project context envelope for this connector. The runtime
+   * threads it into execution and approval so tools run scoped to the context.
+   */
+  setActiveContext?: (envelope: ContextEnvelope | null) => void
 }
 
 export function ownsTool(connector: ConnectorDefinition, toolName: string): boolean {

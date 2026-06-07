@@ -39,6 +39,8 @@ export interface ConnectorPermissions {
   file?: { read?: boolean; write?: boolean }
   /** Secret keys the connector may read via host.secrets.get (subset of auth fields). */
   secrets?: string[]
+  /** Host-provided integrations (e.g. `jira.uploadAttachment`), brokered by the main process. */
+  host?: string[]
 }
 
 export interface ConnectorUI {
@@ -53,12 +55,23 @@ export interface ToolConfirmationTemplate {
   summary?: string
 }
 
+/** How tool execution is implemented for this connector package. */
+export type ConnectorHandlerKind = 'code' | 'mcp'
+
+/** Maps a connector tool to an MCP server tool (used when handlerKind is 'mcp'). */
+export interface ToolMcpBinding {
+  serverId: string
+  toolName: string
+}
+
 export interface ToolManifest {
   name: string
   description: string
   category: PluginToolCategory
   requiresConfirmation: boolean
   inputSchema: JSONSchema
+  /** Required when manifest.handlerKind is 'mcp'. */
+  mcp?: ToolMcpBinding
   /** Declarative confirmation card content for write tools. */
   confirmation?: ToolConfirmationTemplate
   /** Declarative one-line action preview, supports {{arg}} placeholders. */
@@ -71,6 +84,12 @@ export interface ConnectorManifest {
   name: string
   version: string
   description?: string
+  /**
+   * Execution model for this connector:
+   * - `code` (default): sandboxed `handler.js` with custom logic.
+   * - `mcp`: declarative 1:1 mapping to MCP tools; no handler.js required.
+   */
+  handlerKind?: ConnectorHandlerKind
   auth?: ConnectorAuth
   permissions?: ConnectorPermissions
   ui?: ConnectorUI

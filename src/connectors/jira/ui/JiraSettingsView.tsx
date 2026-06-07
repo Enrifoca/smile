@@ -7,6 +7,7 @@ import {
   McpConnectionModule,
 } from '../../../components/connectors/ConnectorSettingsModules'
 import { jiraManifest } from '../manifest'
+import { syncJiraWorkspaceKnowledge } from '../syncKnowledge'
 
 interface JiraProject {
   id: string
@@ -52,7 +53,8 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
   const [jiraApiForm, setJiraApiForm] = useState({ baseUrl: '', email: '', apiToken: '' })
   const [hasJiraApiToken, setHasJiraApiToken] = useState(false)
 
-  const { mcp, jiraMetadata, storage } = useElectron()
+  const electron = useElectron()
+  const { mcp, jiraMetadata, storage } = electron
 
   async function clearProjectScope() {
     setProjects([])
@@ -120,6 +122,10 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
           email: jiraConfig.email || '',
           apiToken: '••••••••',
         })
+      }
+
+      if (connected && metadata.monitoredProjects.length > 0) {
+        await syncJiraWorkspaceKnowledge(electron)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load connector settings')
@@ -200,6 +206,7 @@ export function JiraSettingsView({ onBack, onConnectionChange }: JiraSettingsVie
             }
           }
         }
+        await syncJiraWorkspaceKnowledge(electron)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to save projects')
         throw err

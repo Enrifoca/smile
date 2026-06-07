@@ -36,3 +36,21 @@ Exercises the full path end to end:
   (allowlisted to `https://jsonplaceholder.typicode.com`).
 - `example_echo` (write) — echoes a message, demonstrating the confirmation card
   rendered from the manifest `confirmation`/`preview` templates.
+
+## `jira`
+
+Production Jira connector (MCP + REST attachments). Copy into your workspace:
+
+```
+<workspace>/.smile/connectors/jira/
+  manifest.json
+  prompt.md
+  handler.js
+```
+
+Then connect Jira in **Connectors → Jira** (OAuth + monitored projects + optional
+API token for attachments). Project metadata is synced into workspace knowledge
+for the agent prompt automatically when you save monitored projects.
+
+Requires the Atlassian MCP connection (same as the built-in Jira flow). Tools
+use `host.mcp.call('atlassian', …)`; attachments use `host.call('jira.uploadAttachment', …)`.

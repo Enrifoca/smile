@@ -5,10 +5,12 @@ import MemoriesView from './components/MemoriesView'
 import SettingsView from './components/SettingsView'
 import Onboarding from './components/Onboarding'
 import ConnectorsView from './components/ConnectorsView'
+import ContextView from './components/ContextView'
+import StudioView from './components/StudioView'
 import MacWindowChrome from './components/MacWindowChrome'
 import { useElectron } from './hooks/useElectron'
 
-type View = 'chat' | 'memories' | 'connectors' | 'settings'
+type View = 'chat' | 'memories' | 'connectors' | 'context' | 'studio' | 'settings'
 
 interface UserProfileStore {
   onboardingCompleted: boolean
@@ -142,6 +144,12 @@ function App() {
           )}
           {currentView === 'connectors' && (
             <ConnectorsView />
+          )}
+          {currentView === 'context' && (
+            <ContextView />
+          )}
+          {currentView === 'studio' && (
+            <StudioView />
           )}
           {currentView === 'settings' && (
             <SettingsView onResetOnboarding={() => setShowOnboarding(true)} />
