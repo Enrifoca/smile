@@ -8,6 +8,9 @@ import { OCRConfig, OCRService } from './services/ocr'
 import { ModelCatalogService } from './services/model-catalog'
 import { AIConfig, ModelProvider, getDefaultModelId } from '../src/shared/modelCatalog'
 import { getAtlassianMCPService, AtlassianMCPService } from './services/atlassian-mcp'
+import { ConnectorsService } from './services/connectors'
+import type { ContextEnvelope } from '../src/connectors/contract'
+import type { ProjectContext } from '../src/context/types'
 import { getMemoryService, MemoryService } from './services/memory'
 import { getSourceMemoryService } from './services/sourceMemory'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
@@ -21,6 +24,51 @@ let aiService: AIService | null = null
 let mcpService: AtlassianMCPService | null = null
 let jiraAttachmentService: JiraAttachmentService | null = null
 let modelCatalogService: ModelCatalogService | null = null
+let connectorsService: ConnectorsService | null = null
+
+/** A connected MCP server that can answer generic tool calls from connectors. */
+interface McpServerHandle {
+  callRawTool(toolName: string, args: Record<string, unknown>): Promise<unknown>
+}
+
+/**
+ * Registry of MCP servers indexed by serverId, resolved lazily so a server is
+ * only constructed when a connector actually calls it. Add a server = add an
+ * entry here; the broker stays connector-neutral.
+ */
+const mcpServerRegistry: Record<string, () => McpServerHandle> = {
+  atlassian: () => getAtlassianMCPService(),
+}
+
+function resolveMcpServer(serverId: string): McpServerHandle {
+  const factory = mcpServerRegistry[serverId]
+  if (!factory) throw new Error(`Unknown MCP server: ${serverId}`)
+  return factory()
+}
+
+/** Lazily construct the connector runtime with its capability broker dependencies. */
+function getConnectorsService(): ConnectorsService {
+  if (!connectorsService) {
+    connectorsService = new ConnectorsService(
+      {
+        readFile: async (relativePath: string) => {
+          if (!fileService) return { success: false, error: 'Workspace not configured' }
+          return fileService.readFile(relativePath) as Promise<{ success: boolean; data?: string; error?: string }>
+        },
+        mcpCall: async (serverId: string, toolName: string, args: Record<string, unknown>) =>
+          resolveMcpServer(serverId).callRawTool(toolName, args),
+        getSecret: (connectorId: string, key: string) =>
+          storageService.getSecure(`connector:${connectorId}:${key}`),
+        saveKnowledge: (contextId: string, connectorId: string, markdown: string) =>
+          storageService.setConnectorKnowledge(contextId, connectorId, markdown),
+        getKnowledge: (contextId: string, connectorId: string) =>
+          storageService.getConnectorKnowledge(contextId, connectorId),
+      },
+      path.join(__dirname, 'connector-sandbox.js'),
+    )
+  }
+  return connectorsService
+}
 
 let mainWindow: BrowserWindow | null = null
 let mcpKeepAliveInterval: NodeJS.Timeout | null = null
@@ -145,6 +193,7 @@ async function initializeServices() {
     memoryService = getMemoryService()
     memoryService.setWorkspace(workspace)
     getSourceMemoryService().setWorkspace(workspace)
+    getConnectorsService().setWorkspace(workspace)
   }
 
   void modelCatalogService.refreshAll().catch(error => {
@@ -360,6 +409,7 @@ ipcMain.handle('file:selectWorkspace', async () => {
     memoryService = getMemoryService()
     memoryService.setWorkspace(workspacePath)
     getSourceMemoryService().setWorkspace(workspacePath)
+    getConnectorsService().setWorkspace(workspacePath)
     return { success: true, path: workspacePath }
   }
   return { success: false }
@@ -794,6 +844,70 @@ ipcMain.handle('jiraMetadata:setUsers', async (_, users: Array<{ accountId: stri
 ipcMain.handle('shell:openExternal', async (_, url: string) => {
   await shell.openExternal(url)
   return { success: true }
+})
+
+// Declarative connectors (sandboxed plugins)
+ipcMain.handle('connectors:list', async () => {
+  try {
+    return { success: true, data: await getConnectorsService().listForRenderer() }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle(
+  'connectors:execute',
+  async (_, connectorId: string, name: string, args: Record<string, unknown>, context?: ContextEnvelope) => {
+    try {
+      return await getConnectorsService().executeTool(connectorId, name, args, context)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  },
+)
+
+ipcMain.handle(
+  'connectors:approve',
+  async (_, connectorId: string, actionType: string, data: Record<string, unknown>, context?: ContextEnvelope) => {
+    try {
+      return await getConnectorsService().approveAction(connectorId, actionType, data, context)
+    } catch (error) {
+      return { handled: false, message: error instanceof Error ? error.message : String(error) }
+    }
+  },
+)
+
+ipcMain.handle('connectors:getKnowledge', async (_, contextId: string, connectorId: string) => {
+  try {
+    return { success: true, data: getConnectorsService().getKnowledge(contextId, connectorId) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Project contexts (Context management)
+ipcMain.handle('contexts:list', async () => {
+  try {
+    return { success: true, data: storageService.getContexts() }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:save', async (_, context: ProjectContext) => {
+  try {
+    return { success: true, data: storageService.saveContext(context) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:delete', async (_, contextId: string) => {
+  try {
+    return { success: true, data: storageService.deleteContext(contextId) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
 })
 
 // ============================================

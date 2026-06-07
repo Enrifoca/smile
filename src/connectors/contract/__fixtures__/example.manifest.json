@@ -1,0 +1,44 @@
+{
+  "apiVersion": "1.0",
+  "id": "example",
+  "name": "Example Connector",
+  "version": "0.1.0",
+  "description": "Neutral reference connector used by contract checks.",
+  "auth": {
+    "type": "api-key",
+    "fields": [{ "key": "apiToken", "label": "API token", "secret": true }]
+  },
+  "permissions": {
+    "http": ["https://api.example.com"],
+    "mcp": [],
+    "file": { "read": true, "write": false },
+    "secrets": ["apiToken"]
+  },
+  "ui": { "catalogLabel": "Example", "scopeLabel": "Workspaces" },
+  "tools": [
+    {
+      "name": "example_search_records",
+      "description": "Search records by query",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "example_create_record",
+      "description": "Create a record",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "title": { "type": "string" }, "body": { "type": "string" } },
+        "required": ["title"]
+      },
+      "confirmation": { "title": "Create record", "summary": "Create \"{{title}}\"" },
+      "preview": "Create record: {{title}}"
+    }
+  ]
+}

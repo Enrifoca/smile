@@ -36,6 +36,14 @@ export default defineConfig({
             outDir: 'dist-electron'
           }
         }
+      },
+      {
+        entry: 'electron/connector-sandbox.ts',
+        vite: {
+          build: {
+            outDir: 'dist-electron'
+          }
+        }
       }
     ]),
     renderer()

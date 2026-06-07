@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelCatalog, ModelProvider } from '../src/shared/modelCatalog'
+import type { ApproveActionOutcome, ConnectorManifest, ContextEnvelope, ToolResult } from '../src/connectors/contract'
+import type { ProjectContext } from '../src/context/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -181,6 +183,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   },
 
+  // Declarative connectors (sandboxed plugins)
+  connectors: {
+    list: () => ipcRenderer.invoke('connectors:list'),
+    execute: (connectorId: string, name: string, args: Record<string, unknown>, context?: ContextEnvelope) =>
+      ipcRenderer.invoke('connectors:execute', connectorId, name, args, context),
+    approve: (connectorId: string, actionType: string, data: Record<string, unknown>, context?: ContextEnvelope) =>
+      ipcRenderer.invoke('connectors:approve', connectorId, actionType, data, context),
+    getKnowledge: (contextId: string, connectorId: string) =>
+      ipcRenderer.invoke('connectors:getKnowledge', contextId, connectorId),
+  },
+
+  // Project contexts (Context management)
+  contexts: {
+    list: () => ipcRenderer.invoke('contexts:list'),
+    save: (context: ProjectContext) => ipcRenderer.invoke('contexts:save', context),
+    delete: (contextId: string) => ipcRenderer.invoke('contexts:delete', contextId),
+  },
+
   // Memory
   memory: {
     getAll: () => ipcRenderer.invoke('memory:getAll'),
@@ -329,6 +349,24 @@ export interface ElectronAPI {
   }
   shell: {
     openExternal: (url: string) => Promise<{ success: boolean }>
+  }
+  connectors: {
+    list: () => Promise<{
+      success: boolean
+      data?: {
+        connectors: Array<{ manifest: ConnectorManifest; promptMarkdown: string }>
+        errors: Array<{ id: string; errors: string[] }>
+      }
+      error?: string
+    }>
+    execute: (connectorId: string, name: string, args: Record<string, unknown>, context?: ContextEnvelope) => Promise<ToolResult>
+    approve: (connectorId: string, actionType: string, data: Record<string, unknown>, context?: ContextEnvelope) => Promise<ApproveActionOutcome>
+    getKnowledge: (contextId: string, connectorId: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
+  }
+  contexts: {
+    list: () => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
+    save: (context: ProjectContext) => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
+    delete: (contextId: string) => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
   }
   memory: {
     getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>

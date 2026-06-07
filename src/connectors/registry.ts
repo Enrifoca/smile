@@ -1,6 +1,7 @@
 import { ConnectorRuntime } from './types'
 import { ElectronAPI } from '../types/electron'
 import { createJiraRuntime, normalizeJiraMetadata } from './jira/runtime'
+import { createPluginConnectorRuntime } from './pluginLoader'
 
 export interface ConnectorScope {
   connectorId: string
@@ -25,8 +26,20 @@ export async function loadEnabledConnectors(electron: ElectronAPI): Promise<Load
     avatarUrl: project.avatarUrl,
   }))
 
-  return {
-    runtimes: [createJiraRuntime(electron, metadata)],
-    scopes: jiraScopes,
+  const runtimes: ConnectorRuntime<any>[] = [createJiraRuntime(electron, metadata)]
+  const scopes: ConnectorScope[] = [...jiraScopes]
+
+  // Discover declarative plugin connectors from the workspace's .smile/connectors.
+  try {
+    const discovered = await electron.connectors.list()
+    if (discovered.success && discovered.data) {
+      for (const { manifest, promptMarkdown } of discovered.data.connectors) {
+        runtimes.push(createPluginConnectorRuntime(electron, manifest, promptMarkdown))
+      }
+    }
+  } catch {
+    // Discovery failures must not break the built-in connectors.
   }
+
+  return { runtimes, scopes }
 }

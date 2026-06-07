@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { EncryptionService } from './encryption'
 import { ModelCatalog } from '../../src/shared/modelCatalog'
+import { ProjectContext } from '../../src/context/types'
 
 interface AIConfig {
   provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'
@@ -106,7 +107,14 @@ interface StorageSchema {
 
   // Cached provider model lists
   modelCatalog: ModelCatalog | null
-  
+
+  // User-defined project contexts (Context management).
+  contexts: ProjectContext[]
+
+  // Prompt-ready connector knowledge cached per context+connector.
+  // Key: `${contextId}:${connectorId}` → Markdown.
+  connectorKnowledge: Record<string, string>
+
   // Encrypted data (stored as encrypted strings)
   'encrypted:aiConfig': string
   'encrypted:ocrConfig': string
@@ -167,6 +175,8 @@ export class StorageService {
         },
         jiraConnectionMode: null,
         modelCatalog: null,
+        contexts: [],
+        connectorKnowledge: {},
         'encrypted:aiConfig': '',
         'encrypted:ocrConfig': ''
       }
@@ -180,6 +190,38 @@ export class StorageService {
 
   set<K extends keyof StorageSchema>(key: K, value: StorageSchema[K]): void {
     this.store.set(key, value)
+  }
+
+  // Project contexts (Context management)
+  getContexts(): ProjectContext[] {
+    return this.store.get('contexts') || []
+  }
+
+  saveContext(context: ProjectContext): ProjectContext[] {
+    const all = this.getContexts()
+    const index = all.findIndex(item => item.id === context.id)
+    if (index >= 0) all[index] = context
+    else all.push(context)
+    this.store.set('contexts', all)
+    return all
+  }
+
+  deleteContext(contextId: string): ProjectContext[] {
+    const all = this.getContexts().filter(item => item.id !== contextId)
+    this.store.set('contexts', all)
+    return all
+  }
+
+  // Connector knowledge cache (per context+connector)
+  getConnectorKnowledge(contextId: string, connectorId: string): string | null {
+    const all = this.store.get('connectorKnowledge')
+    return all?.[`${contextId}:${connectorId}`] ?? null
+  }
+
+  setConnectorKnowledge(contextId: string, connectorId: string, markdown: string): void {
+    const all = { ...this.store.get('connectorKnowledge') }
+    all[`${contextId}:${connectorId}`] = markdown
+    this.store.set('connectorKnowledge', all)
   }
 
   // Secure get/set (encrypted)

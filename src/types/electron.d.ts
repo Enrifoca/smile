@@ -122,6 +122,41 @@ export interface ElectronAPI {
   shell: {
     openExternal: (url: string) => Promise<{ success: boolean }>
   }
+  connectors: {
+    list: () => Promise<{
+      success: boolean
+      data?: {
+        connectors: Array<{ manifest: import('../connectors/contract').ConnectorManifest; promptMarkdown: string }>
+        errors: Array<{ id: string; errors: string[] }>
+      }
+      error?: string
+    }>
+    execute: (
+      connectorId: string,
+      name: string,
+      args: Record<string, unknown>,
+      context?: import('../connectors/contract').ContextEnvelope,
+    ) => Promise<import('../connectors/contract').ToolResult>
+    approve: (
+      connectorId: string,
+      actionType: string,
+      data: Record<string, unknown>,
+      context?: import('../connectors/contract').ContextEnvelope,
+    ) => Promise<import('../connectors/contract').ApproveActionOutcome>
+    getKnowledge: (
+      contextId: string,
+      connectorId: string,
+    ) => Promise<{ success: boolean; data?: string | null; error?: string }>
+  }
+  contexts: {
+    list: () => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>
+    save: (
+      context: import('../context/types').ProjectContext,
+    ) => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>
+    delete: (
+      contextId: string,
+    ) => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>
+  }
   memory: {
     getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>
     save: (memory: unknown) => Promise<{ success: boolean; error?: string }>
