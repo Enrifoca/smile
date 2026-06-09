@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useElectron } from '../../../hooks/useElectron'
 
 /** Load markdown from the workspace. Keys on path + reloadKey (e.g. artifact message id). */
@@ -7,6 +7,11 @@ export function useArtifactContent(path: string, reloadKey?: string) {
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [generation, setGeneration] = useState(0)
+
+  const reload = useCallback(() => {
+    setGeneration(value => value + 1)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -30,7 +35,7 @@ export function useArtifactContent(path: string, reloadKey?: string) {
     })
 
     return () => { cancelled = true }
-  }, [path, reloadKey, readFile])
+  }, [path, reloadKey, generation, readFile])
 
-  return { content, error, loading }
+  return { content, error, loading, reload }
 }

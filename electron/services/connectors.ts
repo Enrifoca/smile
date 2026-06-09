@@ -1,10 +1,13 @@
-import { utilityProcess, UtilityProcess } from 'electron'
+import { app, utilityProcess, UtilityProcess } from 'electron'
+import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import {
   ApproveActionOutcome,
   ConnectorManifest,
   ContextEnvelope,
+  HostCliRequest,
+  HostCliResponse,
   HostHttpRequest,
   HostHttpResponse,
   SandboxToHostMessage,
@@ -24,6 +27,37 @@ import {
  */
 
 const CALL_TIMEOUT_MS = 60_000
+const CLI_TIMEOUT_MS = 30_000
+const CLI_MAX_OUTPUT_BYTES = 512 * 1024
+const RESERVED_CONNECTOR_IDS = new Set<string>()
+
+function isCliCommandAllowed(executable: string, allowlist: string[]): boolean {
+  const trimmed = executable.trim()
+  return allowlist.some(prefix => trimmed === prefix || trimmed.endsWith(`${path.sep}${prefix}`))
+}
+
+function resolveWorkspaceSubpath(workspacePath: string, relative?: string): string {
+  const base = path.resolve(workspacePath)
+  if (!relative) return base
+  const resolved = path.resolve(base, relative)
+  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+    throw new Error('Path must stay inside the workspace')
+  }
+  return resolved
+}
+
+function resolveBundledConnectorsRoot(): string {
+  const candidates = [
+    path.join(app.getAppPath(), 'bundled', 'connectors'),
+    path.join(process.resourcesPath, 'bundled', 'connectors'),
+    path.join(__dirname, '..', 'bundled', 'connectors'),
+    path.join(process.cwd(), 'bundled', 'connectors'),
+  ]
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate
+  }
+  return candidates[0]
+}
 
 export interface LoadedConnector {
   manifest: ConnectorManifest
@@ -45,9 +79,9 @@ export interface ConnectorCapabilityDeps {
   saveKnowledge: (contextId: string, connectorId: string, markdown: string) => void
   /** Read previously cached knowledge markdown for a context+connector. */
   getKnowledge: (contextId: string, connectorId: string) => string | null
-  /** Upload a file from the workspace to a Jira issue via REST (Settings API token). */
-  jiraUploadAttachment: (issueKey: string, relativePath: string) => Promise<ToolResult>
-  /** Surface connector logs (playground/diagnostics). */
+  /** Optional host-provided integrations declared in permissions.host. */
+  hostCall?: (capability: string, params: Record<string, unknown>) => Promise<ToolResult>
+  /** Optional diagnostic callback when a connector calls host.log. */
   onLog?: (connectorId: string, level: string, args: unknown[]) => void
 }
 
@@ -149,6 +183,81 @@ export class ConnectorsService {
   /** Read cached prompt-ready knowledge for a context+connector (for prompt assembly). */
   getKnowledge(contextId: string, connectorId: string): string | null {
     return this.deps.getKnowledge(contextId, connectorId)
+  }
+
+  async deletePackage(connectorId: string): Promise<void> {
+    if (RESERVED_CONNECTOR_IDS.has(connectorId)) {
+      throw new Error(`Cannot delete reserved connector: ${connectorId}`)
+    }
+    const connector = await this.getConnector(connectorId)
+    await this.shutdownConnector(connectorId)
+    fs.rmSync(connector.dir, { recursive: true, force: true })
+  }
+
+  /** Copy a shipped bundled connector from `bundled/connectors/<id>/` into the workspace. */
+  async installBundledPackage(connectorId: string): Promise<ConnectorManifest> {
+    const root = this.connectorsRoot()
+    if (!root) throw new Error('Workspace not configured')
+
+    const sourceDir = path.join(resolveBundledConnectorsRoot(), connectorId)
+    if (!fs.existsSync(sourceDir)) {
+      throw new Error(`Bundled connector not found: ${connectorId}`)
+    }
+
+    const manifestPath = path.join(sourceDir, 'manifest.json')
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error(`Bundled connector is missing manifest.json: ${connectorId}`)
+    }
+
+    let raw: unknown
+    try {
+      raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+    } catch (error) {
+      throw new Error(`Invalid bundled manifest: ${String(error)}`)
+    }
+
+    const validation = validateManifest(raw)
+    if (!validation.ok) {
+      throw new Error(validation.errors.join('; '))
+    }
+    if (validation.manifest.id !== connectorId) {
+      throw new Error(`Bundled manifest id "${validation.manifest.id}" does not match folder "${connectorId}"`)
+    }
+
+    const destDir = path.join(root, connectorId)
+    if (fs.existsSync(destDir)) {
+      throw new Error(`Connector already installed: ${connectorId}`)
+    }
+
+    fs.mkdirSync(root, { recursive: true })
+    fs.cpSync(sourceDir, destDir, { recursive: true })
+    return validation.manifest
+  }
+
+  async getIconDataUrl(connectorId: string): Promise<string | null> {
+    try {
+      const connector = await this.getConnector(connectorId)
+      return this.readIconDataUrl(connector.dir, connector.manifest)
+    } catch {
+      return null
+    }
+  }
+
+  getBundledIconDataUrl(connectorId: string): string | null {
+    const sourceDir = path.join(resolveBundledConnectorsRoot(), connectorId)
+    if (!fs.existsSync(sourceDir)) return null
+
+    const manifestPath = path.join(sourceDir, 'manifest.json')
+    if (!fs.existsSync(manifestPath)) return null
+
+    try {
+      const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+      const validation = validateManifest(raw)
+      if (!validation.ok) return null
+      return this.readIconDataUrl(sourceDir, validation.manifest)
+    } catch {
+      return null
+    }
   }
 
   /** Execute a tool on a connector, spawning its sandbox if needed. */
@@ -358,6 +467,10 @@ export class ConnectorsService {
         if (!permissions.file?.read) throw new Error('file.read not permitted')
         return this.deps.readFile(params[0] as string)
       }
+      case 'cli.run': {
+        if (!(permissions.cli || []).length) throw new Error('cli.run not permitted')
+        return this.brokerCliRun(params[0] as HostCliRequest, permissions.cli || [])
+      }
       case 'secrets.get': {
         const key = params[0] as string
         if (!(permissions.secrets || []).includes(key)) throw new Error(`secret not declared: ${key}`)
@@ -368,13 +481,10 @@ export class ConnectorsService {
         if (!(permissions.host || []).includes(capability)) {
           throw new Error(`host capability not permitted: ${capability}`)
         }
-        if (capability === 'jira.uploadAttachment') {
-          const issueKey = String(callParams.issueKey || '')
-          const filePath = String(callParams.filePath || '')
-          if (!issueKey || !filePath) throw new Error('issueKey and filePath are required')
-          return this.deps.jiraUploadAttachment(issueKey, filePath)
+        if (!this.deps.hostCall) {
+          throw new Error(`Host capability not available: ${capability}`)
         }
-        throw new Error(`Unknown host capability: ${capability}`)
+        return this.deps.hostCall(capability, callParams)
       }
       default:
         throw new Error(`Unknown capability: ${method}`)
@@ -399,6 +509,124 @@ export class ConnectorsService {
       headers[key] = value
     })
     return { ok: response.ok, status: response.status, headers, text, json }
+  }
+
+  private readIconDataUrl(dir: string, manifest: ConnectorManifest): string | null {
+    const candidates = [
+      manifest.catalog?.icon,
+      'icon.svg',
+      'icon.png',
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+
+    for (const iconRel of [...new Set(candidates)]) {
+      const iconPath = path.join(dir, iconRel)
+      if (!fs.existsSync(iconPath)) continue
+      const buf = fs.readFileSync(iconPath)
+      const ext = path.extname(iconPath).toLowerCase()
+      const mime = ext === '.svg'
+        ? 'image/svg+xml'
+        : ext === '.jpg' || ext === '.jpeg'
+          ? 'image/jpeg'
+          : 'image/png'
+      return `data:${mime};base64,${buf.toString('base64')}`
+    }
+    return null
+  }
+
+  private brokerCliRun(request: HostCliRequest, allowlist: string[]): Promise<HostCliResponse> {
+    if (!this.workspacePath) {
+      return Promise.resolve({ success: false, exitCode: null, stdout: '', stderr: '', error: 'No workspace selected' })
+    }
+
+    const command = request.command?.trim()
+    if (!command) {
+      return Promise.resolve({ success: false, exitCode: null, stdout: '', stderr: '', error: 'command is required' })
+    }
+
+    const hasSeparateArgs = (request.args?.length ?? 0) > 0
+    const executable = hasSeparateArgs ? command : command.split(/\s+/)[0]
+    const inlineArgs = hasSeparateArgs ? [] : command.split(/\s+/).slice(1)
+    if (!isCliCommandAllowed(executable, allowlist)) {
+      return Promise.resolve({ success: false, exitCode: null, stdout: '', stderr: '', error: `cli not allowed: ${executable}` })
+    }
+
+    const cwd = resolveWorkspaceSubpath(this.workspacePath, request.cwd)
+    const args = [...inlineArgs, ...(request.args ?? [])]
+
+    return new Promise(resolve => {
+      let stdout = ''
+      let stderr = ''
+      let truncated = false
+
+      const append = (target: 'stdout' | 'stderr', chunk: string) => {
+        const current = target === 'stdout' ? stdout : stderr
+        if (current.length >= CLI_MAX_OUTPUT_BYTES) {
+          truncated = true
+          return
+        }
+        const next = current + chunk
+        if (next.length > CLI_MAX_OUTPUT_BYTES) {
+          if (target === 'stdout') stdout = next.slice(0, CLI_MAX_OUTPUT_BYTES)
+          else stderr = next.slice(0, CLI_MAX_OUTPUT_BYTES)
+          truncated = true
+          return
+        }
+        if (target === 'stdout') stdout = next
+        else stderr = next
+      }
+
+      const child = spawn(executable, args, {
+        cwd,
+        env: { ...process.env, ...request.env },
+        windowsHide: true,
+      })
+
+      const timer = setTimeout(() => {
+        child.kill()
+        resolve({
+          success: false,
+          exitCode: null,
+          stdout,
+          stderr,
+          error: 'CLI timed out',
+        })
+      }, CLI_TIMEOUT_MS)
+
+      child.stdout?.on('data', chunk => append('stdout', String(chunk)))
+      child.stderr?.on('data', chunk => append('stderr', String(chunk)))
+      child.on('error', error => {
+        clearTimeout(timer)
+        resolve({
+          success: false,
+          exitCode: null,
+          stdout,
+          stderr,
+          error: error.message,
+        })
+      })
+      child.on('close', exitCode => {
+        clearTimeout(timer)
+        resolve({
+          success: exitCode === 0,
+          exitCode,
+          stdout,
+          stderr: truncated ? `${stderr}\n[output truncated]`.trim() : stderr,
+          error: exitCode === 0 ? undefined : `Process exited with code ${exitCode}`,
+        })
+      })
+    })
+  }
+
+  private async shutdownConnector(connectorId: string): Promise<void> {
+    const sandbox = this.sandboxes.get(connectorId)
+    if (!sandbox) return
+    try {
+      sandbox.proc.postMessage({ type: 'shutdown' })
+    } catch {
+      // ignore
+    }
+    sandbox.proc.kill()
+    this.sandboxes.delete(connectorId)
   }
 
   async shutdownAll(): Promise<void> {

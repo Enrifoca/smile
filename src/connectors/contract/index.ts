@@ -23,6 +23,8 @@ export type {
   ConnectorAuthField,
   ConnectorPermissions,
   ConnectorUI,
+  ConnectorIntegrationType,
+  ConnectorCatalogMeta,
   PluginToolCategory,
 } from './manifest'
 
@@ -32,6 +34,8 @@ export type {
   HostBridge,
   HostHttpRequest,
   HostHttpResponse,
+  HostCliRequest,
+  HostCliResponse,
   HostLogLevel,
 } from './host'
 

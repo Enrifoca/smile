@@ -39,8 +39,27 @@ export interface ConnectorPermissions {
   file?: { read?: boolean; write?: boolean }
   /** Secret keys the connector may read via host.secrets.get (subset of auth fields). */
   secrets?: string[]
-  /** Host-provided integrations (e.g. `jira.uploadAttachment`), brokered by the main process. */
+  /** Host-provided integrations brokered by the main process (integration id is manifest-defined). */
   host?: string[]
+  /** Allowlisted CLI command prefixes for host.cli.run (v1 broker). */
+  cli?: string[]
+}
+
+/** How the connector reaches external systems; used for catalog labels and author guidance. */
+export type ConnectorIntegrationType =
+  | 'sop'
+  | 'rest'
+  | 'graphql'
+  | 'ftp'
+  | 'sftp'
+  | 'mcp'
+  | 'cli'
+
+export interface ConnectorCatalogMeta {
+  /** Relative path inside the connector dir, e.g. "icon.png". */
+  icon?: string
+  /** Optional short label on catalog cards. */
+  tagline?: string
 }
 
 export interface ConnectorUI {
@@ -90,9 +109,13 @@ export interface ConnectorManifest {
    * - `mcp`: declarative 1:1 mapping to MCP tools; no handler.js required.
    */
   handlerKind?: ConnectorHandlerKind
+  /** Integration style; optional — connector author may set explicitly. */
+  integrationType?: ConnectorIntegrationType
   auth?: ConnectorAuth
   permissions?: ConnectorPermissions
   ui?: ConnectorUI
+  /** Catalog presentation (icon path relative to connector dir). */
+  catalog?: ConnectorCatalogMeta
   /**
    * JSON Schema describing what a per-project context must provide for this
    * connector (e.g. `{ projectKeys: string[] }`). The Context management UI
@@ -102,3 +125,4 @@ export interface ConnectorManifest {
   contextSchema?: JSONSchema
   tools: ToolManifest[]
 }
+

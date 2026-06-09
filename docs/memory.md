@@ -54,7 +54,7 @@ Leaves are appended only when:
 
 - The connector write tool succeeds (`connector-write` or `connector-attachment` category), **and**
 - The scope is in the user's monitored scopes list, **and**
-- The connector can resolve `connectorId` + `scopeId` from tool args (Jira: project key)
+- The connector can resolve `connectorId` + `scopeId` from tool args (e.g. a project key or workspace id)
 
 Not persisted:
 

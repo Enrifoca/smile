@@ -20,6 +20,16 @@ const HANDLER_KINDS: ConnectorHandlerKind[] = ['code', 'mcp']
 
 const ID_PATTERN = /^[a-z][a-z0-9_-]*$/
 
+const INTEGRATION_TYPES = [
+  'sop',
+  'rest',
+  'graphql',
+  'ftp',
+  'sftp',
+  'mcp',
+  'cli',
+] as const
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -76,6 +86,28 @@ export function validateManifest(raw: unknown): ManifestValidation {
   }
   if (typeof raw.name !== 'string' || !raw.name.trim()) errors.push('name is required')
   if (typeof raw.version !== 'string' || !raw.version.trim()) errors.push('version is required')
+
+  if (raw.integrationType !== undefined) {
+    if (
+      typeof raw.integrationType !== 'string'
+      || !INTEGRATION_TYPES.includes(raw.integrationType as (typeof INTEGRATION_TYPES)[number])
+    ) {
+      errors.push(`integrationType must be one of ${INTEGRATION_TYPES.join(', ')}`)
+    }
+  }
+
+  if (raw.catalog !== undefined) {
+    if (!isRecord(raw.catalog)) {
+      errors.push('catalog must be an object')
+    } else {
+      if (raw.catalog.icon !== undefined && typeof raw.catalog.icon !== 'string') {
+        errors.push('catalog.icon must be a string')
+      }
+      if (raw.catalog.tagline !== undefined && typeof raw.catalog.tagline !== 'string') {
+        errors.push('catalog.tagline must be a string')
+      }
+    }
+  }
 
   if (!Array.isArray(raw.tools) || raw.tools.length === 0) {
     errors.push('tools must be a non-empty array')

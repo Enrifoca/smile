@@ -2,7 +2,7 @@ import { validateManifest } from './validate'
 import { CURRENT_API_VERSION, isApiVersionSupported } from './version'
 import { resolveMigrations } from './migration'
 import { normalizeMcpResult } from './mcpNormalize'
-import exampleManifest from './__fixtures__/example.manifest.json'
+import referenceManifest from './__fixtures__/reference.manifest.json'
 
 /**
  * Framework-agnostic contract checks. Runs reference fixtures against the current
@@ -20,18 +20,18 @@ export interface ContractCheckResult {
 export function runContractChecks(): ContractCheckResult {
   const failures: string[] = []
 
-  const validation = validateManifest(exampleManifest)
+  const validation = validateManifest(referenceManifest)
   if (!validation.ok) {
     failures.push(`reference manifest failed validation: ${validation.errors.join('; ')}`)
   }
 
-  if (!isApiVersionSupported(exampleManifest.apiVersion)) {
-    failures.push(`reference apiVersion ${exampleManifest.apiVersion} not supported by host ${CURRENT_API_VERSION}`)
+  if (!isApiVersionSupported(referenceManifest.apiVersion)) {
+    failures.push(`reference apiVersion ${referenceManifest.apiVersion} not supported by host ${CURRENT_API_VERSION}`)
   }
 
-  const migrations = resolveMigrations(exampleManifest.apiVersion)
+  const migrations = resolveMigrations(referenceManifest.apiVersion)
   if (migrations === null) {
-    failures.push(`no migration path for apiVersion ${exampleManifest.apiVersion}`)
+    failures.push(`no migration path for apiVersion ${referenceManifest.apiVersion}`)
   }
 
   const structured = normalizeMcpResult({

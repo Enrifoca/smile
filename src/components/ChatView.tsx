@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
 import { Agent, Message, PendingAction, UserProfile } from '../agent'
+import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
 import { formatSourceMemoryListing, formatSourceMemoryRead } from '../memory/promptSections'
@@ -17,41 +18,10 @@ interface ChatViewProps {
   chatId: string | null
   onChatCreated: (chatId: string) => void
   onOpenSettings: () => void
+  activeContext: ProjectContext | null
 }
 
 type McpConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
-
-/**
- * Parse a leading `/<name>` context command. The name immediately follows the
- * slash (a leading `/ ` with a space is left untouched, e.g. Jira per-message
- * scopes). Returns the resolved context (matched by name, case-insensitive) and
- * the message with the command stripped. `clear` is true for `/none`.
- */
-function parseContextCommand(
-  raw: string,
-  contexts: ProjectContext[],
-): { context: ProjectContext | null; clear: boolean; message: string; unmatched?: string } {
-  const match = /^\/(?:"([^"]+)"|([^\s/][^\s]*))(?:\s+|$)/.exec(raw)
-  if (!match) return { context: null, clear: false, message: raw }
-
-  const name = (match[1] || match[2] || '').trim()
-  const message = raw.slice(match[0].length)
-
-  if (/^(none|nessuno|clear|off)$/i.test(name)) {
-    return { context: null, clear: true, message }
-  }
-
-  const found = contexts.find(ctx => ctx.name.toLowerCase() === name.toLowerCase())
-  if (!found) return { context: null, clear: false, message: raw, unmatched: name }
-
-  return { context: found, clear: false, message }
-}
-
-/** When the input is a bare `/partial` (no space yet), the context picker opens. */
-function matchContextTrigger(raw: string): string | null {
-  const m = /^\/([^\s/]*)$/.exec(raw)
-  return m ? m[1] : null
-}
 
 /** Returns a specific, human-readable label for a tool call based on its arguments */
 
@@ -78,7 +48,7 @@ const StopIcon = () => (
   </svg>
 )
 
-export default function ChatView({ chatId, onChatCreated, onOpenSettings }: ChatViewProps) {
+export default function ChatView({ chatId, onChatCreated, onOpenSettings, activeContext }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -89,10 +59,6 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
   const [mcpConnectionState, setMcpConnectionState] = useState<McpConnectionState>('disconnected')
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; path: string; size: number }>>([])
   const [managedProjects, setManagedProjects] = useState<ConnectorScope[]>([])
-  const [availableContexts, setAvailableContexts] = useState<ProjectContext[]>([])
-  const [activeContext, setActiveContext] = useState<ProjectContext | null>(null)
-  const [contextMenuIndex, setContextMenuIndex] = useState(0)
-  const [contextMenuDismissed, setContextMenuDismissed] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [dismissedReportMessageId, setDismissedReportMessageId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -114,10 +80,14 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const electron = useElectron()
-  const { storage, mcp, file, ai, memory: memoryAPI, contexts: contextsAPI } = electron
+  const { storage, mcp, file, ai, memory: memoryAPI } = electron
 
   const activeReport = useMemo(() => getActiveReportFromMessages(messages), [messages])
   const showActiveReport = activeReport && activeReport.messageId !== dismissedReportMessageId
+
+  useEffect(() => {
+    agent?.setActiveContext(activeContext)
+  }, [agent, activeContext])
 
   const loadMemoryForAgent = async (): Promise<MemoryStore | null> => {
     try {
@@ -283,15 +253,10 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
       const aiConfig = JSON.parse(aiConfigStr)
       await ai.configure(aiConfig)
       
-      const userProfile = await storage.get('userProfile') as UserProfile | null
+      const userProfile = normalizeUserProfile(await storage.get('userProfile') as Partial<UserProfile> | null)
       
       const connectors = await loadEnabledConnectors(electron)
       setManagedProjects(connectors.scopes)
-
-      try {
-        const ctxResult = await contextsAPI.list()
-        if (ctxResult.success && ctxResult.data) setAvailableContexts(ctxResult.data)
-      } catch { /* contexts are optional */ }
 
       // Load memory for the agent
       const memory = await loadMemoryForAgent()
@@ -707,90 +672,14 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
 
   const refreshAgentProfile = async () => {
     if (!agent) return
-    const userProfile = await storage.get('userProfile') as UserProfile | null
+    const userProfile = normalizeUserProfile(await storage.get('userProfile') as Partial<UserProfile> | null)
     agent.updateUserProfile(userProfile)
   }
-
-  const contextTriggerQuery = matchContextTrigger(input)
-  const contextMenuOptions = useMemo(() => {
-    if (contextTriggerQuery === null) return []
-    const q = contextTriggerQuery.toLowerCase()
-    const matches = availableContexts.filter(ctx => ctx.name.toLowerCase().includes(q))
-    const options: Array<{ kind: 'context'; context: ProjectContext } | { kind: 'clear' }> = matches.map(
-      context => ({ kind: 'context', context }),
-    )
-    // Offer a "clear" entry when a context is active and not filtered out.
-    if (activeContext && ('none'.includes(q) || 'clear'.includes(q) || q === '')) {
-      options.push({ kind: 'clear' })
-    }
-    return options
-  }, [contextTriggerQuery, availableContexts, activeContext])
-  const contextMenuOpen = !contextMenuDismissed && contextTriggerQuery !== null && contextMenuOptions.length > 0
-
-  const applyContext = (next: ProjectContext | null) => {
-    setActiveContext(next)
-    agent?.setActiveContext(next)
-    setInput('')
-    setContextMenuIndex(0)
-    setContextMenuDismissed(false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }
-
-  const selectContextOption = (option: { kind: 'context'; context: ProjectContext } | { kind: 'clear' }) => {
-    applyContext(option.kind === 'clear' ? null : option.context)
-  }
-
-  const refreshContexts = useCallback(async () => {
-    try {
-      const result = await contextsAPI.list()
-      if (result.success && result.data) setAvailableContexts(result.data)
-    } catch { /* contexts are optional */ }
-  }, [contextsAPI])
 
   const handleSend = async () => {
     if (!input.trim() || isLoading || !agent) return
 
     let userMessage = input.trim()
-
-    // Resolve a leading /progetto command (sticky context for the conversation).
-    let parsed = parseContextCommand(userMessage, availableContexts)
-    // The contexts list is loaded at chat init; a context created afterwards
-    // won't be there yet. On a miss, refresh once and re-parse before warning.
-    if (parsed.unmatched) {
-      try {
-        const refreshed = await contextsAPI.list()
-        if (refreshed.success && refreshed.data) {
-          setAvailableContexts(refreshed.data)
-          parsed = parseContextCommand(userMessage, refreshed.data)
-        }
-      } catch { /* keep original parse */ }
-    }
-    if (parsed.unmatched) {
-      setInput('')
-      const warning: Message = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: `No context named "${parsed.unmatched}". Define it in the Context section, or check the name.`,
-        timestamp: new Date().toISOString(),
-      }
-      setMessages(prev => [...prev, warning])
-      return
-    }
-    if (parsed.clear) {
-      setActiveContext(null)
-      agent.setActiveContext(null)
-    } else if (parsed.context) {
-      setActiveContext(parsed.context)
-      agent.setActiveContext(parsed.context)
-    }
-    userMessage = parsed.message.trim()
-    if (!userMessage) {
-      // Command-only message (e.g. just "/progetto X"): switch context, no agent run.
-      setInput('')
-      return
-    }
-
-    // If files are attached, add info about them to the message
     if (attachedFiles.length > 0) {
       const fileInfo = attachedFiles.map(f => `- ${f.name} (${f.path})`).join('\n')
       userMessage = `${userMessage}\n\n[Attached files in workspace]\n${fileInfo}`
@@ -824,30 +713,6 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (contextMenuOpen) {
-      const len = contextMenuOptions.length
-      const current = Math.min(contextMenuIndex, len - 1)
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setContextMenuIndex((current + 1) % len)
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setContextMenuIndex((current - 1 + len) % len)
-        return
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault()
-        selectContextOption(contextMenuOptions[current])
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setContextMenuDismissed(true)
-        return
-      }
-    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -963,7 +828,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <div className="content-shell">
+        <div className={`content-shell ${showActiveReport ? 'ui-chat-composer--with-report' : ''}`}>
           {pendingAction && (
             <WriteActionConfirmModule
               action={pendingAction}
@@ -975,37 +840,12 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
 
           {showActiveReport && (
             <ActiveReportPill
+              key={activeReport.messageId}
               artifact={activeReport.artifact}
               messageId={activeReport.messageId}
               onDismiss={() => setDismissedReportMessageId(activeReport.messageId)}
               className="mb-3"
             />
-          )}
-
-          {/* Active context indicator */}
-          {activeContext && (
-            <div className="mb-3 flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-900 bg-neutral-900 px-2.5 py-1 text-xs text-white">
-                <span className="font-semibold uppercase tracking-wide text-[10px] text-neutral-300">Context</span>
-                <span className="h-1.5 w-1.5 rounded-full bg-white" />
-                <span className="font-medium">{activeContext.name}</span>
-                {activeContext.folder && <span className="text-neutral-400">/{activeContext.folder}</span>}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveContext(null)
-                    agent?.setActiveContext(null)
-                  }}
-                  className="ml-1 text-neutral-400 hover:text-white"
-                  title="Clear active context"
-                  aria-label="Clear active context"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </span>
-            </div>
           )}
 
           {/* Attached Files Preview */}
@@ -1042,41 +882,6 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
             </div>
           )}
 
-          {contextMenuOpen && (
-            <div className="mb-2 overflow-hidden rounded-lg border border-neutral-300 bg-white shadow-sm">
-              <p className="border-b border-neutral-100 px-3 py-1.5 text-xs text-neutral-400">
-                Select a context
-              </p>
-              {contextMenuOptions.map((option, index) => {
-                const isActive = index === Math.min(contextMenuIndex, contextMenuOptions.length - 1)
-                const key = option.kind === 'clear' ? '__clear__' : option.context.id
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onMouseDown={(e) => { e.preventDefault(); selectContextOption(option) }}
-                    onMouseEnter={() => setContextMenuIndex(index)}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
-                      isActive ? 'bg-neutral-100 text-neutral-950' : 'text-neutral-700 hover:bg-neutral-50'
-                    }`}
-                  >
-                    {option.kind === 'clear' ? (
-                      <span className="text-neutral-500">Clear active context</span>
-                    ) : (
-                      <>
-                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-900" />
-                        <span className="font-medium">{option.context.name}</span>
-                        {option.context.folder && (
-                          <span className="truncate text-xs text-neutral-400">{option.context.folder}</span>
-                        )}
-                      </>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           <div className="ui-chat-input-shell">
             <input
               ref={fileInputRef}
@@ -1100,12 +905,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value)
-                setContextMenuIndex(0)
-                setContextMenuDismissed(false)
-              }}
-              onFocus={() => { void refreshContexts() }}
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
                 mcpConnectionState === 'connecting'

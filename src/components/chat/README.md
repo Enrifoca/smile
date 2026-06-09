@@ -18,7 +18,7 @@ When the agent calls a write tool, it explains the action in the chat transcript
 | `getActionConfirmation` | `approveLabel` for the Accept button; optional fields for fallback chat copy |
 | `getActionConfirmationPrompt` | Structured fallback when the model does not explain the action in prose |
 
-Styles: `.ui-write-action-bar` in `src/styles/globals.css`.
+Styles: `.ui-write-action-bar` in `src/styles/globals.css` — white content box, grey border (same family as Settings / connector panels).
 
 ## Activity status (agent loop)
 

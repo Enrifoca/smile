@@ -10,7 +10,7 @@ The stable, **language-neutral** boundary that connectors are written against. N
 | `jsonSchema.ts` | Minimal JSON Schema type for tool inputs |
 | `manifest.ts` | `ConnectorManifest`, `ToolManifest`, permissions, auth, UI |
 | `result.ts` | `ToolResult` envelope (`{ success, data?, error? }`) |
-| `host.ts` | `HostBridge` capability API (http, mcp, file, secrets, log) |
+| `host.ts` | `HostBridge` capability API (http, mcp, file, cli, secrets, log) |
 | `handler.ts` | `ConnectorHandlerModule` (`executeTool`, `approveAction`) |
 | `rpc.ts` | Host <-> sandbox message protocol |
 | `migration.ts` | Migration shims registry (strict compat policy) |
@@ -19,9 +19,18 @@ The stable, **language-neutral** boundary that connectors are written against. N
 
 ## Package layout (`.smile/connectors/<id>/`)
 
-- `manifest.json` — validated by `validateManifest`
+- `manifest.json` — validated by `validateManifest` (optional `integrationType`, `catalog.icon`)
 - `prompt.md` — domain prompt section
 - `handler.js` — sandboxed module matching `ConnectorHandlerModule` (**required when `handlerKind` is `code`**, the default)
+- `icon.png` — optional catalog image (path overridable via `catalog.icon`)
+
+### integrationType
+
+Optional catalog hint: `sop`, `rest`, `graphql`, `ftp`, `sftp`, `mcp`, `cli`. Shown in the Connectors catalog; host enforces `permissions.*` regardless.
+
+### permissions.cli
+
+Allowlisted executable names for `host.cli.run` (e.g. `["git", "npm"]`). Commands run in the workspace with timeout and output caps.
 
 ### handlerKind
 

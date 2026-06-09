@@ -1,7 +1,6 @@
-﻿import { useState, useEffect } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { useElectron } from '../hooks/useElectron'
-import { useActionFeedback } from '../hooks/useActionFeedback'
-import { ActionRow, Spinner } from './ui'
+import { Spinner, StatusText } from './ui'
 import { MemoryEntry, MemoryStore } from '../types/memory'
 
 const TrashIcon = () => (
@@ -22,15 +21,25 @@ const defaultMemory: MemoryStore = {
   version: 3,
 }
 
+const SAVE_DEBOUNCE_MS = 400
+
 export default function MemoriesView() {
   const [memory, setMemory] = useState<MemoryStore>(defaultMemory)
   const [isLoading, setIsLoading] = useState(true)
   const [userMemoryDraft, setUserMemoryDraft] = useState(defaultUserMarkdown)
-  const userMemorySave = useActionFeedback()
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle')
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestDraftRef = useRef(defaultUserMarkdown)
   const { memory: memoryAPI } = useElectron()
 
   useEffect(() => {
     loadMemories()
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    }
   }, [])
 
   const loadMemories = async () => {
@@ -40,7 +49,9 @@ export default function MemoriesView() {
       if (result.success && result.data) {
         const loadedMemory = result.data as MemoryStore
         setMemory(loadedMemory)
-        setUserMemoryDraft(loadedMemory.userMarkdown || '')
+        const markdown = loadedMemory.userMarkdown || ''
+        setUserMemoryDraft(markdown)
+        latestDraftRef.current = markdown
       }
     } catch (error) {
       console.error('Failed to load memories:', error)
@@ -49,12 +60,27 @@ export default function MemoriesView() {
     }
   }
 
-  const handleSaveUserMemory = () => {
-    void userMemorySave.run(async () => {
-      const result = await memoryAPI.saveUserMarkdown(userMemoryDraft)
+  const persistUserMemory = async (markdown: string) => {
+    setSaveStatus('pending')
+    try {
+      const result = await memoryAPI.saveUserMarkdown(markdown)
       if (!result.success) throw new Error(result.error || 'Failed to save user memory')
-      setMemory(prev => ({ ...prev, userMarkdown: userMemoryDraft }))
-    })
+      setMemory(prev => ({ ...prev, userMarkdown: markdown }))
+      setSaveStatus('success')
+      window.setTimeout(() => setSaveStatus('idle'), 2000)
+    } catch (error) {
+      console.error('Failed to save user memory:', error)
+      setSaveStatus('error')
+      window.setTimeout(() => setSaveStatus('idle'), 3000)
+    }
+  }
+
+  const scheduleSave = (markdown: string) => {
+    latestDraftRef.current = markdown
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    saveTimeoutRef.current = setTimeout(() => {
+      void persistUserMemory(latestDraftRef.current)
+    }, SAVE_DEBOUNCE_MS)
   }
 
   const learnedNotes: Array<MemoryEntry & { kind: 'note' | 'style' }> = [
@@ -105,7 +131,7 @@ export default function MemoriesView() {
           </p>
         </div>
 
-        <section className="bg-white rounded-2xl border-2 border-neutral-950 p-5 space-y-4">
+        <section className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
           <div>
             <h2 className="text-lg font-medium text-neutral-950">User Memory</h2>
             <p className="text-sm text-neutral-500 mt-1">
@@ -117,10 +143,11 @@ export default function MemoriesView() {
             value={userMemoryDraft}
             placeholder="Add durable instructions, preferences, and workspace conventions here..."
             onChange={(e) => {
-              setUserMemoryDraft(e.target.value)
-              userMemorySave.reset()
+              const nextValue = e.target.value
+              setUserMemoryDraft(nextValue)
+              scheduleSave(nextValue)
             }}
-            className="w-full min-h-[420px] px-4 py-3 border-2 border-neutral-950 rounded-xl text-sm leading-relaxed resize-y focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
+            className="w-full min-h-[420px] px-4 py-3 border border-gray-300 rounded-xl text-sm leading-relaxed resize-y focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
             spellCheck={false}
           />
 
@@ -128,18 +155,18 @@ export default function MemoriesView() {
             <p className="text-xs text-neutral-500">
               Saved to <code className="bg-gray-100 px-1 py-0.5 rounded">.smile/memories/user.md</code>
             </p>
-            <ActionRow
-              label="Save Memory"
-              busy={userMemorySave.busy}
-              status={userMemorySave.status}
-              onAction={handleSaveUserMemory}
+            <StatusText
+              busy={saveStatus === 'pending'}
+              status={saveStatus === 'success' ? 'success' : saveStatus === 'error' ? 'error' : 'idle'}
+              busyMessage="Saving…"
               successMessage="Saved"
-              errorMessage="Could not save memory"
+              errorMessage="Could not save"
+              size="sm"
             />
           </div>
         </section>
 
-        <section className="bg-white rounded-2xl border-2 border-neutral-950 p-5 space-y-3">
+        <section className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
           <div>
             <h2 className="text-lg font-medium text-neutral-950">Learned Notes</h2>
             <p className="text-sm text-neutral-500 mt-1">

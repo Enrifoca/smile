@@ -284,7 +284,7 @@ export class Agent {
       iterations++
       console.log(`[Agent] Loop iteration ${iterations}${hasLimit ? `/${maxIterations}` : ''}`)
 
-      const { response, wasStreamed, assistantPreamble } = await this.callAI()
+      const { response, wasStreamed, assistantPreamble, preambleMessageId } = await this.callAI()
       if (!response) throw new Error('No response from AI')
 
       if (response.toolCalls && response.toolCalls.length > 0) {
@@ -329,6 +329,7 @@ export class Agent {
               pendingAction,
               assistantPreamble,
               response.content,
+              preambleMessageId,
             )
             this.setAgentStatus(null)
             return
@@ -512,7 +513,12 @@ export class Agent {
    *  - content outside → streamed normally to the response bubble
    * Returns wasStreamed=true when the response was already pushed to UI and history.
    */
-  private async callAI(): Promise<{ response: AIResponse | null; wasStreamed: boolean; assistantPreamble?: string }> {
+  private async callAI(): Promise<{
+    response: AIResponse | null
+    wasStreamed: boolean
+    assistantPreamble?: string
+    preambleMessageId?: string
+  }> {
     // Append the live session scratchpad to the system prompt so the agent
     // always knows what it has already done this turn — even if old tool result
     // messages have been pushed out of the 40-message context window.
@@ -715,7 +721,7 @@ export class Agent {
           } else if (response.content?.trim()) {
             assistantPreamble = response.content.trim()
           }
-          return { response, wasStreamed: false, assistantPreamble }
+          return { response, wasStreamed: false, assistantPreamble, preambleMessageId: responseStarted ? responseMsgId : undefined }
         } else {
           // Final text response — set the clean final content and push to history
           if (responseStarted) {
@@ -774,8 +780,30 @@ export class Agent {
     pendingAction: PendingAction,
     assistantPreamble?: string,
     responseContent?: string,
+    preambleMessageId?: string,
   ): void {
     const content = this.composePendingActionChatContent(pendingAction, assistantPreamble, responseContent)
+
+    if (preambleMessageId && this.config.onUpdateMessage) {
+      this.config.onUpdateMessage(preambleMessageId, content, false)
+      const historyIndex = this.conversationHistory.findIndex(message => message.id === preambleMessageId)
+      if (historyIndex >= 0) {
+        this.conversationHistory[historyIndex] = {
+          ...this.conversationHistory[historyIndex],
+          content,
+          isStreaming: false,
+        }
+      } else {
+        this.conversationHistory.push({
+          id: preambleMessageId,
+          role: 'assistant',
+          content,
+          timestamp: new Date().toISOString(),
+        })
+      }
+      return
+    }
+
     const lastMsg = this.conversationHistory[this.conversationHistory.length - 1]
     if (lastMsg?.role === 'assistant' && lastMsg.content === content) return
 
@@ -807,12 +835,15 @@ export class Agent {
       return modelText
     }
 
+    // Prose preamble is enough — confirmation details live in the write-action bar.
+    if (modelText.length >= 60) return modelText
+
     const includesStructured =
       (title && modelText.includes(title))
       || (preview && modelText.includes(preview))
       || modelText.includes(structured.split('\n')[0])
 
-    if (includesStructured && modelText.length >= 60) return modelText
+    if (includesStructured) return modelText
 
     return `${modelText}\n\n${structured}`
   }
@@ -832,10 +863,14 @@ export class Agent {
     }
 
     const prompt = this.getActionConfirmationPrompt(pendingAction.type, pendingAction.data)
-    const skipPromptList = confirmation?.items?.length
-      && pendingAction.type === 'jira_batch_create_issues'
+    const skipPromptList = Boolean(confirmation?.items?.length)
+    const descriptionText = confirmation?.description?.trim()
+    const previewText = confirmation?.preview?.trim()
     if (prompt && prompt !== `Action: ${pendingAction.type}` && !skipPromptList) {
-      parts.push(prompt)
+      const promptText = prompt.trim()
+      if (promptText !== descriptionText && promptText !== previewText) {
+        parts.push(prompt)
+      }
     }
 
     if (confirmation?.fields?.length) {

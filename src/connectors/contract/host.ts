@@ -27,6 +27,24 @@ export interface HostHttpResponse {
 
 export type HostLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
+export interface HostCliRequest {
+  /** Executable name or path (must match permissions.cli allowlist). */
+  command: string
+  args?: string[]
+  /** Relative path within the workspace; defaults to workspace root. */
+  cwd?: string
+  /** Extra environment variables (values only; keys must be declared in manifest if restricted later). */
+  env?: Record<string, string>
+}
+
+export interface HostCliResponse {
+  success: boolean
+  exitCode: number | null
+  stdout: string
+  stderr: string
+  error?: string
+}
+
 export interface HostBridge {
   http: {
     /** Fetch a resource. Only origins in permissions.http are allowed. */
@@ -40,13 +58,17 @@ export interface HostBridge {
     /** Read a workspace file (requires permissions.file.read). */
     read(path: string): Promise<ToolResult<string>>
   }
+  cli: {
+    /** Run an allowlisted command (requires permissions.cli). */
+    run(request: HostCliRequest): Promise<HostCliResponse>
+  }
   secrets: {
     /** Read a connector-scoped secret declared in permissions.secrets. */
     get(key: string): Promise<string | null>
   }
   /**
-   * Host-provided integrations declared in permissions.host (e.g.
-   * `jira.uploadAttachment`). Params shape is integration-specific.
+   * Host-provided integration (id declared in manifest `permissions.host`).
+   * Params shape is integration-specific.
    */
   call: (capability: string, params: Record<string, unknown>) => Promise<ToolResult>
   context: {
@@ -64,6 +86,6 @@ export interface HostBridge {
      */
     saveKnowledge(markdown: string): Promise<void>
   }
-  /** Diagnostic logging surfaced in the connector playground. */
+  /** Diagnostic logging (optional; host may forward to devtools or discard). */
   log(level: HostLogLevel, ...args: unknown[]): void
 }

@@ -18,71 +18,12 @@ interface OCRConfig {
   model?: string
 }
 
-interface UserProfile {
-  style: 'technical' | 'conversational' | 'balanced'
-  verbosity: 'concise' | 'detailed' | 'balanced'
-  tone: 'formal' | 'casual' | 'balanced'
-  writingPatterns: {
-    commonPhrases: string[]
-    taskFormat: string
-    commentStyle: string
-  }
-  focusProjects: string[]
-  confirmAllJiraActions: boolean
-  onboardingCompleted: boolean
-}
-
-// Jira metadata types (mirrored from src/types/jira.ts for electron process)
-interface JiraProject {
-  id: string
-  key: string
-  name: string
-  projectTypeKey: string
-  avatarUrl?: string
-  description?: string
-}
-
-interface JiraIssueType {
-  id: string
-  name: string
-  description?: string
-  subtask: boolean
-  hierarchyLevel: number
-  iconUrl?: string
-}
-
-interface JiraCustomField {
-  id: string
-  key: string
-  name: string
-  type: string
-  custom: boolean
-  required: boolean
-  hasDefaultValue: boolean
-  defaultValue?: unknown
-  allowedValues?: Array<{ id: string; value: string; name?: string }>
-  schema: {
-    type: string
-    items?: string
-    custom?: string
-    customId?: number
-    system?: string
-  }
-}
-
-interface JiraProjectMetadata {
-  project: JiraProject
-  issueTypes: JiraIssueType[]
-  fieldsByIssueType: Record<string, JiraCustomField[]>
-}
-
-interface JiraMetadataStore {
-  monitoredProjects: JiraProject[]
-  projectMetadata: Record<string, JiraProjectMetadata>
-  standardFields: JiraCustomField[]
-  users?: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>
-  lastSynced: string | null
-  syncedProjects: string[]
+interface UserProfileStore {
+  styleSpectrum?: number
+  detailSpectrum?: number
+  toneSpectrum?: number
+  focusProjects?: string[]
+  confirmAllConnectorActions?: boolean
 }
 
 interface StorageSchema {
@@ -99,17 +40,14 @@ interface StorageSchema {
       timestamp: string
     }>
   }>
-  // Jira metadata (pre-fetched for agent knowledge)
-  jiraMetadata: JiraMetadataStore
-  
-  // Connection mode
-  jiraConnectionMode: 'api' | 'mcp' | null
-
   // Cached provider model lists
   modelCatalog: ModelCatalog | null
 
   // User-defined project contexts (Context management).
   contexts: ProjectContext[]
+
+  /** Globally active project context id, or null. */
+  activeContextId: string | null
 
   // Prompt-ready connector knowledge cached per context+connector.
   // Key: `${contextId}:${connectorId}` → Markdown.
@@ -121,17 +59,11 @@ interface StorageSchema {
 }
 
 const defaultUserProfile: UserProfile = {
-  style: 'balanced',
-  verbosity: 'balanced',
-  tone: 'balanced',
-  writingPatterns: {
-    commonPhrases: [],
-    taskFormat: '',
-    commentStyle: ''
-  },
+  styleSpectrum: 50,
+  detailSpectrum: 50,
+  toneSpectrum: 50,
   focusProjects: [],
-  confirmAllJiraActions: true,
-  onboardingCompleted: false
+  confirmAllConnectorActions: true,
 }
 
 /**
@@ -165,17 +97,9 @@ export class StorageService {
         workspacePath: null,
         userProfile: null,
         chatHistory: [],
-        jiraMetadata: {
-          monitoredProjects: [],
-          projectMetadata: {},
-          standardFields: [],
-          users: [],
-          lastSynced: null,
-          syncedProjects: []
-        },
-        jiraConnectionMode: null,
         modelCatalog: null,
         contexts: [],
+        activeContextId: null,
         connectorKnowledge: {},
         'encrypted:aiConfig': '',
         'encrypted:ocrConfig': ''
@@ -324,68 +248,6 @@ export class StorageService {
   deleteChat(chatId: string): void {
     const history = this.getChatHistory()
     this.store.set('chatHistory', history.filter(c => c.id !== chatId))
-  }
-
-  // Jira Metadata
-  getJiraMetadata(): JiraMetadataStore {
-    return this.store.get('jiraMetadata')
-  }
-
-  setJiraMetadata(metadata: JiraMetadataStore): void {
-    this.store.set('jiraMetadata', metadata)
-  }
-
-  clearJiraMetadata(): void {
-    this.store.set('jiraMetadata', {
-      monitoredProjects: [],
-      projectMetadata: {},
-      standardFields: [],
-      users: [],
-      lastSynced: null,
-      syncedProjects: []
-    })
-  }
-
-  // Set monitored projects (user selection)
-  setMonitoredProjects(projects: JiraProject[]): void {
-    const current = this.getJiraMetadata()
-    this.store.set('jiraMetadata', {
-      ...current,
-      monitoredProjects: projects
-    })
-  }
-
-  // Update project metadata after sync
-  updateProjectMetadata(projectKey: string, metadata: JiraProjectMetadata): void {
-    const current = this.getJiraMetadata()
-    this.store.set('jiraMetadata', {
-      ...current,
-      projectMetadata: {
-        ...current.projectMetadata,
-        [projectKey]: metadata
-      },
-      syncedProjects: [...new Set([...current.syncedProjects, projectKey])],
-      lastSynced: new Date().toISOString()
-    })
-  }
-
-  // Update users/team members
-  setJiraUsers(users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>): void {
-    const current = this.getJiraMetadata()
-    this.store.set('jiraMetadata', {
-      ...current,
-      users,
-      lastSynced: new Date().toISOString()
-    })
-  }
-
-  // Get connection mode
-  getJiraConnectionMode(): 'api' | 'mcp' | null {
-    return this.store.get('jiraConnectionMode')
-  }
-
-  setJiraConnectionMode(mode: 'api' | 'mcp' | null): void {
-    this.store.set('jiraConnectionMode', mode)
   }
 
   // Clear all data

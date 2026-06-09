@@ -1,19 +1,13 @@
 import systemPrompt from './core/system.md?raw'
 import plannerPrompt from './core/planner.md?raw'
 import { UserProfile } from '../agent/types'
+import { buildCommunicationPreferencesPrompt } from '../agent/communicationPreferences'
 import { ConnectorScope } from '../connectors/registry'
 import { MemoryStore, formatMemoryForPrompt } from '../types/memory'
 import { renderPrompt, section } from './loader'
 
 function buildUserContext(profile: UserProfile | null): string {
-  if (!profile) return ''
-
-  return [
-    'Communication preferences:',
-    `- Style: ${profile.style || 'balanced (technical and accessible)'}`,
-    `- Response length: ${profile.verbosity || 'balanced'}`,
-    profile.focusProjects?.length ? `- Focus scopes: ${profile.focusProjects.join(', ')}` : '',
-  ].filter(Boolean).join('\n')
+  return buildCommunicationPreferencesPrompt(profile)
 }
 
 function buildWriteConfirmationMode(mode?: 'chat' | 'headless'): string {

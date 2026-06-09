@@ -5,11 +5,11 @@
  * - an optional working folder (soft scoping: a suggested working dir within the
  *   workspace, not a hard chroot),
  * - the per-connector domain (shaped by each connector's `manifest.contextSchema`,
- *   e.g. Jira `{ projectKeys: ["ACME"] }`).
+ *   e.g. `{ projectKeys: ["ACME"] }` for a project-scoped connector).
  *
- * The user activates a context in chat with `/` + name (sticky for the
- * conversation until changed). The active context drives connector scopes, the
- * prompt knowledge injected per connector, and the working-dir hint.
+ * The user activates one context globally from the sidebar (only one active at a
+ * time). The active context drives connector scopes, the prompt knowledge
+ * injected per connector, and the working-dir hint.
  */
 
 /** Sentinel context id for workspace-wide connector knowledge (no active context). */
