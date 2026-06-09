@@ -7,6 +7,8 @@ import { useArtifactContent } from './useArtifactContent'
 
 export interface MarkdownArtifactCardProps {
   artifact: MarkdownArtifact
+  /** Bumps reload when the same path is overwritten (new artifact message). */
+  messageId?: string
   className?: string
 }
 
@@ -16,14 +18,20 @@ const DocIcon = () => (
   </svg>
 )
 
-export function MarkdownArtifactCard({ artifact, className }: MarkdownArtifactCardProps) {
-  const { content, error, loading } = useArtifactContent(artifact.path)
+export function MarkdownArtifactCard({ artifact, messageId, className }: MarkdownArtifactCardProps) {
+  const reloadKey = messageId ? `${messageId}:${artifact.path}:${artifact.title}` : artifact.path
+  const { content, error, loading, reload } = useArtifactContent(artifact.path, reloadKey)
   const [open, setOpen] = useState(false)
+
+  const handleOpen = () => {
+    reload()
+    setOpen(true)
+  }
 
   return (
     <>
       <div className={joinClasses('ui-artifact-card', className)}>
-        <button type="button" className="ui-artifact-card-header" onClick={() => setOpen(true)}>
+        <button type="button" className="ui-artifact-card-header" onClick={handleOpen}>
           <span className="ui-artifact-card-icon"><DocIcon /></span>
           <span className="ui-artifact-card-title">{artifact.title}</span>
           <span className="ui-artifact-card-action">Open</span>

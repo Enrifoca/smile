@@ -8,6 +8,7 @@ import { OCRConfig, OCRService } from './services/ocr'
 import { ModelCatalogService } from './services/model-catalog'
 import { AIConfig, ModelProvider, getDefaultModelId } from '../src/shared/modelCatalog'
 import { getAtlassianMCPService, AtlassianMCPService } from './services/atlassian-mcp'
+import { getJiraAttachmentService, JiraAttachmentService } from './services/jira-attachment'
 import { ConnectorsService } from './services/connectors'
 import type { ContextEnvelope, ToolResult } from '../src/connectors/contract'
 import { normalizeMcpResult } from '../src/connectors/contract'
@@ -15,7 +16,6 @@ import type { ProjectContext } from '../src/context/types'
 import { getMemoryService, MemoryService } from './services/memory'
 import { getSourceMemoryService } from './services/sourceMemory'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
-import { getJiraAttachmentService, JiraAttachmentService, isJiraAttachmentConfigured } from './services/jira-attachment'
 
 // Services
 let encryptionService: EncryptionService
@@ -50,45 +50,25 @@ function resolveMcpServer(serverId: string): McpServerHandle {
 async function uploadJiraAttachmentFromWorkspace(issueKey: string, filePath: string): Promise<ToolResult> {
   if (!fileService) return { success: false, error: 'Workspace not configured' }
 
-  const configStr = await storageService.getSecure('jiraApiConfig')
-  if (!configStr) {
-    return { success: false, error: 'Jira API token not configured. Please add it in Settings to upload attachments.' }
-  }
+  const baseUrl = storageService.getSecure('connector:jira:baseUrl')
+  const email = storageService.getSecure('connector:jira:email')
+  const apiToken = storageService.getSecure('connector:jira:apiToken')
 
-  let config: { baseUrl?: string; email?: string; apiToken?: string }
-  try {
-    config = JSON.parse(configStr)
-  } catch {
-    return { success: false, error: 'Invalid Jira API configuration' }
-  }
-
-  if (!config.baseUrl || !config.email || !config.apiToken) {
+  if (!baseUrl || !email || !apiToken) {
     const missing = [
-      !config.baseUrl && 'Site URL',
-      !config.email && 'Email',
-      !config.apiToken && 'API Token',
+      !baseUrl && 'Site URL',
+      !email && 'Email',
+      !apiToken && 'API token',
     ].filter(Boolean)
     return {
       success: false,
-      error: `Jira API configuration incomplete. Missing: ${missing.join(', ')}. Please go to Settings and fill in all fields.`,
+      error: `Jira attachment credentials incomplete. Missing: ${missing.join(', ')}. Configure them in Connectors → Jira.`,
     }
   }
 
-  jiraAttachmentService = getJiraAttachmentService(config)
+  jiraAttachmentService = getJiraAttachmentService({ baseUrl, email, apiToken })
   const fullPath = fileService.getFullPath(filePath)
   return jiraAttachmentService.uploadAttachment(issueKey, fullPath)
-}
-
-/** Stream sandbox `host.log` lines to the Studio Playground in the renderer. */
-function broadcastPlaygroundLog(connectorId: string, level: string, args: unknown[]): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('connectors:playgroundLog', {
-      connectorId,
-      level,
-      args,
-      timestamp: new Date().toISOString(),
-    })
-  }
 }
 
 /** Lazily construct the connector runtime with its capability broker dependencies. */
@@ -110,8 +90,17 @@ function getConnectorsService(): ConnectorsService {
           storageService.setConnectorKnowledge(contextId, connectorId, markdown),
         getKnowledge: (contextId: string, connectorId: string) =>
           storageService.getConnectorKnowledge(contextId, connectorId),
-        jiraUploadAttachment: uploadJiraAttachmentFromWorkspace,
-        onLog: broadcastPlaygroundLog,
+        hostCall: async (capability, params) => {
+          if (capability === 'jira.uploadAttachment') {
+            const issueKey = String(params.issueKey || '')
+            const filePath = String(params.filePath || '')
+            if (!issueKey || !filePath) {
+              return { success: false, error: 'issueKey and filePath are required' }
+            }
+            return uploadJiraAttachmentFromWorkspace(issueKey, filePath)
+          }
+          return { success: false, error: `Host capability not implemented: ${capability}` }
+        },
       },
       path.join(__dirname, 'connector-sandbox.js'),
     )
@@ -284,53 +273,6 @@ function sendMcpConnectionState(state: typeof mcpConnectionState, error?: string
   mcpConnectionState = state
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('mcp:connectionState', { state, error })
-  }
-}
-
-function getConfiguredJiraSiteUrl(): string | null {
-  const configStr = storageService.getSecure('jiraApiConfig')
-  if (!configStr) return null
-
-  try {
-    const config = JSON.parse(configStr) as { baseUrl?: string }
-    return config.baseUrl || null
-  } catch {
-    return null
-  }
-}
-
-// Auto-connect to MCP if user has previously connected
-async function autoConnectMcp() {
-  // Check if user has completed onboarding and has monitored projects
-  const jiraMetadata = storageService.getJiraMetadata()
-  const connectionMode = storageService.getJiraConnectionMode()
-  
-  // Only auto-connect if user has set up MCP before
-  if (connectionMode !== 'mcp' || !jiraMetadata.monitoredProjects || jiraMetadata.monitoredProjects.length === 0) {
-    console.log('[MCP] Skipping auto-connect: not configured or no monitored projects')
-    return
-  }
-
-  console.log('[MCP] Auto-connecting to Atlassian MCP...')
-  sendMcpConnectionState('connecting')
-
-  try {
-    mcpService = getAtlassianMCPService()
-    attachMcpServiceListeners(mcpService)
-    mcpService.setPreferredSiteUrl(getConfiguredJiraSiteUrl())
-    const result = await mcpService.connect()
-    
-    if (result.success) {
-      console.log('[MCP] Auto-connect successful')
-      sendMcpConnectionState('connected')
-      startMcpKeepAlive()
-    } else {
-      console.log('[MCP] Auto-connect failed:', result.error)
-      sendMcpConnectionState('error', result.error)
-    }
-  } catch (error) {
-    console.error('[MCP] Auto-connect error:', error)
-    sendMcpConnectionState('error', error instanceof Error ? error.message : 'Connection failed')
   }
 }
 
@@ -539,30 +481,6 @@ ipcMain.handle('file:saveAttachment', async (_, fileName: string, data: ArrayBuf
   return fileService.saveAttachment(fileName, Buffer.from(data))
 })
 
-// ============================================
-// JIRA ATTACHMENT HANDLERS (REST API)
-// ============================================
-
-ipcMain.handle('jiraAttachment:upload', async (_, issueKey: string, filePath: string) => {
-  return uploadJiraAttachmentFromWorkspace(issueKey, filePath)
-})
-
-ipcMain.handle('jiraAttachment:isConfigured', async () => {
-  // Check if config exists
-  if (!jiraAttachmentService) {
-    const configStr = await storageService.getSecure('jiraApiConfig')
-    if (configStr) {
-      try {
-        const config = JSON.parse(configStr)
-        jiraAttachmentService = getJiraAttachmentService(config)
-      } catch {
-        return { configured: false }
-      }
-    }
-  }
-  return { configured: isJiraAttachmentConfigured() }
-})
-
 // AI Service
 let reasoningAiService: AIService | null = null
 
@@ -714,10 +632,8 @@ ipcMain.handle('mcp:connect', async (_, options?: { forceReauth?: boolean }) => 
     sendMcpConnectionState('connecting')
     mcpService = getAtlassianMCPService()
     attachMcpServiceListeners(mcpService)
-    mcpService.setPreferredSiteUrl(getConfiguredJiraSiteUrl())
     const result = await mcpService.connect({ forceReauth: options?.forceReauth ?? false })
     if (result.success) {
-      storageService.setJiraConnectionMode('mcp')
       sendMcpConnectionState('connected')
       startMcpKeepAlive()
     } else {
@@ -734,8 +650,6 @@ ipcMain.handle('mcp:connect', async (_, options?: { forceReauth?: boolean }) => 
 ipcMain.handle('mcp:disconnect', async () => {
   stopMcpKeepAlive()
   sendMcpConnectionState('disconnected')
-  storageService.setJiraConnectionMode(null)
-  storageService.setMonitoredProjects([])
   if (mcpService) {
     await mcpService.disconnect()
     mcpService = null
@@ -744,130 +658,16 @@ ipcMain.handle('mcp:disconnect', async () => {
 })
 
 ipcMain.handle('mcp:status', async () => {
-  return { 
+  return {
     connected: mcpService?.getConnectionStatus() ?? false,
-    mode: storageService.getJiraConnectionMode()
   }
 })
 
 ipcMain.handle('mcp:getConnectionState', async () => {
-  return { 
+  return {
     state: mcpConnectionState,
-    connected: mcpService?.getConnectionStatus() ?? false
+    connected: mcpService?.getConnectionStatus() ?? false,
   }
-})
-
-ipcMain.handle('mcp:getProjects', async () => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.getVisibleProjects()
-})
-
-ipcMain.handle('mcp:getProjectIssueTypes', async (_, projectKey: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.getProjectIssueTypes(projectKey)
-})
-
-ipcMain.handle('mcp:getFieldMetadata', async (_, projectKey: string, issueTypeId: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.getIssueTypeFieldMetadata(projectKey, issueTypeId)
-})
-
-ipcMain.handle('mcp:searchIssues', async (_, jql: string, maxResults?: number, fields?: string | string[]) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.searchIssues(jql, maxResults, fields)
-})
-
-ipcMain.handle('mcp:getIssue', async (_, issueKey: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.getIssue(issueKey)
-})
-
-ipcMain.handle('mcp:createIssue', async (_, projectKey: string, issueTypeId: string, summary: string, description?: string, additionalFields?: Record<string, unknown>) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.createIssue(projectKey, issueTypeId, summary, description, additionalFields)
-})
-
-ipcMain.handle('mcp:editIssue', async (_, issueKey: string, fields: Record<string, unknown>) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.editIssue(issueKey, fields)
-})
-
-ipcMain.handle('mcp:addComment', async (_, issueKey: string, body: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.addComment(issueKey, body)
-})
-
-ipcMain.handle('mcp:getTransitions', async (_, issueKey: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.getTransitions(issueKey)
-})
-
-ipcMain.handle('mcp:transitionIssue', async (_, issueKey: string, transitionId: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.transitionIssue(issueKey, transitionId)
-})
-
-ipcMain.handle('mcp:syncMetadata', async (_, projectKeys: string[]) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.syncProjectMetadata(projectKeys)
-})
-
-ipcMain.handle('mcp:syncAllMetadata', async (_, projectKeys: string[]) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.syncAllMetadata(projectKeys)
-})
-
-ipcMain.handle('mcp:fetchUsers', async (_, projectKeys: string[]) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.fetchAllUsers(projectKeys)
-})
-
-ipcMain.handle('mcp:getAssignableUsers', async (_, projectKey: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.getAssignableUsers(projectKey)
-})
-
-ipcMain.handle('mcp:lookupUser', async (_, query: string) => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.lookupUser(query)
-})
-
-ipcMain.handle('mcp:getCurrentUser', async () => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.getCurrentUser()
-})
-
-ipcMain.handle('mcp:listTools', async () => {
-  if (!mcpService) return { success: false, error: 'MCP not connected' }
-  return mcpService.listTools()
-})
-
-// ============================================
-// JIRA METADATA HANDLERS
-// ============================================
-
-ipcMain.handle('jiraMetadata:get', async () => {
-  return storageService.getJiraMetadata()
-})
-
-ipcMain.handle('jiraMetadata:setMonitoredProjects', async (_, projects: Array<{ id: string; key: string; name: string; projectTypeKey: string; avatarUrl?: string }>) => {
-  storageService.setMonitoredProjects(projects)
-  return { success: true }
-})
-
-ipcMain.handle('jiraMetadata:updateProjectMetadata', async (_, projectKey: string, metadata: unknown) => {
-  storageService.updateProjectMetadata(projectKey, metadata as Parameters<typeof storageService.updateProjectMetadata>[1])
-  return { success: true }
-})
-
-ipcMain.handle('jiraMetadata:set', async (_, metadata: unknown) => {
-  storageService.setJiraMetadata(metadata as Parameters<typeof storageService.setJiraMetadata>[0])
-  return { success: true }
-})
-
-ipcMain.handle('jiraMetadata:setUsers', async (_, users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>) => {
-  storageService.setJiraUsers(users)
-  return { success: true }
 })
 
 // Open external URL (for OAuth)
@@ -919,6 +719,40 @@ ipcMain.handle('connectors:saveKnowledge', async (_, contextId: string, connecto
   try {
     storageService.setConnectorKnowledge(contextId, connectorId, markdown)
     return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('connectors:deletePackage', async (_, connectorId: string) => {
+  try {
+    await getConnectorsService().deletePackage(connectorId)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('connectors:installPackage', async (_, connectorId: string) => {
+  try {
+    const manifest = await getConnectorsService().installBundledPackage(connectorId)
+    return { success: true, data: manifest }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('connectors:getIcon', async (_, connectorId: string) => {
+  try {
+    return { success: true, data: await getConnectorsService().getIconDataUrl(connectorId) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('connectors:getBundledIcon', async (_, connectorId: string) => {
+  try {
+    return { success: true, data: getConnectorsService().getBundledIconDataUrl(connectorId) }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -1206,11 +1040,6 @@ ipcMain.handle('memory:listSources', async () => {
 app.whenReady().then(async () => {
   await initializeServices()
   createWindow()
-
-  // Auto-connect to MCP after a short delay (let the renderer load first)
-  setTimeout(() => {
-    autoConnectMcp()
-  }, 2000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

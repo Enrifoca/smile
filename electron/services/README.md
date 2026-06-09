@@ -2,33 +2,32 @@
 
 Desktop services live in the **Electron main process**. They exist because some work cannot (or should not) run in the renderer: OAuth callbacks, long-lived MCP proxy processes, secret storage, CORS-free HTTP, filesystem access, and provider SDKs that assume Node.js.
 
-**Connectors do not live here.** Connector modules live under `src/connectors/<id>/`. A desktop service is **optional transport infrastructure** that a connector's `runtime.ts` calls through IPC when the integration needs main-process capabilities.
+**Connectors do not live here.** Connector packages live under `<workspace>/.smile/connectors/<id>/` and run in a sandbox (`handler.js`). A desktop service is **optional transport infrastructure** brokered through `host.mcp.call`, `host.http.request`, or `host.call` when the integration needs main-process capabilities.
 
 ## Two layers (do not confuse them)
 
 ```text
-src/connectors/<id>/          ← Agent-facing module (always create this)
-  tools.ts                    ← Tool schemas the model sees
-  prompt.md                   ← Domain instructions
-  formatters.ts               ← Approval copy, result shaping
-  runtime.ts                  ← Calls Electron IPC (thin bridge)
+<workspace>/.smile/connectors/<id>/   ← Author package (always create this)
+  manifest.json                       ← Tools, permissions, auth fields
+  handler.js                          ← Sandboxed executeTool / approveAction
+  prompt.md                           ← Domain instructions
 
-electron/services/<name>.ts   ← Optional transport (create only if needed)
+electron/services/<name>.ts           ← Optional transport (create only if needed)
   auth, HTTP/MCP, normalization, errors
 ```
 
 ```mermaid
 flowchart LR
-  agent["Agent loop"] --> runtime["connectors/&lt;id&gt;/runtime.ts"]
-  runtime --> preload["preload.ts bridge"]
-  preload --> service["electron/services/&lt;name&gt;.ts"]
+  agent["Agent loop"] --> sandbox["ConnectorsService + sandbox"]
+  sandbox --> broker["Capability broker"]
+  broker --> service["electron/services/&lt;name&gt;.ts"]
   service --> provider["External API / MCP server"]
 ```
 
-| Layer | Owns | Example (Jira) |
+| Layer | Owns | Example in this repo |
 | --- | --- | --- |
-| Connector module | What the agent knows and how results read in chat | `src/connectors/jira/` |
-| Desktop service | How the desktop app reaches the provider securely | `electron/services/atlassian-mcp.ts` |
+| Connector package | What the agent knows, tool schemas, prompt, handler logic | `.smile/connectors/my-api/` |
+| Desktop service | How the desktop app reaches a provider securely | `electron/services/atlassian-mcp.ts` (MCP server id `atlassian`) |
 
 See also: [Creating a connector](../../docs/creating-a-connector.md), [Architecture](../../docs/architecture.md).
 
@@ -43,25 +42,24 @@ Create a dedicated service when **any** of these apply:
 | **OAuth / browser login** | Local callback port, token exchange, secure persistence |
 | **Hosted or local MCP** | Spawn/manage proxy process, JSON-RPC over stdio/HTTP |
 | **API keys that must not touch the renderer** | Read/write via `storage.setSecure` in main only |
-| **CORS-blocked REST from the app** | `fetch` from main process (same pattern as `ai.ts`) |
+| **CORS-blocked REST from the app** | HTTP from main process (same pattern as `ai.ts`) |
 | **Long-lived connections** | Keep-alive, reconnect, background token refresh |
 | **Provider SDK requires Node** | Official clients that don't run in Chromium |
 | **Payload normalization** | Translate agent-friendly args into provider API shapes before send |
-| **Structured error parsing** | Map provider/MCP errors into `{ success, error }` the connector expects |
+| **Structured error parsing** | Map provider/MCP errors into `{ success, error }` the sandbox expects |
 
 You often **do not** need a new service when:
 
-- The provider offers a simple REST API and you are comfortable invoking it from main via a **small generic helper** (still prefer main over renderer for secrets).
-- The connector is read-only and uses credentials already stored by an existing service.
-- All logic fits in a few IPC handlers — but keep handlers in a named service file, not bloated into `main.ts`.
+- The connector uses only sandbox-brokered HTTP with URLs declared in `permissions.http`.
+- All logic fits in `handler.js` with existing host capabilities.
 
-**Rule of thumb:** start with `src/connectors/<id>/runtime.ts`. If runtime needs capabilities the preload bridge does not expose yet, add `electron/services/<id>-<transport>.ts` and wire IPC.
+**Rule of thumb:** start with a manifest + `handler.js`. If the sandbox broker lacks a capability, extend the broker or add `electron/services/<vendor>-<transport>.ts` and register it (MCP servers go in `mcpServerRegistry` in `main.ts`).
 
 ---
 
 ## What a connector transport service should do
 
-A file like `atlassian-mcp.ts` is a **connector transport service**, not a second connector. It should:
+A file like `atlassian-mcp.ts` is **transport**, not a connector. It should:
 
 ### 1. Connection lifecycle
 
@@ -76,24 +74,21 @@ A file like `atlassian-mcp.ts` is a **connector transport service**, not a secon
 - Or load API keys from secure storage
 - Never log tokens; never pass secrets to the renderer except “configured: yes/no”
 
-### 3. Operation methods (high-level API)
+### 3. Operation methods
 
-- One method per **capability** the connector runtime needs, not necessarily one per MCP tool name
-- Example: `createIssue(...)`, `searchIssues(...)`, not raw `callTool` exposed to the UI
-- Accept **agent-friendly** arguments (plain strings where possible); normalize inside the service
+- Methods the MCP registry or `host.call` broker needs — often raw `callRawTool(toolName, args)` for MCP
+- Accept **agent-friendly** arguments where possible; normalize inside the service
 
 ### 4. Provider payload normalization
 
 External APIs often expect nested objects. The model sends simple values. Normalize in the service **before** the provider call.
 
-Example (Jira priority):
-
 ```typescript
-// Agent / runtime passes:  { priority: "Low" }
-// Jira REST expects:         { priority: { name: "Low" } }
+// Handler might pass:  { priority: "Low" }
+// Provider API expects: { priority: { name: "Low" } }
 ```
 
-Keep normalization in the service or connector `fields.ts`, not in `src/agent`.
+Keep normalization in the service or connector handler, not in `src/agent`.
 
 ### 5. Error handling
 
@@ -101,60 +96,49 @@ Keep normalization in the service or connector `fields.ts`, not in `src/agent`.
   - `{ success: true, data }` on success
   - `{ success: false, error: "human-readable message" }` on failure
 - Do **not** return `success: true` when the provider returned `isError: true` (common MCP pitfall)
-- Preserve enough detail in `error` for the agent to self-correct (field name, validation message)
 
 ### 6. No agent or prompt logic
 
 - No tool schemas, no Markdown prompts, no approval UI copy
 - No imports from `src/agent` or `src/prompts`
-- The connector's `formatters.ts` turns service results into chat-friendly text
 
 ---
 
-## Reference implementations in this repo
+## Services in this repo
 
-| File | Role | Used by |
-| --- | --- | --- |
-| `atlassian-mcp.ts` | Atlassian Rovo MCP: OAuth via `mcp-remote`, proxy process, Jira tool calls, field normalization, workspace validation | Jira connector `runtime.ts` → `electron.mcp.*` |
-| `jira.ts` | Direct Jira REST API (legacy/alternate path) | Settings, some read/write flows |
-| `jira-attachment.ts` | Attachment upload via REST (MCP gap: binary uploads) | Jira connector attachment tool |
+| File | Role |
+| --- | --- |
+| `atlassian-mcp.ts` | Atlassian Rovo MCP: OAuth via `mcp-remote`, proxy process, raw tool calls — registered as MCP server id `atlassian` |
+| `connectors.ts` | Discovers workspace packages, forks sandbox, brokers `host.*` |
 | `ai.ts` | LLM providers (streaming, tools, retries) | Core agent |
 | `files.ts` | Workspace read/write/search | Core file tools |
 | `memory.ts` | `.smile/memories` persistence | Core memory tools |
 | `storage.ts` / `encryption.ts` | Settings and secure credentials | App-wide |
 | `ocr.ts` | OCR provider calls | `file_read_ocr` |
 
-**Jira uses two transports on purpose:** MCP for most issue operations, REST for attachments and metadata sync. A new connector might also combine MCP + REST if the provider splits features.
+Connectors that declare `"permissions": { "mcp": ["atlassian"] }` call tools through the sandbox broker → `mcpServerRegistry.atlassian`. The renderer only exposes MCP **connection** IPC (`mcp.connect` / `disconnect` / status) for the settings UI.
 
 ---
 
-## Wiring checklist (new service → connector runtime)
+## Wiring checklist (new MCP server or host capability)
 
-When you add `electron/services/my-provider.ts`:
+When you add transport for a new provider:
 
 1. **Service class** — focused methods, no IPC inside the class
-2. **`electron/main.ts`** — `ipcMain.handle('myprovider:action', ...)` delegates to the service
-3. **`electron/preload.ts`** — expose a typed `myprovider` object on `window.electron`
-4. **`src/types/electron.d.ts`** — TypeScript types for the preload API
-5. **`src/hooks/useElectron.ts`** — optional `useCallback` wrappers for React
-6. **`src/connectors/<id>/runtime.ts`** — `executeTool` calls `electron.myprovider.*`
-7. **Connector settings UI** — connect/disconnect buttons call the same IPC
+2. **`electron/main.ts`** — register in `mcpServerRegistry` and/or `hostCall` broker; thin `ipcMain.handle` for user-facing connect/disconnect if needed
+3. **`electron/preload.ts`** — expose only what the renderer needs (prefer generic `connectors.*` + minimal `mcp.*`)
+4. **`src/types/electron.d.ts`** + **`src/hooks/useElectron.ts`** — types and hooks for new IPC surface
+5. **Connector manifest** — declare `permissions.mcp` / `permissions.host` / `permissions.http` to match
 
 Keep `main.ts` thin: register handlers, compose services, forward events.
 
 ### Naming
 
-Prefer descriptive transport names:
-
-- `atlassian-mcp.ts` — provider + mechanism
-- `semrush-api.ts` — REST client
-- `acme-mcp.ts` — another MCP integration
-
-Avoid generic names like `connector-service.ts` unless shared by multiple connectors.
+Prefer descriptive transport names: `atlassian-mcp.ts`, `acme-api.ts`. Avoid generic names like `connector-service.ts` unless shared by multiple connectors.
 
 ---
 
-## MCP vs REST service patterns
+## MCP vs REST patterns
 
 ### MCP pattern (like `atlassian-mcp.ts`)
 
@@ -163,57 +147,19 @@ Use when the vendor ships a hosted MCP server or you run a local MCP server.
 The service typically:
 
 1. Spawns or connects to an MCP proxy (e.g. `mcp-remote`)
-2. Implements OAuth if the MCP server requires it
-3. Maps high-level methods → `tools/call` with tool names and arguments
+2. Implements OAuth if required
+3. Exposes `callRawTool(toolName, args)` for the connector broker
 4. Parses MCP content blocks and `isError` flags
-5. Caches cloud/site IDs needed on every call
 
-The connector `runtime.ts` stays thin:
+Declarative connector tools map 1:1 in the manifest:
 
-```typescript
-return await electron.mcp.createIssue(projectKey, issueTypeName, summary, description, extraFields)
+```json
+"mcp": { "serverId": "atlassian", "toolName": "searchItems" }
 ```
 
-### REST pattern (like `jira.ts`, `jira-attachment.ts`)
+### REST pattern
 
-Use when you call HTTP APIs directly with API tokens or bearer tokens.
-
-The service typically:
-
-1. Loads credentials from secure storage
-2. Builds request URLs and headers
-3. Normalizes request/response JSON
-4. Returns `{ success, data | error }`
-
-Good for uploads, webhooks, or APIs without MCP coverage.
-
----
-
-## Relationship to `src/connectors/<id>/runtime.ts`
-
-| Concern | Belongs in |
-| --- | --- |
-| Tool name → IPC method mapping | `runtime.ts` |
-| Argument renaming (`issueKey` vs `issueIdOrKey`) | `runtime.ts` |
-| Provider field normalization (priority, assignee) | Service or `connectors/<id>/fields.ts` |
-| OAuth browser flow | Service |
-| MCP process management | Service |
-| Formatting results for the model | `formatters.ts` |
-| Write approval copy | `formatters.ts` |
-
-`runtime.ts` should read like a **switchboard**, not a 500-line HTTP client.
-
----
-
-## Future direction
-
-`electron/README.md` notes a goal: **generic connector IPC** so every new connector does not require hand-editing `preload.ts`, `useElectron.ts`, and `main.ts`. Until that exists, follow the wiring checklist above.
-
-When adding a connector, always ask:
-
-1. Does `src/connectors/<id>/` exist with tools, prompt, formatters, runtime? **(required)**
-2. Does the provider need main-process transport? **(if yes → new or reuse service)**
-3. Are IPC types and settings UI wired? **(if exposed to user)**
+Use when you call HTTP APIs directly. Prefer `host.http.request` from `handler.js` when URLs fit `permissions.http`. Add a dedicated service when OAuth, uploads, or SDK clients require main process.
 
 ---
 
@@ -222,16 +168,19 @@ When adding a connector, always ask:
 ```text
 Adding a connector?
 │
-├─ Tools + prompts + formatters only, mock runtime for tests
-│    └─ src/connectors/<id>/ only
-│
-├─ REST API + API key in secure storage
-│    └─ src/connectors/<id>/ + electron/services/<id>-api.ts + IPC wiring
+├─ REST + API key, URLs in permissions.http
+│    └─ manifest + handler.js only (host.http broker)
 │
 ├─ Vendor MCP + OAuth
-│    └─ src/connectors/<id>/ + electron/services/<vendor>-mcp.ts + IPC wiring
-│       (use atlassian-mcp.ts as reference, do not copy blindly)
+│    └─ manifest + handler.js + electron/services/<vendor>-mcp.ts
+│       + entry in mcpServerRegistry (see atlassian-mcp.ts)
 │
-└─ Reuse existing transport (e.g. generic HTTP helper)
-     └─ src/connectors/<id>/runtime.ts calls existing IPC
+└─ Custom host integration (binary upload, proprietary SDK)
+     └─ manifest permissions.host + host.call broker in ConnectorsService
 ```
+
+---
+
+## Future direction
+
+Move toward **fully generic connector IPC** so new connectors rarely require hand-editing `preload.ts` and `useElectron.ts`. Workspace packages and the sandbox broker are the default path today.

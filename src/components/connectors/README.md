@@ -6,7 +6,18 @@ All modules are built on the framework **UI kit** (`src/components/ui/`). Async 
 
 These modules are **editable and intended for external agents and developers**. They own spacing, borders, and header layout only. You pass connector-specific copy, form fields, state, and handlers as props.
 
-Full connector workflow (tools, prompts, runtime, and UI): `docs/creating-a-connector.md`.
+Full connector workflow (manifest, handler, prompts, permissions): `docs/creating-a-connector.md`.
+
+## Default settings page
+
+Workspace connectors open **`GenericConnectorSettingsView`** from `ConnectorsView.tsx`. It composes:
+
+| Manifest need | Module |
+| --- | --- |
+| `auth.fields` | `ApiConnectionModule` |
+| `permissions.mcp` | `McpConnectionModule` |
+
+Fork-level custom settings pages are optional; most packages only need manifest-driven auth + MCP connect.
 
 ## Modules
 
@@ -29,15 +40,7 @@ Props: `title`, `description`, `configured`, `saving`, `saveDisabled`, `saveStat
 
 Props: `title`, `description`, `children`, optional `action` (header button), optional `save` (ActionRow props), optional `footer`.
 
-## Reference implementation: Jira
-
-The Jira settings page lives in `src/connectors/jira/ui/JiraSettingsView.tsx`:
-
-- **Atlassian MCP connection** → `McpConnectionModule`
-- **Jira API connection** → `ApiConnectionModule`
-- **Monitored projects** → `CustomSettingsModule`
-
-## Add a connector settings page
+## Example composition
 
 ```tsx
 import { useActionFeedback } from '../hooks/useActionFeedback'

@@ -43,7 +43,7 @@ export const memoryReadSchema = z.object({
   section: z.enum(['all', 'learned', 'style', 'source']).optional().default('all')
     .describe('Which memory area to read. Use "all" for User Memory + Learned Notes. Use "source" for connector scope evidence.'),
   connectorId: z.string().optional()
-    .describe('Connector id when section is "source", e.g. "jira" or your connector id.'),
+    .describe('Connector id when section is "source", e.g. your connector id.'),
   scopeId: z.string().optional()
     .describe('Scope id when section is "source", e.g. a project key or workspace id.'),
 })

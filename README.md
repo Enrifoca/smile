@@ -1,6 +1,6 @@
 # smile:D
 
-smile:D is a white-label desktop framework for building vertical AI agents for work.
+smile:D is a desktop framework for building vertical AI agents for work.
 
 It gives you the reusable structure: a local desktop shell, multi-model agent loop, human-in-the-loop tool approvals, editable memory, workspace file access, and a connector system. Bring a use case, add connector modules, tune the prompts, and ship a focused agent for that domain.
 
@@ -55,7 +55,7 @@ On first launch, the app will guide you through:
 1. **AI Provider** - Choose and configure your preferred AI provider.
 2. **Workspace** - Select a folder for document access and generated outputs.
 3. **Memory** - Edit durable user instructions in Markdown.
-4. **Connectors** - Add third-party modules such as Jira from the Connectors section.
+4. **Connectors** - Install code packages under `<workspace>/.smile/connectors/<id>/` (see Connectors section and `docs/creating-a-connector.md`).
 
 ## Framework Pillars
 
@@ -75,7 +75,7 @@ A connector should be able to provide:
 - Auth or OAuth setup UI.
 - Cache invalidation rules after writes.
 
-The bundled Jira code is being kept as the first example connector while the framework core becomes connector-neutral.
+The host app ships no connector runtime inside the agent loop. Authors install packages in the active workspace (manually or from **Connectors → Catalog**); the core stays connector-neutral. Optional transport services and host capability handlers live in `electron/`.
 
 ## Security
 
@@ -117,6 +117,7 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | [docs/creating-a-connector.md](docs/creating-a-connector.md) | End-to-end connector authoring (tools, runtime, UI, auth) |
 | [docs/prompts.md](docs/prompts.md) | Core vs connector prompts, assembly rules |
 | [docs/memory.md](docs/memory.md) | User memory, learned notes, source memory, admission |
+| [docs/ui-guidelines.md](docs/ui-guidelines.md) | **UI design rules** — colors, chips, snippets, content boxes, CTAs |
 
 ### Electron (desktop shell)
 
@@ -142,13 +143,14 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | `src/prompts/core/system.md` | Live core system prompt (Markdown) |
 | `src/prompts/core/planner.md` | Live planner prompt (Markdown) |
 
-### Connectors (`src/connectors/`)
+### Connectors
 
 | Doc | Purpose |
 | --- | --- |
-| [src/connectors/README.md](src/connectors/README.md) | Connector contract, folder shape, auth guidance |
-| [src/connectors/jira/README.md](src/connectors/jira/README.md) | **Reference connector** — tools, formatters, runtime |
-| [src/connectors/jira/ui/README.md](src/connectors/jira/ui/README.md) | Reference connector settings UI wiring |
+| [docs/creating-a-connector.md](docs/creating-a-connector.md) | End-to-end connector authoring (manifest, handler, permissions) |
+| [src/connectors/README.md](src/connectors/README.md) | Host contract, discovery, catalog |
+| [src/connectors/contract/README.md](src/connectors/contract/README.md) | Manifest and sandbox API reference |
+| [packages/connector-sdk/README.md](packages/connector-sdk/README.md) | Validate / test CLI for connector packages |
 
 ### UI (`src/components/` + theme)
 
@@ -174,10 +176,10 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | Add a new connector | [docs/creating-a-connector.md](docs/creating-a-connector.md) → [src/connectors/README.md](src/connectors/README.md) |
 | Add OAuth / MCP / REST for a provider | [electron/services/README.md](electron/services/README.md) |
 | Change agent behavior (core) | [src/prompts/core/system.md](src/prompts/core/system.md), [docs/prompts.md](docs/prompts.md) |
-| Change connector agent behavior | `src/connectors/<id>/prompt.md` |
-| Customize write approval UI | [src/components/chat/README.md](src/components/chat/README.md) + connector `formatters.ts` |
+| Change connector agent behavior | `<workspace>/.smile/connectors/<id>/prompt.md` |
+| Customize write approval UI | [src/components/chat/README.md](src/components/chat/README.md) + manifest `confirmation` / `preview` |
 | Add markdown report cards | [src/components/chat/artifacts/README.md](src/components/chat/artifacts/README.md) |
-| Rebrand the UI | [src/theme/README.md](src/theme/README.md) → [src/components/ui/README.md](src/components/ui/README.md) |
+| Rebrand the UI | [docs/ui-guidelines.md](docs/ui-guidelines.md) → [src/theme/README.md](src/theme/README.md) |
 | Understand memory rules | [docs/memory.md](docs/memory.md) → [src/memory/README.md](src/memory/README.md) |
 | Fix agent stopping after file read | [src/agent/taskContinuity.md](src/agent/taskContinuity.md) |
 | Fix model planning in chat instead of tools | [src/agent/HELPERS.md § Loop guards](src/agent/HELPERS.md#loop-guards) |

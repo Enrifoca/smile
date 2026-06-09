@@ -15,6 +15,7 @@ import type {
   ApproveActionOutcome,
   ConnectorHandlerModule,
   HostBridge,
+  HostCliResponse,
   HostToSandboxMessage,
   SandboxToHostMessage,
   ToolResult,
@@ -53,6 +54,7 @@ function makeHost(callId: string): HostBridge {
     http: { fetch: request => callCapability('http.fetch', [request]) as ReturnType<HostBridge['http']['fetch']> },
     mcp: { call: (serverId, toolName, args) => callCapability('mcp.call', [serverId, toolName, args]) as Promise<ToolResult> },
     file: { read: path => callCapability('file.read', [path]) as Promise<ToolResult<string>> },
+    cli: { run: request => callCapability('cli.run', [request]) as Promise<HostCliResponse> },
     secrets: { get: key => callCapability('secrets.get', [key]) as Promise<string | null> },
     call: (capability, params) => callCapability('host.call', [capability, params]) as Promise<ToolResult>,
     context: {

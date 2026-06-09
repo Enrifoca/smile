@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import '../types/electron.d.ts'
 import { AIConfig, ModelProvider } from '../shared/modelCatalog'
 
@@ -8,415 +8,233 @@ export function useElectron() {
   const platform = api.platform
 
   // Storage operations
-  const storage = {
-    get: useCallback(async (key: string) => {
-      return api.storage.get(key)
-    }, []),
-    
-    set: useCallback(async (key: string, value: unknown) => {
-      return api.storage.set(key, value)
-    }, []),
-    
-    getSecure: useCallback(async (key: string) => {
-      return api.storage.getSecure(key)
-    }, []),
-    
-    setSecure: useCallback(async (key: string, value: string) => {
-      return api.storage.setSecure(key, value)
-    }, []),
-  }
+  const storageGet = useCallback(async (key: string) => api.storage.get(key), [])
+  const storageSet = useCallback(async (key: string, value: unknown) => api.storage.set(key, value), [])
+  const storageGetSecure = useCallback(async (key: string) => api.storage.getSecure(key), [])
+  const storageSetSecure = useCallback(async (key: string, value: string) => api.storage.setSecure(key, value), [])
+  const storage = useMemo(
+    () => ({ get: storageGet, set: storageSet, getSecure: storageGetSecure, setSecure: storageSetSecure }),
+    [storageGet, storageSet, storageGetSecure, storageSetSecure],
+  )
 
-  const models = {
-    getCatalog: useCallback(async () => {
-      return api.models.getCatalog()
-    }, []),
+  const modelsGetCatalog = useCallback(async () => api.models.getCatalog(), [])
+  const modelsRefresh = useCallback(async () => api.models.refresh(), [])
+  const modelsRefreshProvider = useCallback(async (provider: ModelProvider) => api.models.refreshProvider(provider), [])
+  const models = useMemo(
+    () => ({ getCatalog: modelsGetCatalog, refresh: modelsRefresh, refreshProvider: modelsRefreshProvider }),
+    [modelsGetCatalog, modelsRefresh, modelsRefreshProvider],
+  )
 
-    refresh: useCallback(async () => {
-      return api.models.refresh()
-    }, []),
+  const windowMinimize = useCallback(async () => api.windowControls.minimize(), [])
+  const windowToggleMaximize = useCallback(async () => api.windowControls.toggleMaximize(), [])
+  const windowClose = useCallback(async () => api.windowControls.close(), [])
+  const windowControls = useMemo(
+    () => ({ minimize: windowMinimize, toggleMaximize: windowToggleMaximize, close: windowClose }),
+    [windowMinimize, windowToggleMaximize, windowClose],
+  )
 
-    refreshProvider: useCallback(async (provider: ModelProvider) => {
-      return api.models.refreshProvider(provider)
-    }, []),
-  }
+  const fileSelectWorkspace = useCallback(async () => api.file.selectWorkspace(), [])
+  const fileGetWorkspace = useCallback(async () => api.file.getWorkspace(), [])
+  const fileSelectFolderInWorkspace = useCallback(async () => api.file.selectFolderInWorkspace(), [])
+  const fileList = useCallback(async (relativePath?: string) => api.file.list(relativePath), [])
+  const fileRead = useCallback(async (relativePath: string) => api.file.read(relativePath), [])
+  const fileReadOcr = useCallback(async (relativePath: string) => api.file.readOcr(relativePath), [])
+  const fileWrite = useCallback(async (relativePath: string, content: string) => api.file.write(relativePath, content), [])
+  const fileMkdir = useCallback(async (relativePath: string) => api.file.mkdir(relativePath), [])
+  const fileExists = useCallback(async (relativePath: string) => api.file.exists(relativePath), [])
+  const fileSearch = useCallback(async (pattern: string, directory?: string) => api.file.search(pattern, directory), [])
+  const fileGetFileInfo = useCallback(async (relativePath: string) => api.file.getFileInfo(relativePath), [])
+  const fileEnsureAttachmentsDir = useCallback(async () => api.file.ensureAttachmentsDir(), [])
+  const fileSaveAttachment = useCallback(async (fileName: string, data: ArrayBuffer) => api.file.saveAttachment(fileName, data), [])
+  const file = useMemo(
+    () => ({
+      selectWorkspace: fileSelectWorkspace,
+      getWorkspace: fileGetWorkspace,
+      selectFolderInWorkspace: fileSelectFolderInWorkspace,
+      list: fileList,
+      read: fileRead,
+      readOcr: fileReadOcr,
+      write: fileWrite,
+      mkdir: fileMkdir,
+      exists: fileExists,
+      search: fileSearch,
+      getFileInfo: fileGetFileInfo,
+      ensureAttachmentsDir: fileEnsureAttachmentsDir,
+      saveAttachment: fileSaveAttachment,
+    }),
+    [
+      fileSelectWorkspace, fileGetWorkspace, fileSelectFolderInWorkspace, fileList, fileRead, fileReadOcr,
+      fileWrite, fileMkdir, fileExists, fileSearch, fileGetFileInfo, fileEnsureAttachmentsDir, fileSaveAttachment,
+    ],
+  )
 
-  const windowControls = {
-    minimize: useCallback(async () => {
-      return api.windowControls.minimize()
-    }, []),
+  const mcpConnect = useCallback(async (options?: { forceReauth?: boolean }) => api.mcp.connect(options), [])
+  const mcpDisconnect = useCallback(async () => api.mcp.disconnect(), [])
+  const mcpStatus = useCallback(async () => api.mcp.status(), [])
+  const mcpGetConnectionState = useCallback(async () => api.mcp.getConnectionState(), [])
+  const mcpOnConnectionStateChange = useCallback((callback: (state: { state: string; error?: string }) => void) => api.mcp.onConnectionStateChange(callback), [])
+  const mcp = useMemo(
+    () => ({
+      connect: mcpConnect,
+      disconnect: mcpDisconnect,
+      status: mcpStatus,
+      getConnectionState: mcpGetConnectionState,
+      onConnectionStateChange: mcpOnConnectionStateChange,
+    }),
+    [mcpConnect, mcpDisconnect, mcpStatus, mcpGetConnectionState, mcpOnConnectionStateChange],
+  )
 
-    toggleMaximize: useCallback(async () => {
-      return api.windowControls.toggleMaximize()
-    }, []),
+  const aiConfigure = useCallback(async (config: AIConfig) => api.ai.configure(config), [])
+  const aiConfigureReasoning = useCallback(async (config: AIConfig) => api.ai.configureReasoning(config), [])
+  const aiConfigurePlanner = useCallback(async (config: AIConfig) => api.ai.configurePlanner(config), [])
+  const aiPlan = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => api.ai.plan(messages), [])
+  const aiChat = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chat(messages, tools), [])
+  const aiChatReasoning = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chatReasoning(messages, tools), [])
+  const aiChatStream = useCallback((
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    tools: unknown[] | undefined,
+    onToken: (token: string) => void,
+    onProgress?: (event: { toolName: string; title?: string }) => void,
+  ) => api.ai.chatStream(messages, tools, onToken, onProgress), [])
+  const aiChatReasoningStream = useCallback((
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    tools: unknown[] | undefined,
+    onToken: (token: string) => void,
+    onProgress?: (event: { toolName: string; title?: string }) => void,
+  ) => api.ai.chatReasoningStream(messages, tools, onToken, onProgress), [])
+  const ai = useMemo(
+    () => ({
+      configure: aiConfigure,
+      configureReasoning: aiConfigureReasoning,
+      configurePlanner: aiConfigurePlanner,
+      plan: aiPlan,
+      chat: aiChat,
+      chatReasoning: aiChatReasoning,
+      chatStream: aiChatStream,
+      chatReasoningStream: aiChatReasoningStream,
+    }),
+    [aiConfigure, aiConfigureReasoning, aiConfigurePlanner, aiPlan, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream],
+  )
 
-    close: useCallback(async () => {
-      return api.windowControls.close()
-    }, []),
-  }
+  const shellOpenExternal = useCallback(async (url: string) => api.shell.openExternal(url), [])
+  const shell = useMemo(() => ({ openExternal: shellOpenExternal }), [shellOpenExternal])
 
-  // File operations
-  const file = {
-    selectWorkspace: useCallback(async () => {
-      return api.file.selectWorkspace()
-    }, []),
-    
-    getWorkspace: useCallback(async () => {
-      return api.file.getWorkspace()
-    }, []),
+  const connectorsList = useCallback(async () => api.connectors.list(), [])
+  const connectorsExecute = useCallback(
+    async (
+      connectorId: string,
+      name: string,
+      args: Record<string, unknown>,
+      context?: import('../connectors/contract').ContextEnvelope,
+    ) => api.connectors.execute(connectorId, name, args, context),
+    [],
+  )
+  const connectorsApprove = useCallback(
+    async (
+      connectorId: string,
+      actionType: string,
+      data: Record<string, unknown>,
+      context?: import('../connectors/contract').ContextEnvelope,
+    ) => api.connectors.approve(connectorId, actionType, data, context),
+    [],
+  )
+  const connectorsGetKnowledge = useCallback(async (contextId: string, connectorId: string) => api.connectors.getKnowledge(contextId, connectorId), [])
+  const connectorsSaveKnowledge = useCallback(async (contextId: string, connectorId: string, markdown: string) => api.connectors.saveKnowledge(contextId, connectorId, markdown), [])
+  const connectorsDeletePackage = useCallback(async (connectorId: string) => api.connectors.deletePackage(connectorId), [])
+  const connectorsInstallPackage = useCallback(async (connectorId: string) => api.connectors.installPackage(connectorId), [])
+  const connectorsGetIcon = useCallback(async (connectorId: string) => api.connectors.getIcon(connectorId), [])
+  const connectorsGetBundledIcon = useCallback(async (connectorId: string) => api.connectors.getBundledIcon(connectorId), [])
+  const connectors = useMemo(
+    () => ({
+      list: connectorsList,
+      execute: connectorsExecute,
+      approve: connectorsApprove,
+      getKnowledge: connectorsGetKnowledge,
+      saveKnowledge: connectorsSaveKnowledge,
+      deletePackage: connectorsDeletePackage,
+      installPackage: connectorsInstallPackage,
+      getIcon: connectorsGetIcon,
+      getBundledIcon: connectorsGetBundledIcon,
+    }),
+    [
+      connectorsList,
+      connectorsExecute,
+      connectorsApprove,
+      connectorsGetKnowledge,
+      connectorsSaveKnowledge,
+      connectorsDeletePackage,
+      connectorsInstallPackage,
+      connectorsGetIcon,
+      connectorsGetBundledIcon,
+    ],
+  )
 
-    selectFolderInWorkspace: useCallback(async () => {
-      return api.file.selectFolderInWorkspace()
-    }, []),
-    
-    list: useCallback(async (relativePath?: string) => {
-      return api.file.list(relativePath)
-    }, []),
-    
-    read: useCallback(async (relativePath: string) => {
-      return api.file.read(relativePath)
-    }, []),
+  const contextsList = useCallback(async () => api.contexts.list(), [])
+  const contextsSave = useCallback(async (context: import('../context/types').ProjectContext) => api.contexts.save(context), [])
+  const contextsDelete = useCallback(async (contextId: string) => api.contexts.delete(contextId), [])
+  const contexts = useMemo(
+    () => ({ list: contextsList, save: contextsSave, delete: contextsDelete }),
+    [contextsList, contextsSave, contextsDelete],
+  )
 
-    readOcr: useCallback(async (relativePath: string) => {
-      return api.file.readOcr(relativePath)
-    }, []),
-    
-    write: useCallback(async (relativePath: string, content: string) => {
-      return api.file.write(relativePath, content)
-    }, []),
-
-    mkdir: useCallback(async (relativePath: string) => {
-      return api.file.mkdir(relativePath)
-    }, []),
-    
-    exists: useCallback(async (relativePath: string) => {
-      return api.file.exists(relativePath)
-    }, []),
-    
-    search: useCallback(async (pattern: string, directory?: string) => {
-      return api.file.search(pattern, directory)
-    }, []),
-    
-    getFileInfo: useCallback(async (relativePath: string) => {
-      return api.file.getFileInfo(relativePath)
-    }, []),
-    
-    ensureAttachmentsDir: useCallback(async () => {
-      return api.file.ensureAttachmentsDir()
-    }, []),
-    
-    saveAttachment: useCallback(async (fileName: string, data: ArrayBuffer) => {
-      return api.file.saveAttachment(fileName, data)
-    }, []),
-  }
-
-  // Jira Attachment operations (REST API)
-  const jiraAttachment = {
-    upload: useCallback(async (issueKey: string, filePath: string) => {
-      return api.jiraAttachment.upload(issueKey, filePath)
-    }, []),
-    
-    isConfigured: useCallback(async () => {
-      return api.jiraAttachment.isConfigured()
-    }, []),
-  }
-
-  // AI operations
-  const ai = {
-    configure: useCallback(async (config: AIConfig) => {
-      return api.ai.configure(config)
-    }, []),
-
-    configureReasoning: useCallback(async (config: AIConfig) => {
-      return api.ai.configureReasoning(config)
-    }, []),
-
-    configurePlanner: useCallback(async (config: AIConfig) => {
-      return api.ai.configurePlanner(config)
-    }, []),
-
-    plan: useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => {
-      return api.ai.plan(messages)
-    }, []),
-    
-    chat: useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => {
-      return api.ai.chat(messages, tools)
-    }, []),
-
-    chatReasoning: useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => {
-      return api.ai.chatReasoning(messages, tools)
-    }, []),
-
-    chatStream: useCallback((
-      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-      tools: unknown[] | undefined,
-      onToken: (token: string) => void,
-      onProgress?: (event: { toolName: string; title?: string }) => void,
-    ) => {
-      return api.ai.chatStream(messages, tools, onToken, onProgress)
-    }, []),
-
-    chatReasoningStream: useCallback((
-      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-      tools: unknown[] | undefined,
-      onToken: (token: string) => void,
-      onProgress?: (event: { toolName: string; title?: string }) => void,
-    ) => {
-      return api.ai.chatReasoningStream(messages, tools, onToken, onProgress)
-    }, []),
-  }
-
-  // Atlassian MCP operations
-  const mcp = {
-    connect: useCallback(async (options?: { forceReauth?: boolean }) => {
-      return api.mcp.connect(options)
-    }, []),
-    
-    disconnect: useCallback(async () => {
-      return api.mcp.disconnect()
-    }, []),
-    
-    status: useCallback(async () => {
-      return api.mcp.status()
-    }, []),
-    
-    getConnectionState: useCallback(async () => {
-      return api.mcp.getConnectionState()
-    }, []),
-    
-    onConnectionStateChange: useCallback((callback: (state: { state: string; error?: string }) => void) => {
-      return api.mcp.onConnectionStateChange(callback)
-    }, []),
-    
-    getProjects: useCallback(async () => {
-      return api.mcp.getProjects()
-    }, []),
-    
-    getProjectIssueTypes: useCallback(async (projectKey: string) => {
-      return api.mcp.getProjectIssueTypes(projectKey)
-    }, []),
-    
-    getFieldMetadata: useCallback(async (projectKey: string, issueTypeId: string) => {
-      return api.mcp.getFieldMetadata(projectKey, issueTypeId)
-    }, []),
-    
-    searchIssues: useCallback(async (jql: string, maxResults?: number, fields?: string | string[]) => {
-      return api.mcp.searchIssues(jql, maxResults, fields)
-    }, []),
-    
-    getIssue: useCallback(async (issueKey: string) => {
-      return api.mcp.getIssue(issueKey)
-    }, []),
-    
-    createIssue: useCallback(async (projectKey: string, issueTypeName: string, summary: string, description?: string, additionalFields?: Record<string, unknown>) => {
-      return api.mcp.createIssue(projectKey, issueTypeName, summary, description, additionalFields)
-    }, []),
-    
-    editIssue: useCallback(async (issueKey: string, fields: Record<string, unknown>) => {
-      return api.mcp.editIssue(issueKey, fields)
-    }, []),
-    
-    addComment: useCallback(async (issueKey: string, body: string) => {
-      return api.mcp.addComment(issueKey, body)
-    }, []),
-    
-    getTransitions: useCallback(async (issueKey: string) => {
-      return api.mcp.getTransitions(issueKey)
-    }, []),
-    
-    transitionIssue: useCallback(async (issueKey: string, transitionId: string) => {
-      return api.mcp.transitionIssue(issueKey, transitionId)
-    }, []),
-    
-    syncMetadata: useCallback(async (projectKeys: string[]) => {
-      return api.mcp.syncMetadata(projectKeys)
-    }, []),
-    
-    syncAllMetadata: useCallback(async (projectKeys: string[]) => {
-      return api.mcp.syncAllMetadata(projectKeys)
-    }, []),
-    
-    fetchUsers: useCallback(async (projectKeys: string[]) => {
-      return api.mcp.fetchUsers(projectKeys)
-    }, []),
-    
-    getAssignableUsers: useCallback(async (projectKey: string) => {
-      return api.mcp.getAssignableUsers(projectKey)
-    }, []),
-    
-    getCurrentUser: useCallback(async () => {
-      return api.mcp.getCurrentUser()
-    }, []),
-    
-    listTools: useCallback(async () => {
-      return api.mcp.listTools()
-    }, []),
-    
-    lookupUser: useCallback(async (query: string) => {
-      return api.mcp.lookupUser(query)
-    }, []),
-  }
-
-  // Jira Metadata operations
-  const jiraMetadata = {
-    get: useCallback(async () => {
-      return api.jiraMetadata.get()
-    }, []),
-    
-    setMonitoredProjects: useCallback(async (projects: Array<{ id: string; key: string; name: string; projectTypeKey: string; avatarUrl?: string }>) => {
-      return api.jiraMetadata.setMonitoredProjects(projects)
-    }, []),
-    
-    updateProjectMetadata: useCallback(async (projectKey: string, metadata: unknown) => {
-      return api.jiraMetadata.updateProjectMetadata(projectKey, metadata)
-    }, []),
-    
-    set: useCallback(async (metadata: unknown) => {
-      return api.jiraMetadata.set(metadata)
-    }, []),
-    
-    setUsers: useCallback(async (users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>) => {
-      return api.jiraMetadata.setUsers(users)
-    }, []),
-  }
-
-  // Shell operations
-  const shell = {
-    openExternal: useCallback(async (url: string) => {
-      return api.shell.openExternal(url)
-    }, []),
-  }
-
-  // Declarative connectors (sandboxed plugins)
-  const connectors = {
-    list: useCallback(async () => {
-      return api.connectors.list()
-    }, []),
-    execute: useCallback(
-      async (
-        connectorId: string,
-        name: string,
-        args: Record<string, unknown>,
-        context?: import('../connectors/contract').ContextEnvelope,
-      ) => {
-        return api.connectors.execute(connectorId, name, args, context)
-      },
-      [],
-    ),
-    approve: useCallback(
-      async (
-        connectorId: string,
-        actionType: string,
-        data: Record<string, unknown>,
-        context?: import('../connectors/contract').ContextEnvelope,
-      ) => {
-        return api.connectors.approve(connectorId, actionType, data, context)
-      },
-      [],
-    ),
-    getKnowledge: useCallback(async (contextId: string, connectorId: string) => {
-      return api.connectors.getKnowledge(contextId, connectorId)
-    }, []),
-    saveKnowledge: useCallback(async (contextId: string, connectorId: string, markdown: string) => {
-      return api.connectors.saveKnowledge(contextId, connectorId, markdown)
-    }, []),
-    onPlaygroundLog: useCallback((callback: (entry: import('../types/playground').PlaygroundLogEntry) => void) => {
-      return api.connectors.onPlaygroundLog(callback)
-    }, []),
-  }
-
-  // Project contexts (Context management)
-  const contexts = {
-    list: useCallback(async () => {
-      return api.contexts.list()
-    }, []),
-    save: useCallback(async (context: import('../context/types').ProjectContext) => {
-      return api.contexts.save(context)
-    }, []),
-    delete: useCallback(async (contextId: string) => {
-      return api.contexts.delete(contextId)
-    }, []),
-  }
-
-  // Memory operations
-  const memory = {
-    getAll: useCallback(async () => {
-      return api.memory.getAll()
-    }, []),
-    
-    save: useCallback(async (memoryData: unknown) => {
-      return api.memory.save(memoryData)
-    }, []),
-
-    saveUserMarkdown: useCallback(async (markdown: string) => {
-      return api.memory.saveUserMarkdown(markdown)
-    }, []),
-    
-    addGeneral: useCallback(async (content: string, source?: 'learned' | 'user') => {
-      return api.memory.addGeneral(content, source)
-    }, []),
-    
-    addLexicon: useCallback(async (content: string, source?: 'learned' | 'user') => {
-      return api.memory.addLexicon(content, source)
-    }, []),
-    
-    addCommonPhrase: useCallback(async (phrase: string) => {
-      return api.memory.addCommonPhrase(phrase)
-    }, []),
-    
-    addIssueExample: useCallback(async (issueTypeName: string, issueTypeId: string, example: {
-      issueKey: string
-      summary: string
-      description?: string
-      createdAt: string
-      customFields?: Record<string, unknown>
-    }) => {
-      return api.memory.addIssueExample(issueTypeName, issueTypeId, example)
-    }, []),
-    
-    syncIssueExamples: useCallback(async (issueTypeName: string, issueTypeId: string, examples: Array<{
-      issueKey: string
-      summary: string
-      description?: string
-      createdAt: string
-      customFields?: Record<string, unknown>
-    }>) => {
-      return api.memory.syncIssueExamples(issueTypeName, issueTypeId, examples)
-    }, []),
-    
-    updateLastSynced: useCallback(async () => {
-      return api.memory.updateLastSynced()
-    }, []),
-    
-    deleteGeneral: useCallback(async (id: string) => {
-      return api.memory.deleteGeneral(id)
-    }, []),
-    
-    deleteLexicon: useCallback(async (id: string) => {
-      return api.memory.deleteLexicon(id)
-    }, []),
-    
-    updateEntry: useCallback(async (category: 'general' | 'lexicon', id: string, content: string) => {
-      return api.memory.updateEntry(category, id, content)
-    }, []),
-
-    appendSourceLeaf: useCallback(async (leaf: {
-      connectorId: string
-      scopeId: string
-      kind: 'write_outcome' | 'scope_sync' | 'user_pin'
-      toolName: string
-      summary: string
-    }) => {
-      return api.memory.appendSourceLeaf(leaf)
-    }, []),
-
-    readSource: useCallback(async (connectorId: string, scopeId: string) => {
-      return api.memory.readSource(connectorId, scopeId)
-    }, []),
-
-    listSources: useCallback(async () => {
-      return api.memory.listSources()
-    }, []),
-  }
+  const memoryGetAll = useCallback(async () => api.memory.getAll(), [])
+  const memorySave = useCallback(async (memoryData: unknown) => api.memory.save(memoryData), [])
+  const memorySaveUserMarkdown = useCallback(async (markdown: string) => api.memory.saveUserMarkdown(markdown), [])
+  const memoryAddGeneral = useCallback(async (content: string, source?: 'learned' | 'user') => api.memory.addGeneral(content, source), [])
+  const memoryAddLexicon = useCallback(async (content: string, source?: 'learned' | 'user') => api.memory.addLexicon(content, source), [])
+  const memoryAddCommonPhrase = useCallback(async (phrase: string) => api.memory.addCommonPhrase(phrase), [])
+  const memoryAddIssueExample = useCallback(async (issueTypeName: string, issueTypeId: string, example: {
+    issueKey: string
+    summary: string
+    description?: string
+    createdAt: string
+    customFields?: Record<string, unknown>
+  }) => api.memory.addIssueExample(issueTypeName, issueTypeId, example), [])
+  const memorySyncIssueExamples = useCallback(async (issueTypeName: string, issueTypeId: string, examples: Array<{
+    issueKey: string
+    summary: string
+    description?: string
+    createdAt: string
+    customFields?: Record<string, unknown>
+  }>) => api.memory.syncIssueExamples(issueTypeName, issueTypeId, examples), [])
+  const memoryUpdateLastSynced = useCallback(async () => api.memory.updateLastSynced(), [])
+  const memoryDeleteGeneral = useCallback(async (id: string) => api.memory.deleteGeneral(id), [])
+  const memoryDeleteLexicon = useCallback(async (id: string) => api.memory.deleteLexicon(id), [])
+  const memoryUpdateEntry = useCallback(async (category: 'general' | 'lexicon', id: string, content: string) => api.memory.updateEntry(category, id, content), [])
+  const memoryAppendSourceLeaf = useCallback(async (leaf: {
+    connectorId: string
+    scopeId: string
+    kind: 'write_outcome' | 'scope_sync' | 'user_pin'
+    toolName: string
+    summary: string
+  }) => api.memory.appendSourceLeaf(leaf), [])
+  const memoryReadSource = useCallback(async (connectorId: string, scopeId: string) => api.memory.readSource(connectorId, scopeId), [])
+  const memoryListSources = useCallback(async () => api.memory.listSources(), [])
+  const memory = useMemo(
+    () => ({
+      getAll: memoryGetAll,
+      save: memorySave,
+      saveUserMarkdown: memorySaveUserMarkdown,
+      addGeneral: memoryAddGeneral,
+      addLexicon: memoryAddLexicon,
+      addCommonPhrase: memoryAddCommonPhrase,
+      addIssueExample: memoryAddIssueExample,
+      syncIssueExamples: memorySyncIssueExamples,
+      updateLastSynced: memoryUpdateLastSynced,
+      deleteGeneral: memoryDeleteGeneral,
+      deleteLexicon: memoryDeleteLexicon,
+      updateEntry: memoryUpdateEntry,
+      appendSourceLeaf: memoryAppendSourceLeaf,
+      readSource: memoryReadSource,
+      listSources: memoryListSources,
+    }),
+    [
+      memoryGetAll, memorySave, memorySaveUserMarkdown, memoryAddGeneral, memoryAddLexicon,
+      memoryAddCommonPhrase, memoryAddIssueExample, memorySyncIssueExamples, memoryUpdateLastSynced,
+      memoryDeleteGeneral, memoryDeleteLexicon, memoryUpdateEntry, memoryAppendSourceLeaf,
+      memoryReadSource, memoryListSources,
+    ],
+  )
 
   return {
     platform,
@@ -426,11 +244,9 @@ export function useElectron() {
     file,
     ai,
     mcp,
-    jiraMetadata,
     shell,
     connectors,
     contexts,
     memory,
-    jiraAttachment,
   }
 }

@@ -106,7 +106,11 @@ button, input, textarea, select {
 }
 
 .ui-chat-avatar--assistant {
-  @apply bg-gray-200 text-gray-600;
+  @apply bg-gray-200 text-neutral-950;
+}
+
+.ui-chat-avatar-mark {
+  @apply text-sm font-semibold leading-none select-none;
 }
 
 .ui-chat-bubble-user,
@@ -127,8 +131,21 @@ button, input, textarea, select {
   @apply pl-11 mb-2 animate-slide-in;
 }
 
+.ui-chat-thinking-header {
+  color: var(--color-meta-text);
+}
+
 .ui-chat-tool-summary {
-  @apply pl-11 mb-2 animate-slide-in;
+  @apply pl-11 mb-2 animate-slide-in text-[11px];
+  color: var(--color-meta-text);
+}
+
+.ui-chat-tool-summary button {
+  color: inherit;
+}
+
+.ui-chat-tool-summary button:hover {
+  color: var(--color-muted-text);
 }
 
 .ui-chat-activity,
@@ -165,7 +182,17 @@ input:focus, textarea:focus, select:focus {
 }
 
 .btn-secondary {
-  @apply bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300;
+  background-color: #fff;
+  border: 1px solid #d1d5db;
+  color: #374151;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-hover-surface);
+}
+
+.btn-secondary:active {
+  background-color: var(--color-hover-surface);
 }
 
 .btn-danger {
@@ -173,7 +200,11 @@ input:focus, textarea:focus, select:focus {
 }
 
 .btn-ghost {
-  @apply bg-transparent text-gray-600 hover:bg-gray-100 active:bg-gray-200;
+  @apply bg-transparent text-gray-600 active:bg-gray-200;
+}
+
+.btn-ghost:hover {
+  background-color: var(--color-hover-surface);
 }
 
 /* ============================================
@@ -210,12 +241,17 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-btn--secondary {
-  background-color: #f3f4f6;
+  background-color: #fff;
+  border: 1px solid #d1d5db;
   color: #374151;
 }
 
 .ui-btn--secondary:hover:not(:disabled) {
-  background-color: #e5e7eb;
+  background-color: var(--color-hover-surface);
+}
+
+.ui-btn--secondary:active:not(:disabled) {
+  background-color: var(--color-hover-surface);
 }
 
 .ui-btn--danger {
@@ -233,7 +269,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-btn--ghost:hover:not(:disabled) {
-  background-color: #f3f4f6;
+  background-color: var(--color-hover-surface);
 }
 
 .ui-btn--outline {
@@ -248,6 +284,8 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-btn--sm {
+  min-height: var(--control-height);
+  box-sizing: border-box;
   padding: 0.375rem 0.75rem;
   font-size: 0.875rem;
   border-radius: 0.5rem;
@@ -394,6 +432,22 @@ input:focus, textarea:focus, select:focus {
   background: #fff;
 }
 
+.ui-toggle--compact {
+  height: 1.125rem;
+  width: 1.875rem;
+  border-width: 1px;
+}
+
+.ui-toggle--compact .ui-toggle-thumb {
+  height: 0.625rem;
+  width: 0.625rem;
+  transform: translateX(0.125rem);
+}
+
+.ui-toggle--compact:has(input:checked) .ui-toggle-thumb {
+  transform: translateX(1rem);
+}
+
 .ui-field-group {
   display: flex;
   flex-direction: column;
@@ -414,11 +468,64 @@ input:focus, textarea:focus, select:focus {
 
 .ui-field {
   width: 100%;
+  min-height: var(--control-height);
+  box-sizing: border-box;
   border: 1px solid #d1d5db;
   border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;
   background: #fff;
   color: var(--color-border-strong);
+}
+
+.ui-field--readonly {
+  cursor: default;
+  background: var(--color-muted-surface);
+}
+
+.ui-chevron-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.ui-chevron-icon--open {
+  transform: rotate(90deg);
+}
+
+.ui-field-select-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.ui-field-select-wrap--auto {
+  width: auto;
+  display: inline-block;
+}
+
+.ui-field-select {
+  appearance: none;
+  padding-right: 2.25rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ui-field-select:hover:not(:disabled) {
+  background-color: var(--color-hover-surface);
+}
+
+.ui-field-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ui-field-select-chevron {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  width: 0.875rem;
+  height: 0.875rem;
+  pointer-events: none;
+  color: var(--color-muted-text);
+  transform: translateY(-50%) rotate(90deg);
 }
 
 .ui-field--textarea {
@@ -510,31 +617,6 @@ input:focus, textarea:focus, select:focus {
   color: var(--color-muted-text);
 }
 
-.ui-spinner {
-  border-radius: 9999px;
-  border: 2px solid #d4d4d4;
-  border-top-color: var(--color-border-strong);
-  animation: spin 0.8s linear infinite;
-}
-
-.ui-spinner--sm {
-  width: 1rem;
-  height: 1rem;
-}
-
-.ui-spinner--md {
-  width: 2rem;
-  height: 2rem;
-}
-
-.ui-spinner--lg {
-  width: 2.5rem;
-  height: 2.5rem;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
 
 /* Legacy save aliases */
 .btn-save,
@@ -557,7 +639,11 @@ input:focus, textarea:focus, select:focus {
 
 /* Sidebar item */
 .sidebar-item {
-  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-neutral-800 hover:bg-neutral-100 cursor-pointer transition-colors;
+  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-neutral-800 cursor-pointer transition-colors;
+}
+
+.sidebar-item:hover {
+  background-color: var(--color-hover-surface);
 }
 
 .app-sidebar {
@@ -651,7 +737,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .sidebar-collapse-button:hover {
-  background: var(--color-muted-surface);
+  background-color: var(--color-hover-surface);
   color: var(--color-border-strong);
 }
 
@@ -712,8 +798,12 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-chat-suggestion {
-  @apply p-3 text-sm text-left bg-white border border-gray-200 rounded-lg;
-  @apply hover:bg-gray-50 hover:border-neutral-300 transition-colors;
+  @apply p-3 text-sm text-left bg-white border border-gray-200 rounded-lg transition-colors;
+}
+
+.ui-chat-suggestion:hover {
+  background-color: var(--color-hover-surface);
+  @apply border-neutral-300;
 }
 
 .ui-chat-banner {
@@ -753,8 +843,12 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-chat-scope-chip {
-  @apply flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700;
-  @apply hover:border-neutral-300 hover:text-neutral-950;
+  @apply flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700 transition-colors;
+}
+
+.ui-chat-scope-chip:hover {
+  background-color: var(--color-hover-surface);
+  @apply border-neutral-300 text-neutral-950;
 }
 
 .ui-chat-attachment {
@@ -762,7 +856,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-chat-active-report {
-  @apply flex flex-col gap-1;
+  @apply inline-flex flex-col gap-1 w-fit max-w-full;
 }
 
 .ui-chat-active-report-heading {
@@ -770,15 +864,27 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-chat-report-pill {
-  @apply flex items-center gap-1 px-1 py-1 bg-white border border-gray-200 rounded-lg text-sm max-w-full transition-colors hover:bg-gray-50;
+  @apply inline-flex items-center gap-1 px-1 py-1 bg-white border border-neutral-950 rounded-lg text-sm w-fit max-w-full transition-colors;
+}
+
+.ui-chat-report-pill:hover {
+  background-color: var(--color-hover-surface);
 }
 
 .ui-chat-report-pill-trigger {
-  @apply flex items-center gap-2 min-w-0 flex-1 px-2 py-1 rounded-md text-left cursor-pointer;
+  @apply inline-flex items-center gap-2 min-w-0 px-2 py-1 rounded-md text-left cursor-pointer;
+}
+
+.ui-chat-report-pill-text {
+  @apply inline-flex items-center gap-2 min-w-0 whitespace-nowrap;
 }
 
 .ui-chat-report-pill-title {
-  @apply text-gray-800 truncate;
+  @apply text-gray-800 text-sm font-medium shrink-0;
+}
+
+.ui-chat-report-pill-path {
+  @apply text-xs text-gray-500 shrink-0;
 }
 
 .ui-chat-report-pill-status {
@@ -806,7 +912,11 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-artifact-card-header {
-  @apply w-full flex items-center gap-3 px-4 py-3 border-b border-gray-100 text-left hover:bg-gray-50 transition-colors;
+  @apply w-full flex items-center gap-3 px-4 py-3 border-b border-gray-100 text-left transition-colors;
+}
+
+.ui-artifact-card-header:hover {
+  background-color: var(--color-hover-surface);
 }
 
 .ui-artifact-card-icon {
@@ -856,6 +966,170 @@ input:focus, textarea:focus, select:focus {
 
 .ui-artifact-modal-body {
   @apply overflow-y-auto px-5 py-4;
+}
+
+.ui-download-popover {
+  @apply absolute right-0 top-full z-10 mt-1 min-w-[7rem] rounded-lg border border-gray-200 bg-white py-1 shadow-lg;
+}
+
+.ui-download-popover-item {
+  @apply block w-full px-3 py-2 text-left text-sm text-gray-700;
+}
+
+.ui-download-popover-item:hover {
+  background-color: var(--color-hover-surface);
+}
+
+.ui-confirm-modal-backdrop {
+  @apply fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-6;
+}
+
+.ui-confirm-modal {
+  @apply w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl;
+}
+
+.ui-confirm-modal-title {
+  @apply text-lg font-semibold text-gray-900;
+}
+
+.ui-confirm-modal-description {
+  @apply mt-2 text-sm text-gray-600;
+}
+
+.ui-confirm-modal-actions {
+  @apply mt-6 flex justify-end gap-2;
+}
+
+.ui-range-slider {
+  @apply space-y-2;
+}
+
+.ui-range-slider-labels {
+  @apply flex justify-between text-xs text-gray-500;
+}
+
+.ui-range-slider-zone {
+  padding: 0.875rem 0;
+  margin: -0.875rem 0;
+}
+
+.ui-range-slider-track {
+  @apply relative flex w-full cursor-pointer items-center;
+  height: 1.25rem;
+}
+
+.ui-range-slider-track-line {
+  @apply h-1 w-full rounded-full bg-gray-200;
+}
+
+.ui-range-slider-thumb {
+  @apply absolute top-1/2 h-3.5 w-3.5 rounded-full bg-neutral-950;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.ui-range-slider-thumb--start {
+  transform: translate(0, -50%);
+}
+
+.ui-range-slider-thumb--end {
+  transform: translate(-100%, -50%);
+}
+
+.ui-range-slider-ticks {
+  @apply relative mt-1;
+  height: 0.75rem;
+}
+
+.ui-range-slider-tick {
+  @apply absolute bottom-0 w-0.5 rounded-full border-0 bg-gray-300 p-0 h-2 cursor-pointer transition-colors;
+  transform: translateX(-50%);
+}
+
+.ui-range-slider-tick--start {
+  transform: translateX(0);
+}
+
+.ui-range-slider-tick--end {
+  transform: translateX(-100%);
+}
+
+.ui-range-slider-tick--center {
+  @apply h-3 bg-gray-400;
+}
+
+.ui-range-slider-tick--active {
+  @apply bg-neutral-950;
+}
+
+.ui-range-slider-tick--center.ui-range-slider-tick--active {
+  @apply bg-neutral-950;
+}
+
+.ui-range-slider-tick:disabled {
+  @apply cursor-not-allowed opacity-50;
+}
+
+.ui-sidebar-subitem {
+  @apply w-full rounded-lg px-3 py-1.5 text-left text-sm text-gray-600 transition-colors;
+}
+
+.ui-sidebar-subitem:hover {
+  background-color: var(--color-hover-surface);
+}
+
+.ui-sidebar-subitem--current {
+  background-color: var(--color-hover-surface);
+}
+
+.ui-sidebar-subitem--current:hover {
+  background-color: var(--color-hover-surface);
+}
+
+.ui-sidebar-subitem-group {
+  @apply ml-3 mt-1 space-y-1 border-l border-gray-200 pl-3;
+}
+
+.ui-sidebar-subitem-group-label {
+  @apply text-xs px-3 py-1;
+  color: var(--color-meta-text);
+}
+
+.ui-text-meta {
+  color: var(--color-meta-text);
+}
+
+.ui-hover-surface:hover {
+  background-color: var(--color-hover-surface);
+}
+
+.ui-context-active-dot {
+  @apply h-2 w-2 shrink-0 rounded-full bg-green-600;
+}
+
+.ui-sidebar-context-row {
+  @apply flex w-full items-center gap-2 border-0 cursor-default text-sm;
+}
+
+.ui-sidebar-subitem.ui-sidebar-context-row.ui-sidebar-subitem--current,
+.ui-sidebar-subitem.ui-sidebar-context-row--button.ui-sidebar-subitem--current {
+  background-color: var(--color-hover-surface);
+}
+
+.ui-sidebar-context-row--button {
+  @apply cursor-pointer font-normal;
+}
+
+.ui-sidebar-context-name {
+  @apply min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm font-normal text-inherit;
+}
+
+.ui-sidebar-context-name--active {
+  @apply font-semibold text-neutral-950;
+}
+
+.ui-chat-composer--with-report .ui-chat-input-shell {
+  @apply bg-gray-100 border-gray-200;
 }
 
 .ui-md {
@@ -912,7 +1186,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-write-action-bar {
-  @apply flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2;
+  @apply flex flex-col gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2;
 }
 
 .ui-write-action-bar-summary {
@@ -924,13 +1198,15 @@ input:focus, textarea:focus, select:focus {
 }
 
 .connector-card {
+  position: relative;
   display: flex;
-  width: 6rem;
-  height: 6rem;
+  width: 6.75rem;
+  min-height: 7rem;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  justify-content: flex-start;
+  padding: 0.75rem 0.5rem 0.625rem;
+  gap: 0.375rem;
   border: 2px solid var(--color-border-strong);
   border-radius: 1rem;
   background: var(--color-surface);
@@ -941,14 +1217,33 @@ input:focus, textarea:focus, select:focus {
 }
 
 .connector-card:hover {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background-color: var(--color-hover-surface);
+}
+
+.connector-card-name {
+  text-align: center;
+  line-height: 1.25;
+}
+
+.connector-card-type-badge {
+  margin-top: auto;
+}
+
+.connector-card-active-dot {
+  flex-shrink: 0;
 }
 
 .connector-card-icon {
-  width: 2rem;
-  height: 2rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
   object-fit: contain;
+  display: block;
+}
+
+.connector-card-icon--jira {
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 /* Markdown content styling */
@@ -988,10 +1283,25 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* Loading dots */
+.ui-loading-dots,
+.loading-dots {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .ui-loading-dots span,
 .loading-dots span {
   @apply inline-block w-2 h-2 bg-neutral-500 rounded-full mx-0.5;
   animation: loadingDot 1.4s infinite ease-in-out both;
+}
+
+.ui-loading-dots--sm span {
+  @apply w-1.5 h-1.5;
+}
+
+.ui-loading-dots--lg span {
+  @apply w-2.5 h-2.5;
 }
 
 .ui-loading-dots span:nth-child(1),

@@ -26,6 +26,6 @@ More detail: [HELPERS.md](./HELPERS.md) (guards, errors, artifacts, streaming). 
 
 - Do not add connector-specific branches here.
 - Do not add product-specific prompt text here.
-- Connector-specific formatting belongs in `src/connectors/<id>/formatters.ts`.
-- Connector-specific execution belongs in `src/connectors/<id>/runtime.ts`.
+- Connector-specific formatting belongs in the connector package (`handler.js` return values, manifest confirmation/preview templates).
+- Connector-specific execution belongs in `<workspace>/.smile/connectors/<id>/handler.js` (sandbox) or declarative MCP mappings in the manifest.
 - Task continuity uses tool **categories**, not connector tool names — see [taskContinuity.md](./taskContinuity.md).

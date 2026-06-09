@@ -1,433 +1,416 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import {
+  CatalogEntry,
+  getBuiltinCatalogEntries,
+  INTEGRATION_TYPE_LABELS,
+  isWorkspaceConnectorConfigured,
+  mergeCatalogEntries,
+} from '../connectors/catalog'
+import { ConnectorManifest } from '../connectors/contract'
 import { useElectron } from '../hooks/useElectron'
-import { Alert, Input, Spinner } from './ui'
+import { GenericConnectorSettingsView } from './connectors/GenericConnectorSettingsView'
+import { ConnectorPageHeader } from './connectors/ConnectorPageHeader'
+import { Alert, Badge, Button, Input, Panel, Spinner } from './ui'
 
-import { jiraCatalogEntry, JiraSettingsView } from '../connectors/jira/ui'
-import { ConnectorManifest, ConnectorPermissions } from '../connectors/contract'
+const CONNECTOR_LOADING_MIN_MS = 700
 
-function describePermissions(permissions: ConnectorPermissions): string {
-  const parts: string[] = []
-  if (permissions.http?.length) parts.push(`http(${permissions.http.length})`)
-  if (permissions.mcp?.length) parts.push(`mcp(${permissions.mcp.join(', ')})`)
-  if (permissions.file?.read || permissions.file?.write) {
-    parts.push(`file(${[permissions.file?.read && 'read', permissions.file?.write && 'write'].filter(Boolean).join('/')})`)
+function CatalogEntryIcon({
+  connector,
+  iconDataUrl,
+}: {
+  connector: CatalogEntry
+  iconDataUrl?: string | null
+}) {
+  if (connector.CatalogGraphic) {
+    const Graphic = connector.CatalogGraphic
+    return <Graphic className="connector-card-icon" />
   }
-  if (permissions.secrets?.length) parts.push(`secrets(${permissions.secrets.length})`)
-  return parts.length ? parts.join(' · ') : 'none'
+
+  const src = iconDataUrl?.trim()
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="connector-card-icon rounded-md object-contain"
+      />
+    )
+  }
+  const Icon = connector.Icon
+  return <Icon />
 }
 
-function PluginConnectorsSection() {
+function ConnectorCard({
+  connector,
+  connected,
+  iconDataUrl,
+  onClick,
+}: {
+  connector: CatalogEntry
+  connected?: boolean
+  iconDataUrl?: string | null
+  onClick: () => void
+}) {
+  const typeLabel = connector.integrationType
+    ? INTEGRATION_TYPE_LABELS[connector.integrationType]
+    : null
+
+  return (
+    <button
+      onClick={onClick}
+      className="connector-card relative"
+      title={connector.description}
+    >
+      <CatalogEntryIcon connector={connector} iconDataUrl={iconDataUrl} />
+      <span className="connector-card-name">{connector.name}</span>
+      {typeLabel && (
+        <Badge className="connector-card-type-badge text-[10px] font-normal">
+          {typeLabel}
+        </Badge>
+      )}
+      {connected && (
+        <span
+          className="connector-card-active-dot absolute right-2 top-2 h-2 w-2 rounded-full bg-green-600"
+          title="Active"
+          aria-label="Connector active"
+        />
+      )}
+    </button>
+  )
+}
+
+function ConnectorInstallView({
+  entry,
+  onBack,
+  onInstalled,
+}: {
+  entry: CatalogEntry
+  onBack: () => void
+  onInstalled: () => void
+}) {
   const { connectors } = useElectron()
-  const [loading, setLoading] = useState(true)
-  const [plugins, setPlugins] = useState<Array<{ manifest: ConnectorManifest; promptMarkdown: string }>>([])
+  const [installing, setInstalling] = useState(false)
+  const [installError, setInstallError] = useState<string | null>(null)
+
+  async function handleInstall() {
+    setInstalling(true)
+    setInstallError(null)
+    try {
+      const result = await connectors.installPackage(entry.id)
+      if (!result.success) throw new Error(result.error || 'Install failed')
+      onInstalled()
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : 'Install failed')
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const typeLabel = entry.integrationType ? INTEGRATION_TYPE_LABELS[entry.integrationType] : null
+
+  return (
+    <div className="h-full overflow-y-auto bg-white">
+      <div className="content-shell page-shell space-y-6">
+        <ConnectorPageHeader
+          name={entry.name}
+          description={entry.description}
+          integrationLabel={typeLabel}
+          onBack={onBack}
+        />
+
+        <Panel variant="soft" className="space-y-4">
+          <p className="text-sm text-neutral-600">
+            Install copies this connector into your workspace at{' '}
+            <code className="bg-gray-100 px-1 py-0.5 rounded">.smile/connectors/{entry.id}/</code>.
+            You can configure credentials after installation.
+          </p>
+          {installError && <Alert>{installError}</Alert>}
+          <Button
+            variant="primary"
+            size="sm"
+            className="w-fit"
+            loading={installing}
+            loadingLabel="Installing…"
+            onClick={() => void handleInstall()}
+          >
+            Install
+          </Button>
+        </Panel>
+      </div>
+    </div>
+  )
+}
+
+function ConnectorDetailView({
+  entry,
+  connectorId,
+  workspaceManifest,
+  onBack,
+  onInstalled,
+  onConnectionChange,
+}: {
+  entry?: CatalogEntry
+  connectorId: string
+  workspaceManifest?: CatalogEntry['manifest']
+  onBack: () => void
+  onInstalled: () => void
+  onConnectionChange: (connectorId: string, connected: boolean) => void
+}) {
+  if (workspaceManifest) {
+    return (
+      <GenericConnectorSettingsView
+        manifest={workspaceManifest}
+        onBack={onBack}
+        onConnectionChange={connected => onConnectionChange(connectorId, connected)}
+      />
+    )
+  }
+
+  if (entry?.origin === 'bundled') {
+    return <ConnectorInstallView entry={entry} onBack={onBack} onInstalled={onInstalled} />
+  }
+
+  return (
+    <div className="content-shell page-shell">
+      <Alert>Connector not found.</Alert>
+      <button type="button" className="mt-4 text-sm underline" onClick={onBack}>
+        Back to catalog
+      </button>
+    </div>
+  )
+}
+
+export default function ConnectorsView() {
+  const { connectors, mcp, storage } = useElectron()
+  const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [loadingCatalog, setLoadingCatalog] = useState(true)
+  const [loadingConnectionState, setLoadingConnectionState] = useState(true)
+  const [mcpConnected, setMcpConnected] = useState(false)
+  const [workspaceConnectors, setWorkspaceConnectors] = useState<Array<{ manifest: ConnectorManifest; promptMarkdown: string }>>([])
   const [discoveryErrors, setDiscoveryErrors] = useState<Array<{ id: string; errors: string[] }>>([])
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set())
+  const [iconUrls, setIconUrls] = useState<Record<string, string>>({})
+  const [error, setError] = useState<string | null>(null)
+
+  const catalog = useMemo(
+    () => mergeCatalogEntries(getBuiltinCatalogEntries(), workspaceConnectors),
+    [workspaceConnectors],
+  )
+
+  const selectedEntry = useMemo(
+    () => catalog.find(entry => entry.id === selectedConnectorId),
+    [catalog, selectedConnectorId],
+  )
+
+  const filteredCatalog = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return catalog
+    return catalog.filter(entry =>
+      entry.name.toLowerCase().includes(query)
+      || entry.description.toLowerCase().includes(query)
+      || entry.id.toLowerCase().includes(query),
+    )
+  }, [catalog, search])
+
+  const refreshConnectedState = useCallback(async (entries: CatalogEntry[], mcpIsConnected: boolean) => {
+    const next = new Set<string>()
+    for (const entry of entries) {
+      if (entry.manifest && await isWorkspaceConnectorConfigured(entry.manifest, storage.getSecure, mcpIsConnected)) {
+        next.add(entry.id)
+      }
+    }
+    setConnectedIds(next)
+  }, [storage.getSecure])
+
+  const loadCatalog = useCallback(async () => {
+    setLoadingCatalog(true)
+    try {
+      const result = await connectors.list()
+      if (result.success && result.data) {
+        setWorkspaceConnectors(result.data.connectors)
+        setDiscoveryErrors(result.data.errors)
+      } else if (result.error) {
+        setError(result.error)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load connectors')
+    } finally {
+      setLoadingCatalog(false)
+    }
+  }, [connectors])
+
+  const loadMcpState = useCallback(async () => {
+    setLoadingConnectionState(true)
+    const startedAt = Date.now()
+    let keepLoading = false
+    try {
+      const [status, connectionState] = await Promise.all([mcp.status(), mcp.getConnectionState()])
+      const connected = status.connected || connectionState.connected
+      setMcpConnected(connected)
+      keepLoading = connectionState.state === 'connecting' || connectionState.state === 'oauth_pending'
+      await refreshConnectedState(catalog, connected)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load connector state')
+    } finally {
+      if (!keepLoading) {
+        const elapsed = Date.now() - startedAt
+        const remaining = Math.max(0, CONNECTOR_LOADING_MIN_MS - elapsed)
+        window.setTimeout(() => setLoadingConnectionState(false), remaining)
+      }
+    }
+  }, [catalog, mcp, refreshConnectedState])
+
+  useEffect(() => {
+    void loadCatalog()
+  }, [loadCatalog])
+
+  useEffect(() => {
+    void loadMcpState()
+  }, [loadMcpState])
+
+  useEffect(() => {
+    void refreshConnectedState(catalog, mcpConnected)
+  }, [catalog, mcpConnected, refreshConnectedState])
 
   useEffect(() => {
     let active = true
     void (async () => {
-      try {
-        const result = await connectors.list()
-        if (!active) return
-        if (result.success && result.data) {
-          setPlugins(result.data.connectors)
-          setDiscoveryErrors(result.data.errors)
-        } else if (result.error) {
-          setLoadError(result.error)
+      const next: Record<string, string> = {}
+      await Promise.all(catalog.map(async entry => {
+        let dataUrl: string | null = null
+        if (entry.origin === 'workspace') {
+          const result = await connectors.getIcon(entry.id)
+          if (result.success && result.data) dataUrl = result.data
         }
-      } catch (err) {
-        if (active) setLoadError(err instanceof Error ? err.message : 'Failed to load plugins')
-      } finally {
-        if (active) setLoading(false)
-      }
+        if (!dataUrl) {
+          const bundled = await connectors.getBundledIcon(entry.id)
+          if (bundled.success && bundled.data) dataUrl = bundled.data
+        }
+        if (dataUrl) next[entry.id] = dataUrl
+      }))
+      if (active) setIconUrls(next)
     })()
     return () => {
       active = false
     }
-  }, [connectors])
-
-  return (
-    <section className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h2 className="text-xl font-medium text-neutral-950">Plugins</h2>
-        {loading && <Spinner size="sm" />}
-      </div>
-      <p className="text-sm text-neutral-500">
-        Declarative connectors discovered in <code>.smile/connectors</code> of your workspace.
-      </p>
-
-      {!loading && plugins.length === 0 && discoveryErrors.length === 0 && (
-        <p className="text-sm text-neutral-500">No plugin connectors installed yet.</p>
-      )}
-
-      <div className="space-y-3">
-        {plugins.map(({ manifest }) => (
-          <div key={manifest.id} className="rounded-lg border border-neutral-200 p-4">
-            <div className="flex items-baseline justify-between">
-              <h3 className="font-medium text-neutral-950">{manifest.name}</h3>
-              <span className="text-xs text-neutral-400">
-                v{manifest.version} · api {manifest.apiVersion}
-              </span>
-            </div>
-            {manifest.description && <p className="mt-1 text-sm text-neutral-500">{manifest.description}</p>}
-            <div className="mt-3 flex flex-wrap gap-2">
-              {manifest.tools.map(tool => (
-                <span
-                  key={tool.name}
-                  className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600"
-                  title={tool.description}
-                >
-                  {tool.name}
-                  {tool.requiresConfirmation ? ' · confirm' : ''}
-                </span>
-              ))}
-            </div>
-            {manifest.permissions && (
-              <p className="mt-2 text-xs text-neutral-400">Permissions: {describePermissions(manifest.permissions)}</p>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {discoveryErrors.map(err => (
-        <Alert key={err.id}>
-          {err.id}: {err.errors.join('; ')}
-        </Alert>
-      ))}
-      {loadError && <Alert>{loadError}</Alert>}
-    </section>
-  )
-}
-
-
-
-const CONNECTOR_LOADING_MIN_MS = 700
-
-
-
-const connectorCatalog = [jiraCatalogEntry]
-
-
-
-type ConnectorId = (typeof connectorCatalog)[number]['id']
-
-
-
-function ConnectorCard({
-
-  connector,
-
-  onClick,
-
-}: {
-
-  connector: (typeof connectorCatalog)[number]
-
-  onClick: () => void
-
-}) {
-
-  const Icon = connector.Icon
-
-
-
-  return (
-
-    <button
-
-      onClick={onClick}
-
-      className="connector-card"
-
-      title={connector.description}
-
-    >
-
-      <Icon />
-
-      <span>{connector.name}</span>
-
-    </button>
-
-  )
-
-}
-
-
-
-function ConnectorDetailView({
-
-  connectorId,
-
-  onBack,
-
-  onConnectionChange,
-
-}: {
-
-  connectorId: ConnectorId
-
-  onBack: () => void
-
-  onConnectionChange: (connected: boolean) => void
-
-}) {
-
-  switch (connectorId) {
-
-    case 'jira':
-
-      return <JiraSettingsView onBack={onBack} onConnectionChange={onConnectionChange} />
-
-    default:
-
-      return null
-
-  }
-
-}
-
-
-
-export default function ConnectorsView() {
-
-  const [selectedConnector, setSelectedConnector] = useState<ConnectorId | null>(null)
-
-  const [search, setSearch] = useState('')
-
-  const [mcpConnected, setMcpConnected] = useState(false)
-
-  const [loadingConnectorState, setLoadingConnectorState] = useState(true)
-
-  const [error, setError] = useState<string | null>(null)
-
-
-
-  const { mcp } = useElectron()
-
-
+  }, [catalog, connectors])
 
   useEffect(() => {
-
-    void loadConnectorState()
-
-
-
-    const cleanup = mcp.onConnectionStateChange((state) => {
+    const cleanup = mcp.onConnectionStateChange(state => {
       const connected = state.state === 'connected'
       const inProgress = state.state === 'connecting' || state.state === 'oauth_pending'
       setMcpConnected(connected)
-      setLoadingConnectorState(inProgress)
-      if (state.state === 'error' && state.error) {
-        setError(state.error)
-      }
+      setLoadingConnectionState(inProgress)
+      if (state.state === 'error' && state.error) setError(state.error)
     })
-
-
-
     return cleanup
+  }, [mcp])
 
-  }, [])
+  const connectedCatalog = useMemo(
+    () => catalog.filter(entry => connectedIds.has(entry.id)),
+    [catalog, connectedIds],
+  )
 
-
-
-  const filteredCatalog = useMemo(() => {
-
-    const query = search.trim().toLowerCase()
-
-    if (!query) return connectorCatalog
-
-    return connectorCatalog.filter(connector =>
-
-      connector.name.toLowerCase().includes(query) ||
-
-      connector.description.toLowerCase().includes(query)
-
-    )
-
-  }, [search])
-
-
-
-  const connectedConnectors = mcpConnected
-
-    ? connectorCatalog.filter(connector => connector.id === 'jira')
-
-    : []
-
-
-
-  async function loadConnectorState() {
-
-    setLoadingConnectorState(true)
-
-    const startedAt = Date.now()
-
-    let keepLoadingForConnection = false
-
-    try {
-
-      const [status, connectionState] = await Promise.all([
-
-        mcp.status(),
-
-        mcp.getConnectionState(),
-
-      ])
-
-      setMcpConnected(status.connected || connectionState.connected)
-
-      keepLoadingForConnection = connectionState.state === 'connecting'
-        || connectionState.state === 'oauth_pending'
-
-    } catch (err) {
-
-      setError(err instanceof Error ? err.message : 'Failed to load connector state')
-
-    } finally {
-
-      if (!keepLoadingForConnection) {
-
-        const elapsed = Date.now() - startedAt
-
-        const remaining = Math.max(0, CONNECTOR_LOADING_MIN_MS - elapsed)
-
-        window.setTimeout(() => setLoadingConnectorState(false), remaining)
-
-      }
-
-    }
-
+  function handleConnectionChange(connectorId: string, connected: boolean) {
+    setConnectedIds(prev => {
+      const next = new Set(prev)
+      if (connected) next.add(connectorId)
+      else next.delete(connectorId)
+      return next
+    })
   }
 
-
-
-  if (selectedConnector) {
-
+  if (selectedConnectorId) {
     return (
-
       <ConnectorDetailView
-
-        connectorId={selectedConnector}
-
+        entry={selectedEntry}
+        connectorId={selectedConnectorId}
+        workspaceManifest={selectedEntry?.manifest}
         onBack={() => {
-          setSelectedConnector(null)
-          void loadConnectorState()
+          setSelectedConnectorId(null)
+          void loadCatalog()
+          void loadMcpState()
         }}
-
-        onConnectionChange={setMcpConnected}
-
+        onInstalled={() => {
+          void loadCatalog().then(() => {
+            void loadMcpState()
+          })
+        }}
+        onConnectionChange={handleConnectionChange}
       />
-
     )
-
   }
-
-
 
   return (
-
     <div className="h-full overflow-y-auto bg-white">
-
       <div className="content-shell page-shell space-y-8">
-
         <section>
-
           <div className="flex items-center gap-3">
-
             <h1 className="text-xl font-medium text-neutral-950">Connected</h1>
-
-            {loadingConnectorState && (
-
+            {loadingConnectionState && (
               <div className="flex items-center gap-2 text-sm text-neutral-500">
-
                 <Spinner size="sm" />
-
                 <span>Checking...</span>
-
               </div>
-
             )}
-
           </div>
-
           <div className="mt-5 flex flex-wrap gap-4">
-
-            {!loadingConnectorState && connectedConnectors.length === 0 ? (
-
-              <p className="text-sm text-neutral-500">No connectors connected yet.</p>
-
+            {!loadingConnectionState && connectedCatalog.length === 0 ? (
+              <p className="text-sm text-neutral-500">No connectors configured yet.</p>
             ) : (
-
-              connectedConnectors.map(connector => (
-
+              connectedCatalog.map(connector => (
                 <ConnectorCard
-
                   key={connector.id}
-
                   connector={connector}
-
-                  onClick={() => setSelectedConnector(connector.id)}
-
+                  connected
+                  iconDataUrl={iconUrls[connector.id]}
+                  onClick={() => setSelectedConnectorId(connector.id)}
                 />
-
               ))
-
             )}
-
           </div>
-
         </section>
 
-
-
         <section className="space-y-4">
-
-          <h2 className="text-xl font-medium text-neutral-950">Catalog</h2>
-
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-medium text-neutral-950">Catalog</h2>
+            {loadingCatalog && <Spinner size="sm" />}
+          </div>
+          <p className="text-sm text-neutral-500">
+            Install connectors from the catalog into <code>.smile/connectors/&lt;id&gt;/</code>, or author custom packages — see{' '}
+            <code>docs/creating-a-connector.md</code>.
+          </p>
           <Input
             value={search}
             onChange={event => setSearch(event.target.value)}
             placeholder="Search"
             className="ui-field--emphasis"
           />
-
-
-
           <div className="flex flex-wrap gap-4">
-
             {filteredCatalog.map(connector => (
-
               <ConnectorCard
-
                 key={connector.id}
-
                 connector={connector}
-
-                onClick={() => setSelectedConnector(connector.id)}
-
+                connected={connectedIds.has(connector.id)}
+                iconDataUrl={iconUrls[connector.id]}
+                onClick={() => setSelectedConnectorId(connector.id)}
               />
-
             ))}
-
+            {!loadingCatalog && filteredCatalog.length === 0 && (
+              <p className="text-sm text-neutral-500">No connectors match your search.</p>
+            )}
           </div>
-
         </section>
 
-
-
-        <PluginConnectorsSection />
-
-
-
+        {discoveryErrors.map(err => (
+          <Alert key={err.id}>
+            {err.id}: {err.errors.join('; ')}
+          </Alert>
+        ))}
         {error && <Alert>{error}</Alert>}
-
       </div>
-
     </div>
-
   )
-
 }
-
