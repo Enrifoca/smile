@@ -68,6 +68,18 @@ export const scratchpadWriteSchema = z.object({
   note: z.string().describe('The note to add to your session scratchpad. Use this to record key findings, decisions, or progress so you can refer back without re-running tools. Examples: "Document has 4 sections: Setup, API, Deployment, FAQ. Records to create: 6 total.", "Using the default connector scope and record type for all items."'),
 })
 
+export const contextReadSchema = z.object({})
+
+export const contextAppendSchema = z.object({
+  section: z.string().describe('Section heading to append under (e.g. "Notes", "Decisions"). Created when missing.'),
+  content: z.string().describe('Prose to append. Summarize insights — never paste raw JSON or tool output.'),
+})
+
+export const contextReplaceSectionSchema = z.object({
+  heading: z.string().describe('Exact section heading to replace (e.g. "Overview", "Decisions").'),
+  content: z.string().describe('New body for the section (without the heading). Use prose, not raw API data.'),
+})
+
 export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'file_list',
@@ -149,6 +161,29 @@ export const toolDefinitions: ToolDefinition[] = [
     schema: scratchpadWriteSchema,
     requiresConfirmation: false,
     category: 'scratchpad',
+  },
+
+  // Active context tools (require an active project context)
+  {
+    name: 'context_read',
+    description: 'Read the full markdown knowledge file for the active project context. Use when you need details beyond the summary in the system prompt.',
+    schema: contextReadSchema,
+    requiresConfirmation: false,
+    category: 'context',
+  },
+  {
+    name: 'context_append',
+    description: 'Append prose to a section in the active project context. Use to record decisions, scope notes, or ongoing project knowledge. Never paste raw tool output or JSON.',
+    schema: contextAppendSchema,
+    requiresConfirmation: false,
+    category: 'context',
+  },
+  {
+    name: 'context_replace_section',
+    description: 'Replace the body of a section in the active project context by heading. Use when a section needs a full rewrite. Previous content is backed up automatically.',
+    schema: contextReplaceSectionSchema,
+    requiresConfirmation: false,
+    category: 'context',
   },
 ]
 

@@ -6,7 +6,10 @@ import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
 import { getSystemPrompt } from './prompts'
 import { toolDefinitions } from './tools'
 import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
+import type { ContextEnvelope } from '../connectors/contract'
 import type { ProjectContext } from '../context/types'
+import { getConnectorScopeConfig, getEnabledConnectorIds, getContextFolderPath } from '../context/types'
+import type { ContextPromptBody } from '../context/promptInjection'
 import { shouldNudgeActionFirst } from './actionGuards'
 import { zodToJsonSchema } from './jsonSchema'
 import { formatScratchpadNote, getCoreScratchpadNote } from './scratchpad'
@@ -48,6 +51,7 @@ export class Agent {
   private pendingActions: Map<string, PendingAction> = new Map()
   // Active project context (sticky for the conversation); null = no context.
   private activeContext: ProjectContext | null = null
+  private activeContextBody: ContextPromptBody | null = null
   // Deduplication cache: maps "toolName:JSON(args)" → formatted result string.
   // Cleared at the start of each processMessage call. Write operations trigger
   // targeted invalidation so read-after-write always returns fresh data.
@@ -143,12 +147,39 @@ export class Agent {
    */
   setActiveContext(context: ProjectContext | null): void {
     this.activeContext = context
+    this.activeContextBody = null
     for (const connector of this.config.connectors || []) {
       const connectorId = connector.definition.id
-      const envelope = context
-        ? { contextId: context.id, config: context.connectorScopes[connectorId] ?? null }
+      const config = context ? getConnectorScopeConfig(context, connectorId) : null
+      const envelope = context && config !== null
+        ? { contextId: context.id, config }
         : null
-      connector.setActiveContext?.(envelope)
+      void connector.setActiveContext?.(envelope)
+    }
+  }
+
+  /** Build the context envelope for a connector from the active project context. */
+  private async buildConnectorContextEnvelope(connectorId: string): Promise<ContextEnvelope | undefined> {
+    await this.syncActiveContextFromSource()
+    const context = this.activeContext
+    if (!context) return undefined
+    const config = getConnectorScopeConfig(context, connectorId)
+    if (config === null) return undefined
+    return { contextId: context.id, config }
+  }
+
+  /** Reload active context from storage so connector scope config is never stale. */
+  private async syncActiveContextFromSource(): Promise<void> {
+    const contextId = this.activeContext?.id
+    if (!contextId || !this.config.refreshActiveContext) return
+    try {
+      const fresh = await this.config.refreshActiveContext(contextId)
+      if (!fresh || fresh.id !== contextId) return
+      this.activeContext = fresh
+      this.activeContextBody = null
+      this.setActiveContext(fresh)
+    } catch (error) {
+      console.warn('[Agent] Failed to refresh active context:', error)
     }
   }
 
@@ -161,18 +192,61 @@ export class Agent {
    * Prompt section announcing the active context: its name and a soft working-dir
    * hint (file tools stay workspace-wide; this just biases default paths).
    */
-  private buildActiveContextSection(): string {
+  private async buildActiveContextSection(): Promise<string> {
     const context = this.activeContext
     if (!context) return ''
 
+    let body = this.activeContextBody
+    if (this.config.loadContextPromptBody) {
+      try {
+        body = await this.config.loadContextPromptBody(context.id)
+        this.activeContextBody = body
+      } catch {
+        // Keep previous body or fall through to tool-only instructions.
+      }
+    }
+
     const lines = [`\n\n## Active Context: ${context.name}`]
-    lines.push(`The user scoped this conversation to the "${context.name}" project. Keep work within this scope.`)
-    if (context.folder) {
+    lines.push(`The user scoped this conversation to the "${context.name}" project. Only connectors enabled for this context are available.`)
+    lines.push(`Context folder: \`${getContextFolderPath(context)}\` (portable — share this folder with teammates).`)
+
+    const enabledScopes = Object.entries(context.connectors).filter(([, entry]) => entry.enabled)
+    if (enabledScopes.length > 0) {
+      lines.push('\n### Enabled connector scope (enforced by each connector handler)')
+      for (const [connectorId, entry] of enabledScopes) {
+        const configJson = JSON.stringify(entry.config || {})
+        lines.push(`- **${connectorId}**: ${configJson}`)
+      }
+    }
+
+    if (body?.injectFull && body.markdown) {
+      lines.push(`\n### Context knowledge (full)\n${body.markdown}`)
+      lines.push(`\nUpdate this file with \`context_append\` or \`context_replace_section\` — never file_write on the context markdown.`)
+    } else if (body && !body.injectFull && body.length > 0) {
       lines.push(
-        `Working folder: \`${context.folder}\` (relative to the workspace). Prefer this folder for file operations and treat it as the default working directory unless the user points elsewhere.`,
+        `\nThe context file is ${body.length.toLocaleString()} characters — too large to inject verbatim.`,
       )
+      lines.push(`Call \`context_read\` before starting work on this project so you have the full picture.`)
+      lines.push(`Update it with \`context_append\` or \`context_replace_section\` — never file_write on the context markdown.`)
+    } else {
+      lines.push(`\nUse \`context_read\` when you need project knowledge. Update with \`context_append\` or \`context_replace_section\`.`)
     }
     return lines.join('\n')
+  }
+
+  private getCoreToolDefinitions(): ToolDefinition[] {
+    const contextToolNames = new Set(['context_read', 'context_append', 'context_replace_section'])
+    if (!this.activeContext) {
+      return toolDefinitions.filter(tool => !contextToolNames.has(tool.name))
+    }
+    return toolDefinitions
+  }
+
+  private getEnabledConnectors(): ConnectorRuntime[] {
+    const connectors = this.config.connectors || []
+    if (!this.activeContext) return connectors
+    const enabled = new Set(getEnabledConnectorIds(this.activeContext))
+    return connectors.filter(connector => enabled.has(connector.definition.id))
   }
 
   private getConnectorForTool(toolName: string): ConnectorRuntime | undefined {
@@ -181,8 +255,8 @@ export class Agent {
 
   private getAllToolDefinitions(): ToolDefinition[] {
     return [
-      ...toolDefinitions,
-      ...(this.config.connectors || []).flatMap(connector => connector.definition.tools),
+      ...this.getCoreToolDefinitions(),
+      ...this.getEnabledConnectors().flatMap(connector => connector.definition.tools),
     ]
   }
 
@@ -208,17 +282,20 @@ export class Agent {
   }
 
   private getConnectorPromptSections(): string[] {
-    return (this.config.connectors || [])
+    return this.getEnabledConnectors()
       .map(connector => connector.definition.getPromptSection?.(connector.context) || '')
       .filter(Boolean)
   }
 
-  /** Stop the agent after the current iteration completes. */
+  /** Stop the agent and cancel any in-flight AI stream. */
   abort(): void {
     this.abortFlag = true
+    this.config.abortAIStream?.()
+    this.setAgentStatus(null)
   }
 
   async processMessage(userMessage: string): Promise<void> {
+    await this.syncActiveContextFromSource()
     this.abortFlag = false
     this.toolResultCache.clear()
     this.sessionScratchpad = ''
@@ -284,14 +361,26 @@ export class Agent {
       iterations++
       console.log(`[Agent] Loop iteration ${iterations}${hasLimit ? `/${maxIterations}` : ''}`)
 
-      const { response, wasStreamed, assistantPreamble, preambleMessageId } = await this.callAI()
+      const { response, wasStreamed, assistantPreamble, preambleMessageId, aborted } = await this.callAI()
+      if (aborted) {
+        console.log('[Agent] Aborted by user.')
+        break
+      }
       if (!response) throw new Error('No response from AI')
 
       if (response.toolCalls && response.toolCalls.length > 0) {
         let hadError = false
+        let abortedDuringTools = false
         const toolEntries: ToolEntry[] = []
 
         for (const toolCall of response.toolCalls) {
+          if (this.abortFlag) {
+            this.abortFlag = false
+            abortedDuringTools = true
+            console.log('[Agent] Aborted by user during tool execution.')
+            break
+          }
+
           console.log('[Agent] Tool call:', toolCall.name, toolCall.arguments)
           this.toolsRunThisTurn.push({
             name: toolCall.name,
@@ -349,6 +438,12 @@ export class Agent {
             console.log(`[Agent] Cache hit — skipping re-execution of ${toolCall.name}`)
           } else {
             const result = await this.executeTool(toolCall.name, toolCall.arguments)
+            if (this.abortFlag) {
+              this.abortFlag = false
+              abortedDuringTools = true
+              console.log('[Agent] Aborted by user during tool execution.')
+              break
+            }
             formattedResult = this.formatToolResultForAI(toolCall.name, result, toolCall.arguments)
 
             const isError = isFailedToolResult(result, formattedResult)
@@ -385,6 +480,8 @@ export class Agent {
             timestamp: new Date().toISOString(),
           })
         }
+
+        if (abortedDuringTools) break
 
         // Emit a persistent tool-summary block (UI only — not in history)
         if (toolEntries.length > 0) {
@@ -513,11 +610,35 @@ export class Agent {
    *  - content outside → streamed normally to the response bubble
    * Returns wasStreamed=true when the response was already pushed to UI and history.
    */
+  private finalizeAbortedStream(
+    responseMsgId: string,
+    responseStarted: boolean,
+    responseContent: string,
+  ): { response: null; wasStreamed: boolean; aborted: true } {
+    this.abortFlag = false
+    if (responseStarted && this.config.onUpdateMessage) {
+      const finalContent = responseContent.trim()
+      if (finalContent) {
+        this.config.onUpdateMessage(responseMsgId, finalContent, false)
+        this.conversationHistory.push({
+          id: responseMsgId,
+          role: 'assistant',
+          content: finalContent,
+          timestamp: new Date().toISOString(),
+        })
+        return { response: null, wasStreamed: true, aborted: true }
+      }
+      this.config.onUpdateMessage(responseMsgId, '', false)
+    }
+    return { response: null, wasStreamed: false, aborted: true }
+  }
+
   private async callAI(): Promise<{
     response: AIResponse | null
     wasStreamed: boolean
     assistantPreamble?: string
     preambleMessageId?: string
+    aborted?: boolean
   }> {
     // Append the live session scratchpad to the system prompt so the agent
     // always knows what it has already done this turn — even if old tool result
@@ -528,7 +649,7 @@ export class Agent {
     const scratchpadSection = this.sessionScratchpad
       ? `\n\n## Session Scratchpad — What You've Done This Turn\n${this.sessionScratchpad}\n\nDo NOT re-read files or re-run searches that are already listed above. Use their results from context.`
       : ''
-    const contextSection = this.buildActiveContextSection()
+    const contextSection = await this.buildActiveContextSection()
     const systemPrompt = getSystemPrompt(
       this.config.userProfile,
       this.getConnectorPromptSections(),
@@ -665,6 +786,9 @@ export class Agent {
       }
 
       let result = await effectiveCallAIStream(messages, tools, onToken, event => this.handleStreamProgress(event))
+      if (this.abortFlag) {
+        return this.finalizeAbortedStream(responseMsgId, responseStarted, responseContent)
+      }
       if (
         !result.success
         && useReasoning
@@ -674,6 +798,9 @@ export class Agent {
         console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
         this.setAgentStatus('Reasoning model busy — using chat model…')
         result = await this.config.callAIStream(messages, tools, onToken, event => this.handleStreamProgress(event))
+      }
+      if (this.abortFlag) {
+        return this.finalizeAbortedStream(responseMsgId, responseStarted, responseContent)
       }
       if (!result.success) throw new Error(result.error || 'AI request failed')
       const response = result.data || null
@@ -747,6 +874,10 @@ export class Agent {
 
     // ── Fallback: non-streaming ───────────────────────────────────────────────
     let result = await effectiveCallAI(messages, tools)
+    if (this.abortFlag) {
+      this.abortFlag = false
+      return { response: null, wasStreamed: false, aborted: true }
+    }
     if (
       !result.success
       && useReasoning
@@ -755,6 +886,10 @@ export class Agent {
       console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
       this.setAgentStatus('Reasoning model busy — using chat model…')
       result = await this.config.callAI(messages, tools)
+    }
+    if (this.abortFlag) {
+      this.abortFlag = false
+      return { response: null, wasStreamed: false, aborted: true }
     }
     if (!result.success) throw new Error(result.error || 'AI request failed')
     const response = result.data || null
@@ -993,11 +1128,22 @@ export class Agent {
     
     const connector = this.getConnectorForTool(name)
     if (connector) {
-      return connector.executeTool(name, args)
+      const envelope = await this.buildConnectorContextEnvelope(connector.definition.id)
+      if (this.activeContext && getEnabledConnectorIds(this.activeContext).includes(connector.definition.id)) {
+        if (!envelope) {
+          return {
+            success: false,
+            error: 'Active context is missing scope configuration for this connector.',
+          }
+        }
+      }
+      return connector.executeTool(name, args, envelope)
     } else if (name === 'report_write' || name.startsWith('file_')) {
       return this.config.executeFileTool(name, args)
     } else if (name.startsWith('memory_')) {
       return this.config.executeMemoryTool(name, args)
+    } else if (name.startsWith('context_')) {
+      return this.config.executeContextTool(name, args)
     } else if (name === 'scratchpad_write') {
       // Handled locally — append to session scratchpad
       if (this.scratchpadToolWrittenThisTurn) {
@@ -1049,9 +1195,17 @@ export class Agent {
     }
     this.pendingActions.delete(actionId)
 
-    const connectorApproval = await this.getConnectorForTool(action.type)?.definition.approveAction?.({
+    await this.syncActiveContextFromSource()
+
+    const connector = this.getConnectorForTool(action.type)
+    const contextEnvelope = connector
+      ? await this.buildConnectorContextEnvelope(connector.definition.id)
+      : undefined
+
+    const connectorApproval = await connector?.definition.approveAction?.({
       actionType: action.type,
       data: action.data,
+      contextEnvelope,
       executeTool: (name, args) => this.executeTool(name, args),
       formatToolResultForAI: (name, result) => this.formatToolResultForAI(name, result),
       updateScratchpadAfterTool: (name, args, formattedResult) => this.updateScratchpadAfterTool(name, args, formattedResult),

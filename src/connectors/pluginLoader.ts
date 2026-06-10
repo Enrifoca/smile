@@ -81,7 +81,7 @@ export function createPluginConnectorRuntime(
         manifest.id,
         input.actionType,
         input.data,
-        activeEnvelope ?? undefined,
+        input.contextEnvelope ?? activeEnvelope ?? undefined,
       )
       if (!outcome.handled) return { handled: false }
       for (const write of outcome.writes || []) {
@@ -99,18 +99,17 @@ export function createPluginConnectorRuntime(
     context: manifest,
     executeTool: (name, args, context) =>
       electron.connectors.execute(manifest.id, name, args, context ?? activeEnvelope ?? undefined),
-    setActiveContext: async envelope => {
+    setActiveContext: envelope => {
       activeEnvelope = envelope
       if (!envelope) {
         knowledge = ''
         return
       }
-      try {
-        const result = await electron.connectors.getKnowledge(envelope.contextId, manifest.id)
+      void electron.connectors.getKnowledge(envelope.contextId, manifest.id).then(result => {
         knowledge = result.success && result.data ? result.data : ''
-      } catch {
+      }).catch(() => {
         knowledge = ''
-      }
+      })
     },
   }
 }

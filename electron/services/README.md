@@ -113,6 +113,7 @@ Keep normalization in the service or connector handler, not in `src/agent`.
 | `ai.ts` | LLM providers (streaming, tools, retries) | Core agent |
 | `files.ts` | Workspace read/write/search | Core file tools |
 | `memory.ts` | `.smile/memories` persistence | Core memory tools |
+| `contexts.ts` | `.smile/contexts` portable project contexts | Context management UI + agent context tools |
 | `storage.ts` / `encryption.ts` | Settings and secure credentials | App-wide |
 | `ocr.ts` | OCR provider calls | `file_read_ocr` |
 

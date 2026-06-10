@@ -1,4 +1,5 @@
-// Jira connector handler — MCP-backed tools with result shaping and batch approval.
+// Jira connector handler — MCP-backed tools with result shaping, batch approval,
+// and per-context project scoping via host.context.get().
 
 const MCP_SERVER = 'atlassian'
 
@@ -24,6 +25,86 @@ function extractIssueKey(data) {
   const text = typeof data === 'string' ? data : JSON.stringify(data || '')
   const match = text.match(/[A-Z][A-Z0-9]+-\d+/)
   return match ? match[0] : null
+}
+
+function extractProjectKeyFromIssueKey(issueKey) {
+  const match = str(issueKey).trim().match(/^([A-Z][A-Z0-9]+)-\d+$/)
+  return match ? match[1].toUpperCase() : null
+}
+
+function normalizeProjectKey(projectKey) {
+  return str(projectKey).trim().toUpperCase()
+}
+
+/** Load allowed project keys from the active context envelope (null = no scoping). */
+async function loadProjectScope(host) {
+  const ctx = await host.context.get()
+  if (!ctx) return { allowedKeys: null }
+
+  const raw = ctx.projectKeys
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return {
+      error: 'No Jira projects are enabled for this context. Open Context settings and select at least one project.',
+    }
+  }
+
+  const allowedKeys = raw.map(normalizeProjectKey).filter(Boolean)
+  if (!allowedKeys.length) {
+    return {
+      error: 'No Jira projects are enabled for this context. Open Context settings and select at least one project.',
+    }
+  }
+
+  return { allowedKeys }
+}
+
+function isProjectAllowed(projectKey, allowedKeys) {
+  if (!allowedKeys) return true
+  const normalized = normalizeProjectKey(projectKey)
+  return normalized ? allowedKeys.includes(normalized) : false
+}
+
+/** Resolve or reject a project key against the active context scope. */
+function resolveProjectKey(requestedKey, allowedKeys) {
+  const normalized = normalizeProjectKey(requestedKey)
+
+  if (!allowedKeys) {
+    if (!normalized) return { error: 'Project key is required.' }
+    return { key: normalized }
+  }
+
+  if (normalized && isProjectAllowed(normalized, allowedKeys)) {
+    return { key: normalized }
+  }
+
+  if (normalized && !isProjectAllowed(normalized, allowedKeys)) {
+    return {
+      error: `Project "${normalized}" is not enabled for this context. Allowed: ${allowedKeys.join(', ')}.`,
+    }
+  }
+
+  if (allowedKeys.length === 1) {
+    return { key: allowedKeys[0] }
+  }
+
+  return {
+    error: `Project key is required. Allowed projects for this context: ${allowedKeys.join(', ')}.`,
+  }
+}
+
+function validateIssueKeyScope(issueKey, allowedKeys) {
+  if (!allowedKeys) return null
+  const projectKey = extractProjectKeyFromIssueKey(issueKey)
+  if (!projectKey) return `Invalid issue key: ${issueKey}`
+  if (!allowedKeys.includes(projectKey)) {
+    return `Issue ${issueKey} belongs to project ${projectKey}, which is not enabled for this context. Allowed: ${allowedKeys.join(', ')}.`
+  }
+  return null
+}
+
+function constrainJql(jql, allowedKeys) {
+  if (!allowedKeys || allowedKeys.length === 0) return jql
+  return `(${jql}) AND project in (${allowedKeys.join(', ')})`
 }
 
 function formatSearchIssues(data) {
@@ -67,9 +148,13 @@ function formatTransitions(data) {
   return lines.length ? lines.join('\n') : 'No transitions available.'
 }
 
-function formatProjects(data) {
+function formatProjects(data, allowedKeys) {
   const parsed = typeof data === 'string' ? JSON.parse(data) : data
-  const projects = parsed.values ?? (Array.isArray(parsed) ? parsed : [])
+  let projects = parsed.values ?? (Array.isArray(parsed) ? parsed : [])
+  if (allowedKeys) {
+    const allowed = new Set(allowedKeys)
+    projects = projects.filter(p => allowed.has(normalizeProjectKey(p.key)))
+  }
   const lines = projects.map(p => `- ${p.key}: ${p.name}`)
   return lines.length ? lines.join('\n') : 'No projects found.'
 }
@@ -97,7 +182,7 @@ function shapeToolResult(name, result) {
     try { return { success: true, data: formatTransitions(data) } } catch { /* fall through */ }
   }
   if (name === 'jira_get_projects') {
-    try { return { success: true, data: formatProjects(data) } } catch { /* fall through */ }
+    try { return { success: true, data: result.formattedProjects ?? formatProjects(data) } } catch { /* fall through */ }
   }
 
   if (typeof data === 'string') return { success: true, data }
@@ -109,13 +194,16 @@ async function mcp(host, toolName, args) {
   return host.mcp.call(MCP_SERVER, toolName, args)
 }
 
-async function createIssue(host, args) {
-  const projectKey = str(args.projectKey || args.project)
+async function createIssue(host, args, allowedKeys) {
+  const resolution = resolveProjectKey(args.projectKey || args.project, allowedKeys)
+  if (resolution.error) return { success: false, error: resolution.error }
+
+  const projectKey = resolution.key
   const issueTypeName = str(args.issueTypeName || args.issueType)
   const summary = str(args.summary)
   const description = args.description ? str(args.description) : undefined
-  if (!projectKey || !issueTypeName || !summary) {
-    return { success: false, error: 'Project key, issue type, and summary are required.' }
+  if (!issueTypeName || !summary) {
+    return { success: false, error: 'Issue type and summary are required.' }
   }
 
   const reserved = new Set(['projectKey', 'project', 'issueTypeName', 'issueType', 'summary', 'description'])
@@ -130,11 +218,16 @@ async function createIssue(host, args) {
 }
 
 async function executeTool(name, args, host) {
+  const scope = await loadProjectScope(host)
+  if (scope.error) return { success: false, error: scope.error }
+  const allowedKeys = scope.allowedKeys
+
   switch (name) {
     case 'jira_search_issues': {
       const jql = str(args.jql)
       if (!jql) return { success: false, error: 'JQL query is required.' }
-      const mcpArgs = { jql, maxResults: Number(args.maxResults) || 20 }
+      const scopedJql = constrainJql(jql, allowedKeys)
+      const mcpArgs = { jql: scopedJql, maxResults: Number(args.maxResults) || 20 }
       if (Array.isArray(args.fields)) mcpArgs.fields = args.fields
       else if (typeof args.fields === 'string' && args.fields.trim()) {
         mcpArgs.fields = args.fields.split(',').map(f => f.trim()).filter(Boolean)
@@ -144,18 +237,26 @@ async function executeTool(name, args, host) {
     case 'jira_get_issue': {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
       if (!issueIdOrKey) return { success: false, error: 'Issue key is required.' }
+      const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
+      if (issueScopeError) return { success: false, error: issueScopeError }
       return shapeToolResult(name, await mcp(host, 'getJiraIssue', { issueIdOrKey }))
     }
-    case 'jira_get_projects':
-      return shapeToolResult(name, await mcp(host, 'getVisibleJiraProjects', {}))
+    case 'jira_get_projects': {
+      const raw = await mcp(host, 'getVisibleJiraProjects', {})
+      if (!raw.success) return shapeToolResult(name, raw)
+      const formattedProjects = formatProjects(raw.data, allowedKeys)
+      return shapeToolResult(name, { ...raw, formattedProjects })
+    }
     case 'jira_get_issue_types': {
-      const projectIdOrKey = str(args.projectIdOrKey || args.projectKey)
-      if (!projectIdOrKey) return { success: false, error: 'Project key is required.' }
-      return shapeToolResult(name, await mcp(host, 'getJiraProjectIssueTypesMetadata', { projectIdOrKey }))
+      const resolution = resolveProjectKey(args.projectIdOrKey || args.projectKey, allowedKeys)
+      if (resolution.error) return { success: false, error: resolution.error }
+      return shapeToolResult(name, await mcp(host, 'getJiraProjectIssueTypesMetadata', { projectIdOrKey: resolution.key }))
     }
     case 'jira_get_transitions': {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
       if (!issueIdOrKey) return { success: false, error: 'Issue key is required.' }
+      const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
+      if (issueScopeError) return { success: false, error: issueScopeError }
       return shapeToolResult(name, await mcp(host, 'getTransitionsForJiraIssue', { issueIdOrKey }))
     }
     case 'jira_lookup_user': {
@@ -164,10 +265,12 @@ async function executeTool(name, args, host) {
       return shapeToolResult(name, await mcp(host, 'lookupJiraAccountId', { searchString }))
     }
     case 'jira_create_issue':
-      return shapeToolResult(name, await createIssue(host, args))
+      return shapeToolResult(name, await createIssue(host, args, allowedKeys))
     case 'jira_update_issue': {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
       if (!issueIdOrKey) return { success: false, error: 'Issue key is required.' }
+      const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
+      if (issueScopeError) return { success: false, error: issueScopeError }
       const { issueKey: _ik, issueIdOrKey: _iok, ...rest } = args
       return shapeToolResult(name, await mcp(host, 'editJiraIssue', { issueIdOrKey, ...rest }))
     }
@@ -175,18 +278,24 @@ async function executeTool(name, args, host) {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
       const commentBody = str(args.body || args.comment || args.commentBody)
       if (!issueIdOrKey || !commentBody) return { success: false, error: 'Issue key and body are required.' }
+      const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
+      if (issueScopeError) return { success: false, error: issueScopeError }
       return shapeToolResult(name, await mcp(host, 'addCommentToJiraIssue', { issueIdOrKey, commentBody }))
     }
     case 'jira_transition_issue': {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
       const transitionId = str(args.transitionId)
       if (!issueIdOrKey || !transitionId) return { success: false, error: 'Issue key and transition ID are required.' }
+      const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
+      if (issueScopeError) return { success: false, error: issueScopeError }
       return shapeToolResult(name, await mcp(host, 'transitionJiraIssue', { issueIdOrKey, transitionId }))
     }
     case 'jira_upload_attachment': {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
       const filePath = str(args.filePath)
       if (!issueIdOrKey || !filePath) return { success: false, error: 'Issue key and file path are required.' }
+      const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
+      if (issueScopeError) return { success: false, error: issueScopeError }
       const result = await host.call('jira.uploadAttachment', { issueKey: issueIdOrKey, filePath })
       return shapeToolResult(name, result)
     }
@@ -198,13 +307,18 @@ async function executeTool(name, args, host) {
 async function approveAction(actionType, data, host) {
   if (actionType !== 'jira_batch_create_issues') return { handled: false }
 
+  const scope = await loadProjectScope(host)
+  if (scope.error) {
+    return { handled: true, message: scope.error, resumeAgent: false, writes: [] }
+  }
+
   const issues = data.issues || []
   const writes = []
   const created = []
   const failed = []
 
   for (const issue of issues) {
-    const raw = await createIssue(host, issue)
+    const raw = await createIssue(host, issue, scope.allowedKeys)
     const shaped = shapeToolResult('jira_create_issue', raw)
     writes.push({ name: 'jira_create_issue', args: issue, result: shaped })
 

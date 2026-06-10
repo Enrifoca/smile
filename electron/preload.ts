@@ -124,6 +124,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.send('ai:reasoning:stream', messages, tools)
       })
     },
+    abortStream: () => ipcRenderer.send('ai:abortStream'),
   },
 
   // MCP connection (OAuth / session lifecycle only; tool calls go through connector sandbox)
@@ -163,8 +164,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Project contexts (Context management)
   contexts: {
     list: () => ipcRenderer.invoke('contexts:list'),
+    create: (name: string) => ipcRenderer.invoke('contexts:create', name),
     save: (context: ProjectContext) => ipcRenderer.invoke('contexts:save', context),
     delete: (contextId: string) => ipcRenderer.invoke('contexts:delete', contextId),
+    readMarkdown: (contextId: string) => ipcRenderer.invoke('contexts:readMarkdown', contextId),
+    getPromptBody: (contextId: string) => ipcRenderer.invoke('contexts:getPromptBody', contextId),
+    appendSection: (contextId: string, section: string, content: string) =>
+      ipcRenderer.invoke('contexts:appendSection', contextId, section, content),
+    replaceSection: (contextId: string, heading: string, content: string) =>
+      ipcRenderer.invoke('contexts:replaceSection', contextId, heading, content),
   },
 
   // Memory
@@ -302,8 +310,17 @@ export interface ElectronAPI {
   }
   contexts: {
     list: () => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
+    create: (name: string) => Promise<{ success: boolean; data?: ProjectContext[]; context?: ProjectContext; error?: string }>
     save: (context: ProjectContext) => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
     delete: (contextId: string) => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
+    readMarkdown: (contextId: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    getPromptBody: (contextId: string) => Promise<{
+      success: boolean
+      data?: import('../context/promptInjection').ContextPromptBody
+      error?: string
+    }>
+    appendSection: (contextId: string, section: string, content: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    replaceSection: (contextId: string, heading: string, content: string) => Promise<{ success: boolean; data?: string; error?: string }>
   }
   memory: {
     getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>

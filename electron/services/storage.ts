@@ -49,6 +49,9 @@ interface StorageSchema {
   /** Globally active project context id, or null. */
   activeContextId: string | null
 
+  /** When false, skip Atlassian MCP auto-connect until the user connects again manually. */
+  atlassianMcpAutoConnect: boolean | null
+
   // Prompt-ready connector knowledge cached per context+connector.
   // Key: `${contextId}:${connectorId}` → Markdown.
   connectorKnowledge: Record<string, string>
@@ -100,6 +103,7 @@ export class StorageService {
         modelCatalog: null,
         contexts: [],
         activeContextId: null,
+        atlassianMcpAutoConnect: null,
         connectorKnowledge: {},
         'encrypted:aiConfig': '',
         'encrypted:ocrConfig': ''

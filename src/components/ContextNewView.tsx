@@ -1,16 +1,42 @@
-import { useMemo } from 'react'
+import { useState } from 'react'
 
-import type { ProjectContext } from '../context/types'
-import { blankContext, ContextEditorForm } from './context/ContextEditorForm'
+import { useElectron } from '../hooks/useElectron'
+import { Alert, Button, Field, Input } from './ui'
 
 interface ContextNewViewProps {
-  onContextsChange: (contexts: ProjectContext[]) => void
+  onContextsChange: (contexts: import('../context/types').ProjectContext[]) => void
   onOpenContext: (contextId: string) => void
   onCancel: () => void
 }
 
 export default function ContextNewView({ onContextsChange, onOpenContext, onCancel }: ContextNewViewProps) {
-  const draft = useMemo(() => blankContext(), [])
+  const { contexts: contextsAPI } = useElectron()
+  const [name, setName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleCreate() {
+    const trimmed = name.trim()
+    if (!trimmed) return
+
+    setCreating(true)
+    setError(null)
+    try {
+      const result = await contextsAPI.create(trimmed)
+      if (result.success && result.data) {
+        onContextsChange(result.data)
+        const created = result.context ?? result.data[result.data.length - 1]
+        if (created) onOpenContext(created.id)
+        else onCancel()
+      } else if (result.error) {
+        setError(result.error)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create context')
+    } finally {
+      setCreating(false)
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto bg-white">
@@ -18,20 +44,38 @@ export default function ContextNewView({ onContextsChange, onOpenContext, onCanc
         <div>
           <h1 className="text-xl font-medium text-neutral-950">New context</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Define a project scope with an optional working folder and connector settings.
+            Enter a name to create a portable context folder under <code className="text-xs">.smile/contexts/</code>.
           </p>
         </div>
 
-        <ContextEditorForm
-          initial={draft}
-          onSaved={contexts => {
-            onContextsChange(contexts)
-            const created = contexts[contexts.length - 1]
-            if (created) onOpenContext(created.id)
-            else onCancel()
-          }}
-          onCancel={onCancel}
-        />
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <Field label="Name" hint="Used for the folder and context files (e.g. acme → acme.json, acme.md)">
+            <Input
+              value={name}
+              placeholder="e.g. Acme Website"
+              autoFocus
+              onChange={event => setName(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') void handleCreate()
+              }}
+            />
+          </Field>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button onClick={() => void handleCreate()} loading={creating} disabled={!name.trim()}>
+              Create context
+            </Button>
+            <Button variant="secondary" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+
+          {error && (
+            <div className="mt-4">
+              <Alert>{error}</Alert>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

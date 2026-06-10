@@ -34,7 +34,8 @@
     "properties": {
       "projectKeys": {
         "type": "array",
-        "description": "Jira project keys to scope this context (e.g. ACME, WEB)"
+        "title": "Projects",
+        "description": "Jira project keys scoped to this context (comma-separated, e.g. ACME, WEB). The connector enforces this list on every tool call."
       }
     }
   },
