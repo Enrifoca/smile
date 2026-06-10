@@ -102,6 +102,7 @@ export function useElectron() {
     onToken: (token: string) => void,
     onProgress?: (event: { toolName: string; title?: string }) => void,
   ) => api.ai.chatReasoningStream(messages, tools, onToken, onProgress), [])
+  const aiAbortStream = useCallback(() => api.ai.abortStream(), [])
   const ai = useMemo(
     () => ({
       configure: aiConfigure,
@@ -112,8 +113,9 @@ export function useElectron() {
       chatReasoning: aiChatReasoning,
       chatStream: aiChatStream,
       chatReasoningStream: aiChatReasoningStream,
+      abortStream: aiAbortStream,
     }),
-    [aiConfigure, aiConfigureReasoning, aiConfigurePlanner, aiPlan, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream],
+    [aiConfigure, aiConfigureReasoning, aiConfigurePlanner, aiPlan, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream, aiAbortStream],
   )
 
   const shellOpenExternal = useCallback(async (url: string) => api.shell.openExternal(url), [])
@@ -170,11 +172,34 @@ export function useElectron() {
   )
 
   const contextsList = useCallback(async () => api.contexts.list(), [])
+  const contextsCreate = useCallback(async (name: string) => api.contexts.create(name), [])
   const contextsSave = useCallback(async (context: import('../context/types').ProjectContext) => api.contexts.save(context), [])
   const contextsDelete = useCallback(async (contextId: string) => api.contexts.delete(contextId), [])
+  const contextsReadMarkdown = useCallback(async (contextId: string) => api.contexts.readMarkdown(contextId), [])
+  const contextsGetPromptBody = useCallback(async (contextId: string) => api.contexts.getPromptBody(contextId), [])
+  const contextsAppendSection = useCallback(async (contextId: string, section: string, content: string) => api.contexts.appendSection(contextId, section, content), [])
+  const contextsReplaceSection = useCallback(async (contextId: string, heading: string, content: string) => api.contexts.replaceSection(contextId, heading, content), [])
   const contexts = useMemo(
-    () => ({ list: contextsList, save: contextsSave, delete: contextsDelete }),
-    [contextsList, contextsSave, contextsDelete],
+    () => ({
+      list: contextsList,
+      create: contextsCreate,
+      save: contextsSave,
+      delete: contextsDelete,
+      readMarkdown: contextsReadMarkdown,
+      getPromptBody: contextsGetPromptBody,
+      appendSection: contextsAppendSection,
+      replaceSection: contextsReplaceSection,
+    }),
+    [
+      contextsList,
+      contextsCreate,
+      contextsSave,
+      contextsDelete,
+      contextsReadMarkdown,
+      contextsGetPromptBody,
+      contextsAppendSection,
+      contextsReplaceSection,
+    ],
   )
 
   const memoryGetAll = useCallback(async () => api.memory.getAll(), [])

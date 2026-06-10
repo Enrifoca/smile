@@ -10,6 +10,8 @@ export interface MarkdownArtifactModalProps {
   loading?: boolean
   error?: string | null
   onClose: () => void
+  /** When false, hides the download menu (e.g. context knowledge viewer). */
+  showDownload?: boolean
 }
 
 const DownloadIcon = () => (
@@ -24,6 +26,7 @@ export function MarkdownArtifactModal({
   loading = false,
   error = null,
   onClose,
+  showDownload = true,
 }: MarkdownArtifactModalProps) {
   const [downloadOpen, setDownloadOpen] = useState(false)
   const downloadRef = useRef<HTMLDivElement>(null)
@@ -56,45 +59,47 @@ export function MarkdownArtifactModal({
             <p className="ui-artifact-modal-path">{artifact.path}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div className="relative" ref={downloadRef}>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!canDownload}
-                onClick={() => setDownloadOpen(open => !open)}
-                aria-expanded={downloadOpen}
-                aria-haspopup="menu"
-              >
-                <DownloadIcon />
-                Download
-              </Button>
-              {downloadOpen && canDownload ? (
-                <div className="ui-download-popover" role="menu">
-                  <button
-                    type="button"
-                    className="ui-download-popover-item"
-                    role="menuitem"
-                    onClick={() => {
-                      exportReportAsPdf(content || '', artifact.title, artifact.path)
-                      setDownloadOpen(false)
-                    }}
-                  >
-                    PDF
-                  </button>
-                  <button
-                    type="button"
-                    className="ui-download-popover-item"
-                    role="menuitem"
-                    onClick={() => {
-                      exportReportAsDoc(content || '', artifact.title, artifact.path)
-                      setDownloadOpen(false)
-                    }}
-                  >
-                    .doc
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            {showDownload ? (
+              <div className="relative" ref={downloadRef}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canDownload}
+                  onClick={() => setDownloadOpen(open => !open)}
+                  aria-expanded={downloadOpen}
+                  aria-haspopup="menu"
+                >
+                  <DownloadIcon />
+                  Download
+                </Button>
+                {downloadOpen && canDownload ? (
+                  <div className="ui-download-popover" role="menu">
+                    <button
+                      type="button"
+                      className="ui-download-popover-item"
+                      role="menuitem"
+                      onClick={() => {
+                        exportReportAsPdf(content || '', artifact.title, artifact.path)
+                        setDownloadOpen(false)
+                      }}
+                    >
+                      PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-download-popover-item"
+                      role="menuitem"
+                      onClick={() => {
+                        exportReportAsDoc(content || '', artifact.title, artifact.path)
+                        setDownloadOpen(false)
+                      }}
+                    >
+                      .doc
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <Button variant="ghost" size="sm" onClick={onClose}>
               Close
             </Button>

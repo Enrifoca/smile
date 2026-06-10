@@ -14,6 +14,7 @@ import type { ContextEnvelope, ToolResult } from '../src/connectors/contract'
 import { normalizeMcpResult } from '../src/connectors/contract'
 import type { ProjectContext } from '../src/context/types'
 import { getMemoryService, MemoryService } from './services/memory'
+import { getContextService, ContextService } from './services/contexts'
 import { getSourceMemoryService } from './services/sourceMemory'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
 
@@ -26,6 +27,7 @@ let mcpService: AtlassianMCPService | null = null
 let jiraAttachmentService: JiraAttachmentService | null = null
 let modelCatalogService: ModelCatalogService | null = null
 let connectorsService: ConnectorsService | null = null
+let contextService: ContextService | null = null
 
 /** A connected MCP server that can answer generic tool calls from connectors. */
 interface McpServerHandle {
@@ -71,6 +73,27 @@ async function uploadJiraAttachmentFromWorkspace(issueKey: string, filePath: str
   return jiraAttachmentService.uploadAttachment(issueKey, fullPath)
 }
 
+function ensureContextService(): ContextService {
+  contextService = getContextService()
+  const workspace = storageService.getWorkspacePath()
+  if (workspace) contextService.setWorkspace(workspace)
+  return contextService
+}
+
+function listContextsWithMigration(): ProjectContext[] {
+  const service = ensureContextService()
+  const workspace = storageService.getWorkspacePath()
+  if (!workspace) return []
+
+  const legacy = storageService.getContexts()
+  if (legacy.length > 0) {
+    service.migrateLegacyContexts(legacy)
+    storageService.set('contexts', [])
+  }
+
+  return service.list()
+}
+
 /** Lazily construct the connector runtime with its capability broker dependencies. */
 function getConnectorsService(): ConnectorsService {
   if (!connectorsService) {
@@ -81,6 +104,10 @@ function getConnectorsService(): ConnectorsService {
           return fileService.readFile(relativePath) as Promise<{ success: boolean; data?: string; error?: string }>
         },
         mcpCall: async (serverId: string, toolName: string, args: Record<string, unknown>) => {
+          if (serverId === 'atlassian') {
+            const blocked = await ensureAtlassianMcpConnected()
+            if (blocked) return blocked
+          }
           const raw = await resolveMcpServer(serverId).callRawTool(toolName, args)
           return normalizeMcpResult(raw)
         },
@@ -232,6 +259,7 @@ async function initializeServices() {
     memoryService.setWorkspace(workspace)
     getSourceMemoryService().setWorkspace(workspace)
     getConnectorsService().setWorkspace(workspace)
+    ensureContextService()
   }
 
   void modelCatalogService.refreshAll().catch(error => {
@@ -276,6 +304,62 @@ function sendMcpConnectionState(state: typeof mcpConnectionState, error?: string
   }
 }
 
+async function connectAtlassianMcp(options?: { forceReauth?: boolean }): Promise<{ success: boolean; error?: string }> {
+  stopMcpKeepAlive()
+  sendMcpConnectionState('connecting')
+  mcpService = getAtlassianMCPService()
+  attachMcpServiceListeners(mcpService)
+  const result = await mcpService.connect({ forceReauth: options?.forceReauth ?? false })
+  if (result.success) {
+    storageService.set('atlassianMcpAutoConnect', true)
+    sendMcpConnectionState('connected')
+    startMcpKeepAlive()
+  } else {
+    sendMcpConnectionState('error', result.error)
+  }
+  return result
+}
+
+/** Reconnect using stored OAuth when the proxy was stopped (app restart) but tokens remain on disk. */
+async function ensureAtlassianMcpConnected(): Promise<ToolResult | null> {
+  const service = getAtlassianMCPService()
+  if (service.getConnectionStatus()) return null
+
+  if (!service.hasStoredAuth()) {
+    return {
+      success: false,
+      error: 'Atlassian MCP is not connected. Open Connectors → Jira and connect your account.',
+    }
+  }
+
+  console.log('[MCP] Restoring Atlassian session from stored OAuth')
+  const result = await connectAtlassianMcp()
+  if (!result.success) {
+    return { success: false, error: result.error || 'Failed to connect to Atlassian MCP' }
+  }
+  return null
+}
+
+async function autoConnectAtlassianMcpOnStartup(): Promise<void> {
+  const service = getAtlassianMCPService()
+  if (storageService.get('atlassianMcpAutoConnect') === false) {
+    console.log('[MCP] User disconnected Atlassian MCP — skipping auto-connect')
+    return
+  }
+  if (!service.hasStoredAuth()) {
+    console.log('[MCP] No stored Atlassian OAuth session — skipping auto-connect')
+    return
+  }
+  if (service.getConnectionStatus()) return
+
+  console.log('[MCP] Auto-connecting Atlassian MCP from stored OAuth')
+  const result = await connectAtlassianMcp()
+  if (!result.success) {
+    console.warn('[MCP] Auto-connect failed:', result.error)
+    sendMcpConnectionState('disconnected')
+  }
+}
+
 // Start keep-alive interval
 function startMcpKeepAlive() {
   // Clear any existing interval
@@ -300,10 +384,9 @@ function startMcpKeepAlive() {
       sendMcpConnectionState('connecting')
       
       try {
-        const result = await mcpService.connect()
+        const result = await connectAtlassianMcp()
         if (result.success) {
           console.log('[MCP] Keep-alive: Reconnected successfully')
-          sendMcpConnectionState('connected')
         } else {
           console.log('[MCP] Keep-alive: Reconnect failed:', result.error)
           sendMcpConnectionState('error', result.error)
@@ -401,6 +484,7 @@ ipcMain.handle('file:selectWorkspace', async () => {
     memoryService.setWorkspace(workspacePath)
     getSourceMemoryService().setWorkspace(workspacePath)
     getConnectorsService().setWorkspace(workspacePath)
+    ensureContextService()
     return { success: true, path: workspacePath }
   }
   return { success: false }
@@ -592,6 +676,11 @@ ipcMain.on('ai:chat:stream', async (event, messages: Array<{ role: 'system' | 'u
   }
 })
 
+ipcMain.on('ai:abortStream', () => {
+  aiService?.abortStream()
+  reasoningAiService?.abortStream()
+})
+
 // Streaming version for the reasoning model
 ipcMain.on('ai:reasoning:stream', async (event, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => {
   if (!reasoningAiService) {
@@ -628,18 +717,7 @@ ipcMain.on('ai:reasoning:stream', async (event, messages: Array<{ role: 'system'
 
 ipcMain.handle('mcp:connect', async (_, options?: { forceReauth?: boolean }) => {
   try {
-    stopMcpKeepAlive()
-    sendMcpConnectionState('connecting')
-    mcpService = getAtlassianMCPService()
-    attachMcpServiceListeners(mcpService)
-    const result = await mcpService.connect({ forceReauth: options?.forceReauth ?? false })
-    if (result.success) {
-      sendMcpConnectionState('connected')
-      startMcpKeepAlive()
-    } else {
-      sendMcpConnectionState('error', result.error)
-    }
-    return result
+    return await connectAtlassianMcp(options)
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'MCP connection failed'
     sendMcpConnectionState('error', errorMsg)
@@ -649,6 +727,7 @@ ipcMain.handle('mcp:connect', async (_, options?: { forceReauth?: boolean }) => 
 
 ipcMain.handle('mcp:disconnect', async () => {
   stopMcpKeepAlive()
+  storageService.set('atlassianMcpAutoConnect', false)
   sendMcpConnectionState('disconnected')
   if (mcpService) {
     await mcpService.disconnect()
@@ -761,7 +840,20 @@ ipcMain.handle('connectors:getBundledIcon', async (_, connectorId: string) => {
 // Project contexts (Context management)
 ipcMain.handle('contexts:list', async () => {
   try {
-    return { success: true, data: storageService.getContexts() }
+    return { success: true, data: listContextsWithMigration() }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:create', async (_, name: string) => {
+  try {
+    const service = ensureContextService()
+    if (!storageService.getWorkspacePath()) {
+      return { success: false, error: 'Workspace not configured' }
+    }
+    const created = service.create(name)
+    return { success: true, data: listContextsWithMigration(), context: created }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -769,7 +861,9 @@ ipcMain.handle('contexts:list', async () => {
 
 ipcMain.handle('contexts:save', async (_, context: ProjectContext) => {
   try {
-    return { success: true, data: storageService.saveContext(context) }
+    const service = ensureContextService()
+    service.update(context)
+    return { success: true, data: listContextsWithMigration() }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -777,7 +871,47 @@ ipcMain.handle('contexts:save', async (_, context: ProjectContext) => {
 
 ipcMain.handle('contexts:delete', async (_, contextId: string) => {
   try {
-    return { success: true, data: storageService.deleteContext(contextId) }
+    const service = ensureContextService()
+    service.delete(contextId)
+    return { success: true, data: listContextsWithMigration() }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:readMarkdown', async (_, contextId: string) => {
+  try {
+    const service = ensureContextService()
+    return { success: true, data: service.readMarkdown(contextId) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:getPromptBody', async (_, contextId: string) => {
+  try {
+    const service = ensureContextService()
+    return { success: true, data: service.getPromptBody(contextId) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:appendSection', async (_, contextId: string, section: string, content: string) => {
+  try {
+    const service = ensureContextService()
+    const markdown = service.appendSection(contextId, section, content)
+    return { success: true, data: markdown }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:replaceSection', async (_, contextId: string, heading: string, content: string) => {
+  try {
+    const service = ensureContextService()
+    const markdown = service.replaceSection(contextId, heading, content)
+    return { success: true, data: markdown }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -1039,6 +1173,7 @@ ipcMain.handle('memory:listSources', async () => {
 // App lifecycle
 app.whenReady().then(async () => {
   await initializeServices()
+  void autoConnectAtlassianMcpOnStartup()
   createWindow()
 
   app.on('activate', () => {

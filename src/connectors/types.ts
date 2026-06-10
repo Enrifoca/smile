@@ -11,6 +11,7 @@ export type ToolCategory =
   | 'file-manage'
   | 'memory'
   | 'scratchpad'
+  | 'context'
 
 export interface ToolDefinition {
   name: string
@@ -50,6 +51,7 @@ export interface ConnectorDefinition<TContext = unknown> {
   approveAction?: (input: {
     actionType: string
     data: Record<string, unknown>
+    contextEnvelope?: ContextEnvelope
     executeTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
     formatToolResultForAI: (name: string, result: unknown) => string
     updateScratchpadAfterTool: (name: string, args: Record<string, unknown>, formattedResult: string) => void

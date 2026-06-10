@@ -1,5 +1,6 @@
 import { app, utilityProcess, UtilityProcess } from 'electron'
 import { spawn } from 'child_process'
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import {
@@ -30,6 +31,10 @@ const CALL_TIMEOUT_MS = 60_000
 const CLI_TIMEOUT_MS = 30_000
 const CLI_MAX_OUTPUT_BYTES = 512 * 1024
 const RESERVED_CONNECTOR_IDS = new Set<string>()
+
+function hashHandlerSource(source: string | undefined): string {
+  return crypto.createHash('sha256').update(source ?? '').digest('hex')
+}
 
 function isCliCommandAllowed(executable: string, allowlist: string[]): boolean {
   const trimmed = executable.trim()
@@ -98,6 +103,7 @@ interface SandboxInstance {
   pendingCalls: Map<string, PendingCall>
   /** Active context envelope per in-flight call, used to resolve host.context.*. */
   contextByCall: Map<string, ContextEnvelope>
+  handlerSourceHash: string
 }
 
 export class ConnectorsService {
@@ -348,10 +354,15 @@ export class ConnectorsService {
       : connectorOrId
 
     const connectorId = connector.manifest.id
+    const handlerSourceHash = hashHandlerSource(connector.handlerSource)
     const existing = this.sandboxes.get(connectorId)
     if (existing) {
-      await existing.ready
-      return existing
+      if (existing.handlerSourceHash !== handlerSourceHash) {
+        await this.shutdownConnector(connectorId)
+      } else {
+        await existing.ready
+        return existing
+      }
     }
 
     if (!connector.handlerSource) {
@@ -367,7 +378,7 @@ export class ConnectorsService {
       markReady = resolve
     })
 
-    const instance: SandboxInstance = { proc, connector, ready, pendingCalls, contextByCall }
+    const instance: SandboxInstance = { proc, connector, ready, pendingCalls, contextByCall, handlerSourceHash }
     this.sandboxes.set(connectorId, instance)
 
     proc.on('message', (message: SandboxToHostMessage) => {

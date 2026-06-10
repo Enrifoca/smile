@@ -69,6 +69,7 @@ export interface ElectronAPI {
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
       error?: string
     }>
+    abortStream: () => void
   }
   mcp: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
@@ -117,12 +118,34 @@ export interface ElectronAPI {
   }
   contexts: {
     list: () => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>
+    create: (name: string) => Promise<{
+      success: boolean
+      data?: import('../context/types').ProjectContext[]
+      context?: import('../context/types').ProjectContext
+      error?: string
+    }>
     save: (
       context: import('../context/types').ProjectContext,
     ) => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>
     delete: (
       contextId: string,
     ) => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>
+    readMarkdown: (contextId: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    getPromptBody: (contextId: string) => Promise<{
+      success: boolean
+      data?: import('../context/promptInjection').ContextPromptBody
+      error?: string
+    }>
+    appendSection: (
+      contextId: string,
+      section: string,
+      content: string,
+    ) => Promise<{ success: boolean; data?: string; error?: string }>
+    replaceSection: (
+      contextId: string,
+      heading: string,
+      content: string,
+    ) => Promise<{ success: boolean; data?: string; error?: string }>
   }
   memory: {
     getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>

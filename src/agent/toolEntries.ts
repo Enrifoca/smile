@@ -39,6 +39,12 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
       return { tool: name, label: `Deleted memory matching "${str(args.query)}"`, group: 'memory' }
     case 'scratchpad_write':
       return { tool: name, label: 'Updated scratchpad', group: 'memory' }
+    case 'context_read':
+      return { tool: name, label: 'Read project context', group: 'memory' }
+    case 'context_append':
+      return { tool: name, label: `Added to context: ${str(args.section)}`, group: 'memory' }
+    case 'context_replace_section':
+      return { tool: name, label: `Updated context: ${str(args.heading)}`, group: 'memory' }
     default:
       return { tool: name, label: name, group: 'file' }
   }

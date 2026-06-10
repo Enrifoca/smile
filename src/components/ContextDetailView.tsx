@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 
 import { useElectron } from '../hooks/useElectron'
-import { Spinner } from './ui'
+import { Alert, Button, Spinner } from './ui'
 import type { ProjectContext } from '../context/types'
-import { ContextEditorForm } from './context/ContextEditorForm'
+import { ContextConnectorsPanel } from './context/ContextConnectorsPanel'
+import { ContextKnowledgeCard } from './context/ContextKnowledgeCard'
 
 interface ContextDetailViewProps {
   contextId: string
@@ -23,6 +24,8 @@ export default function ContextDetailView({
   const { contexts: contextsAPI } = useElectron()
   const [context, setContext] = useState<ProjectContext | null>(null)
   const [loading, setLoading] = useState(true)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -41,6 +44,25 @@ export default function ContextDetailView({
       active = false
     }
   }, [contextId, contextsAPI])
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError(null)
+    try {
+      const result = await contextsAPI.delete(contextId)
+      if (result.success) {
+        if (activeContextId === contextId) onActiveContextChange(null)
+        if (result.data) onContextsChange(result.data)
+        onBack()
+      } else if (result.error) {
+        setError(result.error)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete context')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -64,29 +86,34 @@ export default function ContextDetailView({
   return (
     <div className="h-full overflow-y-auto bg-white">
       <div className="content-shell page-shell space-y-6">
-        <div>
-          <h1 className="text-xl font-medium text-neutral-950">{context.name || 'Context'}</h1>
-          <p className="mt-1 text-sm text-neutral-500">
-            Manage folder scope and connector configuration for this project context.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-medium text-neutral-950">{context.name}</h1>
+            <p className="mt-1 text-sm text-neutral-500">
+              Enable connectors and configure scope for this project context.
+            </p>
+          </div>
+          <Button variant="danger" onClick={() => void handleDelete()} loading={deleting}>
+            Delete context
+          </Button>
         </div>
 
-        <ContextEditorForm
-          initial={context}
+        <ContextKnowledgeCard
+          contextId={context.id}
+          contextName={context.name}
+          slug={context.slug}
+        />
+
+        <ContextConnectorsPanel
+          context={context}
           onSaved={contexts => {
             onContextsChange(contexts)
             const updated = contexts.find(item => item.id === contextId)
             if (updated) setContext(updated)
           }}
-          onCancel={onBack}
-          onDeleted={() => {
-            if (activeContextId === contextId) onActiveContextChange(null)
-            void contextsAPI.list().then(result => {
-              if (result.success && result.data) onContextsChange(result.data)
-            })
-            onBack()
-          }}
         />
+
+        {error && <Alert>{error}</Alert>}
       </div>
     </div>
   )

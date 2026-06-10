@@ -524,13 +524,33 @@ export default function Sidebar({
                     >
                       {context.name}
                     </button>
-                    <Toggle
-                      checked={isActive}
-                      onChange={event => handleContextToggle(context.id, event.target.checked)}
-                      label={`Activate ${context.name}`}
-                      className="ui-toggle--compact shrink-0"
-                      onClick={event => event.stopPropagation()}
-                    />
+                    <div
+                      className="ui-sidebar-context-toggle-cell"
+                      role="switch"
+                      aria-checked={isActive}
+                      aria-label={`Activate ${context.name}`}
+                      tabIndex={0}
+                      onClick={event => {
+                        event.stopPropagation()
+                        handleContextToggle(context.id, !isActive)
+                      }}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          handleContextToggle(context.id, !isActive)
+                        }
+                      }}
+                    >
+                      <Toggle
+                        checked={isActive}
+                        onChange={event => handleContextToggle(context.id, event.target.checked)}
+                        label={`Activate ${context.name}`}
+                        className="ui-toggle--compact shrink-0 pointer-events-none"
+                        tabIndex={-1}
+                        aria-hidden
+                      />
+                    </div>
                   </div>
                 )
               })}
