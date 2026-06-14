@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Message, ToolEntry } from '../agent/types'
+import { summariseToolEntries } from '../agent/toolSummary'
 import { MarkdownArtifactCard } from './chat/artifacts'
 
 interface ChatMessageProps {
@@ -34,30 +35,7 @@ function formatThinkingTime(ms: number): string {
 
 /** Compute the collapsed summary label from a list of tool entries */
 function summariseEntries(entries: ToolEntry[]): string {
-  const count = (fn: (e: ToolEntry) => boolean) => entries.filter(fn).length
-  const fileReads   = count(e => ['file_read', 'file_read_ocr', 'file_list'].includes(e.tool))
-  const fileSearch  = count(e => e.tool === 'file_search')
-  const connectorReads = count(e => e.group !== 'file' && e.group !== 'memory' && !e.tool.includes('create') && !e.tool.includes('update') && !e.tool.includes('comment') && !e.tool.includes('transition') && !e.tool.includes('upload'))
-  const connectorWrites = count(e => e.group !== 'file' && e.group !== 'memory' && (e.tool.includes('create') || e.tool.includes('update') || e.tool.includes('comment') || e.tool.includes('transition') || e.tool.includes('upload')))
-  const fileWrite   = count(e => ['file_write', 'report_write', 'file_mkdir'].includes(e.tool))
-  const memRead     = count(e => e.tool === 'memory_read')
-  const memWrite    = count(e => e.tool === 'memory_update')
-  const memDelete   = count(e => e.tool === 'memory_delete')
-
-  const parts: string[] = []
-  if (fileReads > 0 || fileSearch > 0) {
-    const pieces: string[] = []
-    if (fileReads > 0)  pieces.push(`${fileReads} file${fileReads > 1 ? 's' : ''}`)
-    if (fileSearch > 0) pieces.push(`${fileSearch} search${fileSearch > 1 ? 'es' : ''}`)
-    parts.push(`Explored ${pieces.join(', ')}`)
-  }
-  if (connectorReads > 0) parts.push(`${connectorReads} connector read${connectorReads > 1 ? 's' : ''}`)
-  if (connectorWrites > 0) parts.push(`${connectorWrites} connector update${connectorWrites > 1 ? 's' : ''}`)
-  if (fileWrite > 0) parts.push(`${fileWrite} file${fileWrite > 1 ? 's' : ''} written`)
-  if (memRead > 0)   parts.push('Checked memory')
-  if (memWrite > 0)  parts.push('Memory updated')
-  if (memDelete > 0) parts.push('Memory cleaned')
-  return parts.join(' · ') || `${entries.length} action${entries.length !== 1 ? 's' : ''}`
+  return summariseToolEntries(entries)
 }
 
 // ─── ThinkingBlock ────────────────────────────────────────────────────────────

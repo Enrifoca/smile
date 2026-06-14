@@ -273,5 +273,7 @@ export function useElectron() {
     connectors,
     contexts,
     memory,
+    app: api.app,
+    updates: api.updates,
   }
 }

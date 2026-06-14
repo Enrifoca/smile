@@ -19,6 +19,8 @@ import { Spinner } from './components/ui'
 import ContextNewView from './components/ContextNewView'
 
 import MacWindowChrome from './components/MacWindowChrome'
+import { UpdateToast } from './components/UpdateToast'
+import { UpdateProvider } from './context/UpdateContext'
 
 import { useElectron } from './hooks/useElectron'
 
@@ -186,7 +188,9 @@ function App() {
 
   return shell(
 
-    <>
+    <UpdateProvider>
+
+      <>
 
       <Sidebar
 
@@ -348,7 +352,11 @@ function App() {
 
       </main>
 
-    </>,
+      <UpdateToast />
+
+      </>
+
+    </UpdateProvider>,
 
   )
 

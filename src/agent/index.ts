@@ -13,7 +13,9 @@ import type { ContextPromptBody } from '../context/promptInjection'
 import { shouldNudgeActionFirst } from './actionGuards'
 import { zodToJsonSchema } from './jsonSchema'
 import { formatScratchpadNote, getCoreScratchpadNote } from './scratchpad'
-import { getCoreToolEntry } from './toolEntries'
+import { getCoreToolEntry, ensureToolEntryActivity } from './toolEntries'
+import { getConnectorToolEntry } from './connectorToolEntries'
+import { resolveActivityLabel, type AgentPhase } from './activityStatus'
 import { formatCoreToolResultForAI } from './toolResults'
 import { isFailedToolResult } from './toolErrors'
 import {
@@ -74,62 +76,56 @@ export class Agent {
   private taskContinuationNudgedThisTurn = false
   private turnIntent: TurnIntent = { kind: 'general', summary: '' }
   private toolsRunThisTurn: ToolRunRecord[] = []
+  private lastToolEntryThisTurn: ToolEntry | null = null
 
   private setAgentStatus(status: string | null): void {
     this.config.onAgentStatus?.(status)
   }
 
+  private setActivityPhase(phase: AgentPhase): void {
+    this.setAgentStatus(resolveActivityLabel(phase))
+  }
+
   private handleStreamProgress(event: AIStreamProgressEvent): void {
-    if (event.toolName === 'report_write') {
-      this.setAgentStatus(
-        event.title ? `Drafting report: ${event.title}…` : 'Drafting markdown report…',
-      )
-      return
-    }
-
-    const entry = this.getToolEntry(event.toolName, event.title ? { title: event.title } : {})
-    this.setAgentStatus(`Preparing: ${entry.label}…`)
+    const entry = this.getToolEntry(
+      event.toolName,
+      event.title ? { title: event.title } : {},
+    )
+    this.setActivityPhase({ kind: 'streaming_tool_draft', entry })
   }
 
-  private getLikelyReportDraftStatus(): string | null {
-    const lastUser = [...this.conversationHistory]
-      .reverse()
-      .find(message => message.role === 'user' && !message.content.startsWith('[SYSTEM]'))
-
-    if (!lastUser) return null
-
-    const text = lastUser.content.toLowerCase()
-    if (/\b(report|markdown|\.md|plan|spec|batch|summary)\b/.test(text)) {
-      return 'Drafting markdown report…'
+  /** Push assistant prose to chat before tool execution (streamed or batched at end of stream). */
+  private emitAssistantPreamble(content: string, existingMessageId?: string): string {
+    const trimmed = content.trim()
+    const messageId = existingMessageId || uuidv4()
+    if (!trimmed) {
+      if (existingMessageId && this.config.onUpdateMessage) {
+        this.config.onUpdateMessage(existingMessageId, '', false)
+      }
+      return messageId
     }
 
-    return null
-  }
-
-  /** What to show while waiting for the model between loop steps (not during tool execution). */
-  private getStatusBeforeModelCall(useReasoning: boolean): string {
-    const reportHint = this.getLikelyReportDraftStatus()
-    if (reportHint) return reportHint
-
-    if (useReasoning) return 'Reasoning about next step…'
-
-    const lastToolResult = [...this.conversationHistory]
-      .reverse()
-      .find(message => message.content.startsWith('[tool_result:'))
-
-    if (!lastToolResult) return 'Working on your request…'
-
-    const toolName = lastToolResult.content.match(/\[tool_result:\s*([^\]\s]+)/i)?.[1] || ''
-    if (toolName === 'report_write') return 'Summarizing report…'
-    if (toolName.startsWith('file_read') || toolName === 'file_read_ocr') {
-      return 'Analyzing file contents…'
+    const message: Message = {
+      id: messageId,
+      role: 'assistant',
+      content: trimmed,
+      timestamp: new Date().toISOString(),
     }
-    if (toolName.startsWith('file_')) return 'Analyzing workspace results…'
-    if (toolName.startsWith('memory_')) return 'Analyzing memory…'
-    if (this.getConnectorForTool(toolName)) {
-      return 'Analyzing connector data…'
+
+    if (existingMessageId && this.config.onUpdateMessage) {
+      this.config.onUpdateMessage(existingMessageId, trimmed, false)
+    } else {
+      this.config.onMessage(message)
     }
-    return 'Analyzing results…'
+
+    const historyIndex = this.conversationHistory.findIndex(entry => entry.id === messageId)
+    if (historyIndex >= 0) {
+      this.conversationHistory[historyIndex] = message
+    } else {
+      this.conversationHistory.push(message)
+    }
+
+    return messageId
   }
 
   constructor(config: AgentConfig) {
@@ -277,8 +273,22 @@ export class Agent {
   }
 
   private getToolEntry(name: string, args: Record<string, unknown>): ToolEntry {
-    const connectorEntry = this.getConnectorForTool(name)?.definition.getToolEntry?.(name, args)
-    return connectorEntry || getCoreToolEntry(name, args)
+    const connector = this.getConnectorForTool(name)
+    const custom = connector?.definition.getToolEntry?.(name, args)
+    if (custom) {
+      return ensureToolEntryActivity(custom, this.getToolDefinition(name)?.category)
+    }
+    if (connector) {
+      const tool = this.getToolDefinition(name)
+      return getConnectorToolEntry(
+        connector.definition.id,
+        connector.definition.name,
+        name,
+        tool?.category ?? 'connector-read',
+        args,
+      )
+    }
+    return getCoreToolEntry(name, args)
   }
 
   private getConnectorPromptSections(): string[] {
@@ -305,6 +315,7 @@ export class Agent {
     this.reportWriteSucceededThisTurn = false
     this.taskContinuationNudgedThisTurn = false
     this.toolsRunThisTurn = []
+    this.lastToolEntryThisTurn = null
     this.turnIntent = inferTurnIntent(userMessage)
     const intentNote = formatTurnIntentForScratchpad(this.turnIntent)
     if (intentNote) {
@@ -373,6 +384,10 @@ export class Agent {
         let abortedDuringTools = false
         const toolEntries: ToolEntry[] = []
 
+        if (assistantPreamble?.trim() && !preambleMessageId) {
+          this.emitAssistantPreamble(assistantPreamble.trim())
+        }
+
         for (const toolCall of response.toolCalls) {
           if (this.abortFlag) {
             this.abortFlag = false
@@ -387,12 +402,8 @@ export class Agent {
             category: this.getToolDefinition(toolCall.name)?.category,
           })
           const toolEntry = this.getToolEntry(toolCall.name, toolCall.arguments)
-          if (toolCall.name === 'report_write') {
-            const title = String(toolCall.arguments.title || '').trim()
-            this.setAgentStatus(title ? `Saving report: ${title}…` : 'Saving report…')
-          } else {
-            this.setAgentStatus(`Running: ${toolEntry.label}…`)
-          }
+          this.lastToolEntryThisTurn = toolEntry
+          this.setActivityPhase({ kind: 'running_tool', entry: toolEntry })
 
           if (!this.scratchpadWrittenThisTurn) {
             const plannedNote = this.getConnectorForTool(toolCall.name)?.definition.getScratchpadNote?.(toolCall.name, toolCall.arguments, '')
@@ -420,7 +431,7 @@ export class Agent {
               response.content,
               preambleMessageId,
             )
-            this.setAgentStatus(null)
+            this.setActivityPhase({ kind: 'awaiting_approval', entry: toolEntry })
             return
           }
 
@@ -695,7 +706,11 @@ export class Agent {
       ? this.config.callAIReasoning
       : this.config.callAI
 
-    this.setAgentStatus(this.getStatusBeforeModelCall(useReasoning))
+    this.setActivityPhase({
+      kind: 'awaiting_model',
+      useReasoning,
+      lastEntry: this.lastToolEntryThisTurn,
+    })
 
     // ── Streaming path ────────────────────────────────────────────────────────
     if (effectiveCallAIStream && this.config.onUpdateMessage) {
@@ -728,7 +743,7 @@ export class Agent {
       const flushToResponse = (text: string) => {
         if (!text) return
         if (!responseStarted) {
-          this.setAgentStatus('Writing response…')
+          this.setActivityPhase({ kind: 'streaming_text' })
         }
         responseContent += text
         if (!responseStarted) {
@@ -749,7 +764,7 @@ export class Agent {
             // Confirmed: this response opens with <think>
             phase = 'in_think'
             thinkTimerStart = Date.now()
-            this.setAgentStatus('Thinking…')
+            this.setActivityPhase({ kind: 'streaming_thinking' })
             // The content so far (after <think>) goes into the think buffer
             buffer = trimmed.slice(THINK_OPEN_TAG.length)
             return
@@ -796,7 +811,7 @@ export class Agent {
         && isRetryableAIError(result.error || '')
       ) {
         console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
-        this.setAgentStatus('Reasoning model busy — using chat model…')
+        this.setActivityPhase({ kind: 'reasoning_fallback' })
         result = await this.config.callAIStream(messages, tools, onToken, event => this.handleStreamProgress(event))
       }
       if (this.abortFlag) {
@@ -818,37 +833,30 @@ export class Agent {
 
       if (response) {
         if (response.toolCalls && response.toolCalls.length > 0) {
-          const firstTool = response.toolCalls[0]
-          const firstEntry = this.getToolEntry(firstTool.name, firstTool.arguments)
-          if (firstTool.name === 'report_write') {
-            const title = String(firstTool.arguments.title || '').trim()
-            this.setAgentStatus(title ? `Saving report: ${title}…` : 'Saving report…')
-          } else {
-            this.setAgentStatus(
-              response.toolCalls.length > 1
-                ? `Preparing ${response.toolCalls.length} actions…`
-                : `Preparing: ${firstEntry.label}…`,
+          const preambleText =
+            (responseStarted ? responseContent.trim() : '')
+            || response.content?.trim()
+            || ''
+          let assistantPreamble: string | undefined
+          let preambleMessageId: string | undefined
+
+          // Show intro prose in chat before tool status / execution.
+          if (preambleText) {
+            assistantPreamble = preambleText
+            preambleMessageId = this.emitAssistantPreamble(
+              preambleText,
+              responseStarted ? responseMsgId : undefined,
             )
+          } else if (responseStarted && this.config.onUpdateMessage) {
+            this.config.onUpdateMessage(responseMsgId, '', false)
           }
 
-          let assistantPreamble: string | undefined
-          if (responseStarted && responseContent.trim()) {
-            const finalContent = responseContent.trim()
-            this.config.onUpdateMessage!(responseMsgId, finalContent, false)
-            const preambleMsg: Message = {
-              id: responseMsgId,
-              role: 'assistant',
-              content: finalContent,
-              timestamp: new Date().toISOString(),
-            }
-            this.conversationHistory.push(preambleMsg)
-            assistantPreamble = finalContent
-          } else if (responseStarted) {
-            this.config.onUpdateMessage!(responseMsgId, '', false)
-          } else if (response.content?.trim()) {
-            assistantPreamble = response.content.trim()
-          }
-          return { response, wasStreamed: false, assistantPreamble, preambleMessageId: responseStarted ? responseMsgId : undefined }
+          const toolEntries = response.toolCalls.map(toolCall =>
+            this.getToolEntry(toolCall.name, toolCall.arguments),
+          )
+          this.setActivityPhase({ kind: 'preparing_tools', entries: toolEntries })
+
+          return { response, wasStreamed: false, assistantPreamble, preambleMessageId }
         } else {
           // Final text response — set the clean final content and push to history
           if (responseStarted) {
@@ -884,7 +892,7 @@ export class Agent {
       && isRetryableAIError(result.error || '')
     ) {
       console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
-      this.setAgentStatus('Reasoning model busy — using chat model…')
+      this.setActivityPhase({ kind: 'reasoning_fallback' })
       result = await this.config.callAI(messages, tools)
     }
     if (this.abortFlag) {
@@ -908,7 +916,18 @@ export class Agent {
       response.content = response.content.replace(THINK_BLOCK_REGEX, '').trim()
     }
 
-    return { response, wasStreamed: false, assistantPreamble: response?.content?.trim() || undefined }
+    const preambleText = response?.content?.trim() || ''
+    if (response?.toolCalls?.length && preambleText) {
+      const preambleMessageId = this.emitAssistantPreamble(preambleText)
+      return {
+        response,
+        wasStreamed: false,
+        assistantPreamble: preambleText,
+        preambleMessageId,
+      }
+    }
+
+    return { response, wasStreamed: false, assistantPreamble: preambleText || undefined }
   }
 
   private emitPendingActionChatMessage(

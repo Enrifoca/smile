@@ -144,6 +144,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   },
 
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
+  },
+
+  updates: {
+    check: () => ipcRenderer.invoke('updates:check') as Promise<{ success: boolean; data?: import('../src/shared/updates').UpdateState; error?: string }>,
+    install: () => ipcRenderer.invoke('updates:install') as Promise<{ success: boolean }>,
+    onStateChange: (callback: (state: import('../src/shared/updates').UpdateState) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, state: import('../src/shared/updates').UpdateState) => callback(state)
+      ipcRenderer.on('updates:state', listener)
+      return () => ipcRenderer.removeListener('updates:state', listener)
+    },
+  },
+
   // Declarative connectors (sandboxed plugins)
   connectors: {
     list: () => ipcRenderer.invoke('connectors:list'),
@@ -289,6 +303,14 @@ export interface ElectronAPI {
   }
   shell: {
     openExternal: (url: string) => Promise<{ success: boolean }>
+  }
+  app: {
+    getVersion: () => Promise<string>
+  }
+  updates: {
+    check: () => Promise<{ success: boolean; data?: import('../src/shared/updates').UpdateState; error?: string }>
+    install: () => Promise<{ success: boolean }>
+    onStateChange: (callback: (state: import('../src/shared/updates').UpdateState) => void) => () => void
   }
   connectors: {
     list: () => Promise<{

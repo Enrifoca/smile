@@ -1338,3 +1338,39 @@ input:focus, textarea:focus, select:focus {
 .animate-pulse-once {
   animation: pulseOnce 0.9s ease-out 1;
 }
+
+.ui-update-toast {
+  @apply fixed bottom-5 right-5 z-50 max-w-sm pointer-events-auto;
+  animation: updateToastIn 0.22s ease-out;
+}
+
+.ui-update-toast-body {
+  @apply rounded-xl border-2 border-neutral-950 bg-white p-4 shadow-lg;
+}
+
+.ui-update-toast-title {
+  @apply text-sm font-medium text-neutral-950;
+}
+
+.ui-update-toast-detail {
+  @apply mt-1 text-sm text-gray-500;
+}
+
+.ui-update-toast-actions {
+  @apply mt-3 flex items-center gap-2;
+}
+
+.ui-update-toast-dismiss {
+  @apply text-sm text-gray-500 transition-colors hover:text-neutral-950;
+}
+
+@keyframes updateToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

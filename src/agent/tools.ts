@@ -111,7 +111,7 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'report_write',
-    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates.',
+    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary, or other structured document). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates. The user can export the same report as PDF or Word from the Download menu on the report card — mention that if they ask for those formats.',
     schema: reportWriteSchema,
     requiresConfirmation: false,
     category: 'file-write',

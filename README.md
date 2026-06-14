@@ -48,6 +48,8 @@ npm run build:win
 npm run build:mac
 ```
 
+Published releases (installers + auto-update): see [docs/distribution.md](docs/distribution.md).
+
 ## Configuration
 
 On first launch, the app will guide you through:
