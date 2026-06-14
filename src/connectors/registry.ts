@@ -1,6 +1,6 @@
 import { ConnectorRuntime } from './types'
 import { ElectronAPI } from '../types/electron'
-import { createJiraRuntime, normalizeJiraMetadata } from './jira/runtime'
+import { createPluginConnectorRuntime } from './pluginLoader'
 
 export interface ConnectorScope {
   connectorId: string
@@ -16,17 +16,18 @@ export interface LoadedConnectors {
 }
 
 export async function loadEnabledConnectors(electron: ElectronAPI): Promise<LoadedConnectors> {
-  const metadata = normalizeJiraMetadata(await electron.jiraMetadata.get())
-  const jiraScopes = metadata.monitoredProjects.map(project => ({
-    connectorId: 'jira',
-    scopeId: project.key,
-    key: project.key,
-    name: project.name,
-    avatarUrl: project.avatarUrl,
-  }))
+  const runtimes: ConnectorRuntime<any>[] = []
 
-  return {
-    runtimes: [createJiraRuntime(electron, metadata)],
-    scopes: jiraScopes,
+  try {
+    const discovered = await electron.connectors.list()
+    if (discovered.success && discovered.data) {
+      for (const { manifest, promptMarkdown } of discovered.data.connectors) {
+        runtimes.push(createPluginConnectorRuntime(electron, manifest, promptMarkdown))
+      }
+    }
+  } catch {
+    // Discovery failures must not break chat initialization.
   }
+
+  return { runtimes, scopes: [] }
 }

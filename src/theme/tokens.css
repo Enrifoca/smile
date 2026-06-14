@@ -11,6 +11,10 @@
   --color-muted-surface: #f3f4f6;
   --color-muted-border: #d1d5db;
   --color-muted-text: #4b5563;
+  /** Meta / secondary labels: tool summaries, chat history date groups, thinking headers */
+  --color-meta-text: #9ca3af;
+  /** Single light hover fill app-wide (sidebar, lists, ghost buttons, cards, etc.) */
+  --color-hover-surface: #f5f5f5;
 
   /* Feedback */
   --color-success: #16a34a;
@@ -36,4 +40,7 @@
   /* macOS window chrome (traffic lights sit on this strip); keep in sync with electron/main.ts */
   --mac-titlebar-height: 28px;
   --mac-titlebar-bg: #000000;
+
+  /** Shared height for text fields and sm buttons (Settings rows, forms) */
+  --control-height: 2.5rem;
 }

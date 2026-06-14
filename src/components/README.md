@@ -22,11 +22,11 @@ Theme tokens: **`src/theme/tokens.css`**. Semantic styles: **`src/styles/globals
 
 ## Does not belong here
 
-- Connector tool schemas, prompts, or runtime logic (use `src/connectors/<id>/`)
+- Connector tool schemas, prompts, or runtime logic (author under `<workspace>/.smile/connectors/<id>/`)
 - Domain-specific business rules inside reusable modules (pass them as props instead)
 
 ## Connector setup UI
 
-Connector settings pages compose **`ConnectorSettingsModules`** (which uses the UI kit internally). Example: `src/connectors/jira/ui/JiraSettingsView.tsx`. Catalog routing: `ConnectorsView.tsx`.
+Workspace connectors use **`GenericConnectorSettingsView`**, which composes **`ConnectorSettingsModules`** (UI kit internally). Catalog routing: `ConnectorsView.tsx`.
 
-When adding a connector, copy `src/connectors/jira/ui/` and register the catalog entry + detail route in `ConnectorsView.tsx`. See `src/components/connectors/README.md`.
+For custom fork-level settings pages, reuse the same modules. See `src/components/connectors/README.md` and `docs/creating-a-connector.md`.

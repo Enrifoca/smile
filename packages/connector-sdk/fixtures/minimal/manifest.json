@@ -1,0 +1,44 @@
+{
+  "apiVersion": "1.0",
+  "id": "minimal",
+  "name": "Minimal SDK fixture",
+  "version": "0.0.0",
+  "description": "Minimal package for validate/test CLI — not a shippable connector.",
+  "auth": {
+    "type": "api-key",
+    "fields": [{ "key": "apiToken", "label": "API token", "secret": true }]
+  },
+  "permissions": {
+    "http": ["https://api.example.com"],
+    "mcp": [],
+    "file": { "read": true, "write": false },
+    "secrets": ["apiToken"]
+  },
+  "ui": { "catalogLabel": "Fixture", "scopeLabel": "Scopes" },
+  "tools": [
+    {
+      "name": "fixture_search_records",
+      "description": "Search records by query",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "fixture_create_record",
+      "description": "Create a record",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "title": { "type": "string" }, "body": { "type": "string" } },
+        "required": ["title"]
+      },
+      "confirmation": { "title": "Create record", "summary": "Create \"{{title}}\"" },
+      "preview": "Create record: {{title}}"
+    }
+  ]
+}

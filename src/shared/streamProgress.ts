@@ -23,7 +23,7 @@ export function notifyToolDraftProgress(
     const title = toolCall.name === 'report_write'
       ? extractPartialToolTitle(toolCall.arguments)
       : undefined
-    const signature = `${toolCall.name}:${title || ''}`
+    const signature = `${toolCall.name}:${title ?? '*'}`
     if (lastNotified.get(index) === signature) return
     lastNotified.set(index, signature)
     onProgress({ toolName: toolCall.name, title })

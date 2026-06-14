@@ -43,7 +43,7 @@ export const memoryReadSchema = z.object({
   section: z.enum(['all', 'learned', 'style', 'source']).optional().default('all')
     .describe('Which memory area to read. Use "all" for User Memory + Learned Notes. Use "source" for connector scope evidence.'),
   connectorId: z.string().optional()
-    .describe('Connector id when section is "source", e.g. "jira" or your connector id.'),
+    .describe('Connector id when section is "source", e.g. your connector id.'),
   scopeId: z.string().optional()
     .describe('Scope id when section is "source", e.g. a project key or workspace id.'),
 })
@@ -66,6 +66,18 @@ export const memoryDeleteSchema = z.object({
 
 export const scratchpadWriteSchema = z.object({
   note: z.string().describe('The note to add to your session scratchpad. Use this to record key findings, decisions, or progress so you can refer back without re-running tools. Examples: "Document has 4 sections: Setup, API, Deployment, FAQ. Records to create: 6 total.", "Using the default connector scope and record type for all items."'),
+})
+
+export const contextReadSchema = z.object({})
+
+export const contextAppendSchema = z.object({
+  section: z.string().describe('Section heading to append under (e.g. "Notes", "Decisions"). Created when missing.'),
+  content: z.string().describe('Prose to append. Summarize insights — never paste raw JSON or tool output.'),
+})
+
+export const contextReplaceSectionSchema = z.object({
+  heading: z.string().describe('Exact section heading to replace (e.g. "Overview", "Decisions").'),
+  content: z.string().describe('New body for the section (without the heading). Use prose, not raw API data.'),
 })
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -99,7 +111,7 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'report_write',
-    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates.',
+    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary, or other structured document). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates. The user can export the same report as PDF or Word from the Download menu on the report card — mention that if they ask for those formats.',
     schema: reportWriteSchema,
     requiresConfirmation: false,
     category: 'file-write',
@@ -150,6 +162,29 @@ export const toolDefinitions: ToolDefinition[] = [
     requiresConfirmation: false,
     category: 'scratchpad',
   },
+
+  // Active context tools (require an active project context)
+  {
+    name: 'context_read',
+    description: 'Read the full markdown knowledge file for the active project context. Use when you need details beyond the summary in the system prompt.',
+    schema: contextReadSchema,
+    requiresConfirmation: false,
+    category: 'context',
+  },
+  {
+    name: 'context_append',
+    description: 'Append prose to a section in the active project context. Use to record decisions, scope notes, or ongoing project knowledge. Never paste raw tool output or JSON.',
+    schema: contextAppendSchema,
+    requiresConfirmation: false,
+    category: 'context',
+  },
+  {
+    name: 'context_replace_section',
+    description: 'Replace the body of a section in the active project context by heading. Use when a section needs a full rewrite. Previous content is backed up automatically.',
+    schema: contextReplaceSectionSchema,
+    requiresConfirmation: false,
+    category: 'context',
+  },
 ]
 
 /**
@@ -165,95 +200,4 @@ export function getToolDefinition(name: string): ToolDefinition | undefined {
 export function requiresConfirmation(toolName: string): boolean {
   const tool = getToolDefinition(toolName)
   return tool?.requiresConfirmation ?? false
-}
-
-/**
- * Get tools formatted for AI provider
- * This converts our tool definitions to the OpenAI function calling format
- */
-export function getToolsForAI(): Array<{
-  type: 'function'
-  function: {
-    name: string
-    description: string
-    parameters: Record<string, unknown>
-  }
-}> {
-  return toolDefinitions.map(tool => ({
-    type: 'function' as const,
-    function: {
-      name: tool.name,
-      description: tool.description,
-      // Convert Zod schema to JSON Schema
-      parameters: zodToJsonSchema(tool.schema),
-    },
-  }))
-}
-
-/**
- * Convert a Zod schema to JSON Schema format
- * This is a simplified converter for our use case
- */
-function zodToJsonSchema(schema: z.ZodObject<z.ZodRawShape>): Record<string, unknown> {
-  const shape = schema.shape
-  const properties: Record<string, unknown> = {}
-  const required: string[] = []
-
-  for (const [key, value] of Object.entries(shape)) {
-    const zodType = value as z.ZodTypeAny
-    const typeDef = zodType._def
-
-    // Handle optional types
-    const isOptional = zodType.isOptional()
-    const innerType = isOptional ? (typeDef as { innerType?: z.ZodTypeAny }).innerType || zodType : zodType
-
-    // Get the base type
-    const baseTypeDef = innerType._def
-    let jsonType: Record<string, unknown> = {}
-
-    // Determine the JSON Schema type
-    if (baseTypeDef.typeName === 'ZodString') {
-      jsonType = { type: 'string' }
-    } else if (baseTypeDef.typeName === 'ZodNumber') {
-      jsonType = { type: 'number' }
-    } else if (baseTypeDef.typeName === 'ZodBoolean') {
-      jsonType = { type: 'boolean' }
-    } else if (baseTypeDef.typeName === 'ZodArray') {
-      jsonType = {
-        type: 'array',
-        items: { type: 'string' }, // Simplified - assumes string arrays
-      }
-    } else if (baseTypeDef.typeName === 'ZodDefault') {
-      // Handle default values
-      const defaultInner = (baseTypeDef as { innerType?: z.ZodTypeAny }).innerType
-      if (defaultInner?._def.typeName === 'ZodString') {
-        jsonType = { type: 'string' }
-      } else if (defaultInner?._def.typeName === 'ZodNumber') {
-        jsonType = { type: 'number' }
-      }
-    } else {
-      // Default to string for unknown types
-      jsonType = { type: 'string' }
-    }
-
-    // Add description if available
-    if (typeDef.description) {
-      jsonType.description = typeDef.description
-    } else if (baseTypeDef.description) {
-      jsonType.description = baseTypeDef.description
-    }
-
-    properties[key] = jsonType
-
-    // Track required fields
-    if (!isOptional && baseTypeDef.typeName !== 'ZodDefault') {
-      required.push(key)
-    }
-  }
-
-  return {
-    type: 'object',
-    properties,
-    required: required.length > 0 ? required : undefined,
-  }
 }

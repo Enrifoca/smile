@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Message, ToolEntry } from '../agent/types'
+import { summariseToolEntries } from '../agent/toolSummary'
 import { MarkdownArtifactCard } from './chat/artifacts'
 
 interface ChatMessageProps {
@@ -14,10 +15,8 @@ const UserIcon = () => (
   </svg>
 )
 
-const BotIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-  </svg>
+const SmileAvatarMark = () => (
+  <span className="ui-chat-avatar-mark" aria-hidden="true">:D</span>
 )
 
 const ChevronIcon = ({ open }: { open: boolean }) => (
@@ -36,30 +35,7 @@ function formatThinkingTime(ms: number): string {
 
 /** Compute the collapsed summary label from a list of tool entries */
 function summariseEntries(entries: ToolEntry[]): string {
-  const count = (fn: (e: ToolEntry) => boolean) => entries.filter(fn).length
-  const fileReads   = count(e => ['file_read', 'file_read_ocr', 'file_list'].includes(e.tool))
-  const fileSearch  = count(e => e.tool === 'file_search')
-  const connectorReads = count(e => e.group !== 'file' && e.group !== 'memory' && !e.tool.includes('create') && !e.tool.includes('update') && !e.tool.includes('comment') && !e.tool.includes('transition') && !e.tool.includes('upload'))
-  const connectorWrites = count(e => e.group !== 'file' && e.group !== 'memory' && (e.tool.includes('create') || e.tool.includes('update') || e.tool.includes('comment') || e.tool.includes('transition') || e.tool.includes('upload')))
-  const fileWrite   = count(e => ['file_write', 'report_write', 'file_mkdir'].includes(e.tool))
-  const memRead     = count(e => e.tool === 'memory_read')
-  const memWrite    = count(e => e.tool === 'memory_update')
-  const memDelete   = count(e => e.tool === 'memory_delete')
-
-  const parts: string[] = []
-  if (fileReads > 0 || fileSearch > 0) {
-    const pieces: string[] = []
-    if (fileReads > 0)  pieces.push(`${fileReads} file${fileReads > 1 ? 's' : ''}`)
-    if (fileSearch > 0) pieces.push(`${fileSearch} search${fileSearch > 1 ? 'es' : ''}`)
-    parts.push(`Explored ${pieces.join(', ')}`)
-  }
-  if (connectorReads > 0) parts.push(`${connectorReads} connector read${connectorReads > 1 ? 's' : ''}`)
-  if (connectorWrites > 0) parts.push(`${connectorWrites} connector update${connectorWrites > 1 ? 's' : ''}`)
-  if (fileWrite > 0) parts.push(`${fileWrite} file${fileWrite > 1 ? 's' : ''} written`)
-  if (memRead > 0)   parts.push('Checked memory')
-  if (memWrite > 0)  parts.push('Memory updated')
-  if (memDelete > 0) parts.push('Memory cleaned')
-  return parts.join(' · ') || `${entries.length} action${entries.length !== 1 ? 's' : ''}`
+  return summariseToolEntries(entries)
 }
 
 // ─── ThinkingBlock ────────────────────────────────────────────────────────────
@@ -86,7 +62,7 @@ function ThinkingBlock({ message }: { message: Message }) {
       {/* Header row */}
       <button
         onClick={() => hasMore && setExpanded(v => !v)}
-        className={`flex items-center gap-1.5 text-[11px] text-gray-400 mb-1.5 ${hasMore ? 'hover:text-gray-500 cursor-pointer' : 'cursor-default'}`}
+        className={`ui-chat-thinking-header flex items-center gap-1.5 text-[11px] mb-1.5 ${hasMore ? 'hover:text-neutral-600 cursor-pointer' : 'cursor-default'}`}
       >
         <span className="font-medium tracking-wide uppercase">
           {isStreaming ? 'Thinking' : `Thought${timeLabel ? ` ${timeLabel}` : ''}`}
@@ -97,7 +73,7 @@ function ThinkingBlock({ message }: { message: Message }) {
       {/* Content */}
       {(isStreaming || content) && (
         <div className="relative max-w-[85%]">
-          <div className="text-[12px] text-gray-400 leading-relaxed whitespace-pre-wrap break-words">
+          <div className="ui-text-meta text-[12px] leading-relaxed whitespace-pre-wrap break-words">
             {visibleContent}
             {isStreaming && (
               <span className="inline-block w-1.5 h-3 ml-0.5 bg-gray-300 rounded-sm animate-pulse align-text-bottom" />
@@ -145,7 +121,7 @@ function ToolSummaryBlock({ entries }: { entries: ToolEntry[] }) {
     <div className="ui-chat-tool-summary">
       <button
         onClick={toggle}
-        className="flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-500 transition-colors"
+        className="flex items-center gap-1.5 ui-text-meta transition-colors"
       >
         <span>{summary}</span>
         {entries.length > 0 && <ChevronIcon open={open} />}
@@ -154,7 +130,7 @@ function ToolSummaryBlock({ entries }: { entries: ToolEntry[] }) {
       {open && (
         <div className="mt-1.5 pl-2 border-l border-gray-100 space-y-0.5">
           {entries.map((entry, i) => (
-            <div key={i} className="text-[11px] text-gray-400 leading-relaxed">
+            <div key={i} className="ui-text-meta leading-relaxed">
               {entry.label}
             </div>
           ))}
@@ -178,7 +154,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
   if (message.type === 'artifact' && message.artifact) {
     return (
       <div className="ui-chat-artifact animate-slide-in">
-        <MarkdownArtifactCard artifact={message.artifact} />
+        <MarkdownArtifactCard artifact={message.artifact} messageId={message.id} />
       </div>
     )
   }
@@ -246,7 +222,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
   return (
     <div className={`ui-chat-message ${isUser ? 'ui-chat-message--user' : ''}`}>
       <div className={`ui-chat-avatar ${isUser ? 'ui-chat-avatar--user' : 'ui-chat-avatar--assistant'}`}>
-        {isUser ? <UserIcon /> : <BotIcon />}
+        {isUser ? <UserIcon /> : <SmileAvatarMark />}
       </div>
       <div className={`max-w-[80%] ${isUser ? 'text-right' : ''}`}>
         <div className={`px-4 py-3 ${isUser ? 'ui-chat-bubble-user' : 'ui-chat-bubble-assistant'}`}>

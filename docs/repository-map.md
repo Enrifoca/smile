@@ -4,6 +4,8 @@
 
 - `src` contains the renderer app, agent runtime, prompts, connectors, UI, and shared types.
 - `electron` contains desktop services and IPC wiring.
+- `bundled` contains shipped connector packages installable from the in-app catalog (`bundled/connectors/<id>/`).
+- `examples` contains SDK demos (`examples/connectors/example/`).
 - `docs` contains architecture and contributor documentation.
 - `AGENTS.md` is the quick-start instruction file for coding agents.
 
@@ -11,7 +13,7 @@
 
 - `src/agent`: connector-neutral agent runtime — [README](../src/agent/README.md), [HELPERS](../src/agent/HELPERS.md) (loop guards, errors), [taskContinuity](../src/agent/taskContinuity.md).
 - `src/prompts`: Markdown prompts and prompt assembly.
-- `src/connectors`: connector contract, registry, and connector modules.
+- `src/connectors`: connector contract, catalog, registry, plugin loader (host-side only).
 - `src/components`: generic React UI.
 - `src/components/ui`: shared UI kit (buttons, forms, panels, feedback).
 - `src/components/connectors`: reusable connector setup UI shells (`ConnectorSettingsModules.tsx`).
@@ -31,11 +33,10 @@
 See also the full documentation index in [README.md](../README.md#documentation).
 
 - New model/provider behavior: `electron/services/ai.ts` and relevant settings UI.
-- New connector tools: `src/connectors/<id>/tools.ts`.
-- New connector prompt rules: `src/connectors/<id>/prompt.md`.
-- New connector execution: `src/connectors/<id>/runtime.ts` and, if needed, a transport service in `electron/services/` ([guide](../electron/services/README.md)).
+- New connector package: `<workspace>/.smile/connectors/<id>/` — see [creating-a-connector.md](creating-a-connector.md). Shipped sources: `bundled/connectors/<id>/`.
+- New connector tools / prompt / handler: edit `manifest.json`, `prompt.md`, `handler.js` in that folder.
+- New transport (OAuth, MCP, REST): `electron/services/` ([guide](../electron/services/README.md)) + broker registration in `main.ts`.
 - Generic agent loop behavior: `src/agent`.
 - Generic prompt behavior: `src/prompts/core`.
 - UI presentation: `src/components`.
-- Connector setup UI shells: `src/components/connectors/ConnectorSettingsModules.tsx` (see `src/components/connectors/README.md`).
-- Connector settings pages: compose modules in `src/connectors/<id>/ui/` (see `src/connectors/jira/ui/`).
+- Connector settings UI: `GenericConnectorSettingsView` + `ConnectorSettingsModules.tsx` (see `src/components/connectors/README.md`).

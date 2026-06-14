@@ -168,7 +168,14 @@ export class AtlassianMCPService extends EventEmitter {
         await new Promise(resolve => setTimeout(resolve, 2500))
       }
 
-      await this.ensureOAuthEnvironmentClean(Boolean(options.forceReauth) || attempt > 1)
+      await this.ensureOAuthEnvironmentClean(Boolean(options.forceReauth))
+      if (attempt > 1) {
+        // Retry port conflicts only — never wipe OAuth tokens on reconnect attempts.
+        await this.releaseOAuthCallbackPorts(this.collectOAuthCallbackPorts())
+        await Promise.all(
+          [SMILE_MCP_CALLBACK_PORT, MCP_OAUTH_CALLBACK_PORT].map(port => this.waitForPortFree(port, 3000)),
+        )
+      }
 
       try {
         const result = await this.startProxyAndInitialize(Boolean(options.forceReauth))
@@ -935,6 +942,30 @@ export class AtlassianMCPService extends EventEmitter {
   }
 
   /**
+   * True when mcp-remote has a persisted OAuth session on disk (~/.smile-mcp-auth).
+   * The proxy process may still be stopped — call connect() to restore the session.
+   */
+  hasStoredAuth(): boolean {
+    return this.authCacheExists(MCP_AUTH_DIR) || this.authCacheExists(LEGACY_MCP_AUTH_DIR)
+  }
+
+  private authCacheExists(rootDir: string): boolean {
+    if (!fs.existsSync(rootDir)) return false
+
+    for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+      const fullPath = path.join(rootDir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith('mcp-remote-')) return true
+        if (this.authCacheExists(fullPath)) return true
+        continue
+      }
+      if (entry.name.startsWith(`${MCP_SERVER_HASH}_`)) return true
+    }
+
+    return false
+  }
+
+  /**
    * Process the output buffer for complete JSON messages
    */
   private processOutputBuffer(): void {
@@ -977,6 +1008,18 @@ export class AtlassianMCPService extends EventEmitter {
     } else if (response.id) {
       this.debugLog(`Received response for unknown request: ${response.id}`)
     }
+  }
+
+  /**
+   * Public generic tool call used by the connector capability broker (host.mcp.call).
+   */
+  async callRawTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+    const enriched = { ...args }
+    if (!enriched.cloudId) {
+      const cloudId = await this.getCloudId()
+      if (cloudId) enriched.cloudId = cloudId
+    }
+    return this.callTool(toolName, enriched)
   }
 
   /**

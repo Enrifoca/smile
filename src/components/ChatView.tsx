@@ -2,12 +2,15 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
 import { Agent, Message, PendingAction, UserProfile } from '../agent'
+import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
 import { formatSourceMemoryListing, formatSourceMemoryRead } from '../memory/promptSections'
 import { SourceMemoryReadResult, SourceMemoryScopeListing } from '../memory/sourceTypes'
 import { buildReportPath, buildReportToolResult, getActiveReportFromMessages } from '../agent/artifacts'
 import { loadEnabledConnectors, ConnectorScope } from '../connectors/registry'
+import type { ProjectContext } from '../context/types'
+import type { ContextPromptBody } from '../context/promptInjection'
 import ChatMessage from './ChatMessage'
 import { Button } from './ui/Button'
 import { ChatBanner, ChatEmptyState, ChatActivityIndicator, WriteActionConfirmModule, ActiveReportPill } from './chat'
@@ -16,6 +19,7 @@ interface ChatViewProps {
   chatId: string | null
   onChatCreated: (chatId: string) => void
   onOpenSettings: () => void
+  activeContext: ProjectContext | null
 }
 
 type McpConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -45,7 +49,7 @@ const StopIcon = () => (
   </svg>
 )
 
-export default function ChatView({ chatId, onChatCreated, onOpenSettings }: ChatViewProps) {
+export default function ChatView({ chatId, onChatCreated, onOpenSettings, activeContext }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -77,10 +81,14 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const electron = useElectron()
-  const { storage, mcp, file, ai, memory: memoryAPI } = electron
+  const { storage, mcp, file, ai, memory: memoryAPI, contexts: contextsAPI } = electron
 
   const activeReport = useMemo(() => getActiveReportFromMessages(messages), [messages])
   const showActiveReport = activeReport && activeReport.messageId !== dismissedReportMessageId
+
+  useEffect(() => {
+    agent?.setActiveContext(activeContext)
+  }, [agent, activeContext])
 
   const loadMemoryForAgent = async (): Promise<MemoryStore | null> => {
     try {
@@ -246,7 +254,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
       const aiConfig = JSON.parse(aiConfigStr)
       await ai.configure(aiConfig)
       
-      const userProfile = await storage.get('userProfile') as UserProfile | null
+      const userProfile = normalizeUserProfile(await storage.get('userProfile') as Partial<UserProfile> | null)
       
       const connectors = await loadEnabledConnectors(electron)
       setManagedProjects(connectors.scopes)
@@ -289,8 +297,22 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         onAgentStatus: setAgentStatus,
         executeFileTool,
         executeMemoryTool,
+        executeContextTool,
+        loadContextPromptBody: async (contextId: string): Promise<ContextPromptBody> => {
+          const result = await contextsAPI.getPromptBody(contextId)
+          if (result.success && result.data) return result.data
+          return { length: 0, markdown: '', injectFull: true }
+        },
+        refreshActiveContext: async (contextId: string) => {
+          const result = await contextsAPI.list()
+          if (result.success && result.data) {
+            return result.data.find(context => context.id === contextId) ?? null
+          }
+          return null
+        },
         callAI: async (messages, tools) => ai.chat(messages, tools),
         callAIStream: async (messages, tools, onToken, onProgress) => ai.chatStream(messages, tools, onToken, onProgress),
+        abortAIStream: () => ai.abortStream(),
         ...(reasoningConfigured && {
           callAIReasoning: async (messages, tools) => ai.chatReasoning(messages, tools),
           callAIReasoningStream: async (messages, tools, onToken, onProgress) => ai.chatReasoningStream(messages, tools, onToken, onProgress),
@@ -298,6 +320,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
       })
 
       setAgent(newAgent)
+      if (activeContext) newAgent.setActiveContext(activeContext)
       setIsConfigured(true)
     } catch (error) {
       console.error('Failed to initialize agent:', error)
@@ -662,18 +685,61 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
     }
   }
 
+  const executeContextTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    if (!activeContext) {
+      return { success: false, error: 'No active project context. Enable a context from the sidebar first.' }
+    }
+
+    try {
+      if (name === 'context_read') {
+        const result = await contextsAPI.readMarkdown(activeContext.id)
+        if (!result.success) return { success: false, error: result.error || 'Could not read context' }
+        return { success: true, data: result.data || '(empty context file)' }
+      }
+
+      if (name === 'context_append') {
+        const section = String(args.section || '').trim()
+        const content = String(args.content || '').trim()
+        if (!section) return { success: false, error: 'section is required' }
+        if (!content) return { success: false, error: 'content is required' }
+        const result = await contextsAPI.appendSection(activeContext.id, section, content)
+        if (!result.success) return { success: false, error: result.error || 'Could not append to context' }
+        return { success: true, data: 'Context updated. Give your final response — do not call context tools again unless the user asks for more changes.' }
+      }
+
+      if (name === 'context_replace_section') {
+        const heading = String(args.heading || '').trim()
+        const content = String(args.content || '').trim()
+        if (!heading) return { success: false, error: 'heading is required' }
+        if (!content) return { success: false, error: 'content is required' }
+        const result = await contextsAPI.replaceSection(activeContext.id, heading, content)
+        if (!result.success) return { success: false, error: result.error || 'Could not update context section' }
+        return { success: true, data: 'Context section replaced. Give your final response — do not call context tools again unless the user asks for more changes.' }
+      }
+
+      return { success: false, error: `Unknown context tool: ${name}` }
+    } catch (error) {
+      throw error
+    }
+  }
+
   const refreshAgentProfile = async () => {
     if (!agent) return
-    const userProfile = await storage.get('userProfile') as UserProfile | null
+    const userProfile = normalizeUserProfile(await storage.get('userProfile') as Partial<UserProfile> | null)
     agent.updateUserProfile(userProfile)
   }
+
+  const handleStop = useCallback(() => {
+    if (!agent) return
+    agent.abort()
+    setIsLoading(false)
+    setAgentStatus(null)
+  }, [agent])
 
   const handleSend = async () => {
     if (!input.trim() || isLoading || !agent) return
 
     let userMessage = input.trim()
-    
-    // If files are attached, add info about them to the message
     if (attachedFiles.length > 0) {
       const fileInfo = attachedFiles.map(f => `- ${f.name} (${f.path})`).join('\n')
       userMessage = `${userMessage}\n\n[Attached files in workspace]\n${fileInfo}`
@@ -698,6 +764,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         await handleReiterateAction(userMessage)
       } else {
         await refreshAgentProfile()
+        agent.setActiveContext(activeContext)
         await agent.processMessage(userMessage)
       }
     } finally {
@@ -720,6 +787,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
     setIsLoading(true)
 
     try {
+      agent.setActiveContext(activeContext)
       await agent.approveAction(action.id)
     } catch (error) {
       console.error('Failed to execute action:', error)
@@ -822,7 +890,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <div className="content-shell">
+        <div className={`content-shell ${showActiveReport ? 'ui-chat-composer--with-report' : ''}`}>
           {pendingAction && (
             <WriteActionConfirmModule
               action={pendingAction}
@@ -834,6 +902,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
 
           {showActiveReport && (
             <ActiveReportPill
+              key={activeReport.messageId}
               artifact={activeReport.artifact}
               messageId={activeReport.messageId}
               onDismiss={() => setDismissedReportMessageId(activeReport.messageId)}
@@ -915,10 +984,10 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
             {isLoading ? (
               <button
                 type="button"
-                onClick={() => agent?.abort()}
+                onClick={handleStop}
                 title="Stop"
                 aria-label="Stop"
-                className="ui-chat-input-action text-red-500 hover:text-red-600"
+                className="ui-chat-input-action ui-chat-input-action--end text-red-500 hover:text-red-600"
               >
                 <StopIcon />
               </button>
@@ -927,7 +996,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings }: Chat
                 type="button"
                 onClick={handleSend}
                 disabled={!input.trim() || mcpConnectionState === 'connecting'}
-                className="ui-chat-input-action text-neutral-700 hover:text-neutral-950 disabled:text-gray-300"
+                className="ui-chat-input-action ui-chat-input-action--end text-neutral-700 hover:text-neutral-950 disabled:text-gray-300"
                 title="Send message"
                 aria-label="Send message"
               >

@@ -1,4 +1,5 @@
 import { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
+import { ChevronIcon } from './ChevronIcon'
 import { joinClasses } from './classNames'
 
 export interface FieldProps {
@@ -27,9 +28,13 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
 }
 
 export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  const autoWidth = className?.includes('w-auto')
   return (
-    <select {...props} className={joinClasses('ui-field', className)}>
-      {children}
-    </select>
+    <div className={joinClasses('ui-field-select-wrap', autoWidth && 'ui-field-select-wrap--auto')}>
+      <select {...props} className={joinClasses('ui-field ui-field-select', className)}>
+        {children}
+      </select>
+      <ChevronIcon className="ui-field-select-chevron" />
+    </div>
   )
 }

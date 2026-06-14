@@ -4,11 +4,24 @@ import type { MarkdownArtifact } from './artifacts'
 
 export type { MarkdownArtifact } from './artifacts'
 
+import type { ToolCategory } from '../connectors/types'
+
 /** A single tool operation recorded in a tool-summary block */
 export interface ToolEntry {
   tool: string
+  /** Past-tense label shown in the expanded tool-summary row */
   label: string
+  /** Grouping key: `file`, `memory`, or a connector id */
   group: string
+  category?: ToolCategory
+  /** Display name when group is a connector id */
+  connectorName?: string
+  /** Status while the model streams this tool call */
+  preparingLabel: string
+  /** Status while the tool executes */
+  runningLabel: string
+  /** Status before the next model call after this tool */
+  afterLabel: string
 }
 
 export interface Message {
@@ -80,29 +93,20 @@ export interface PendingAction {
 }
 
 export interface UserProfile {
-  style: 'technical' | 'conversational' | 'balanced'
-  verbosity: 'concise' | 'detailed' | 'balanced'
-  tone: 'formal' | 'casual' | 'balanced'
-  writingPatterns: {
-    commonPhrases: string[]
-    taskFormat: string
-    commentStyle: string
-  }
+  /** 0 = technical, 100 = conversational */
+  styleSpectrum: number
+  /** 0 = concise, 100 = detailed */
+  detailSpectrum: number
+  /** 0 = formal, 100 = casual */
+  toneSpectrum: number
   focusProjects: string[]
   confirmAllConnectorActions: boolean
-  onboardingCompleted: boolean
 }
 
 export interface AIConfig {
   provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'
   apiKey: string
   model?: string
-}
-
-export interface ConnectorApiConfig {
-  baseUrl: string
-  email: string
-  apiToken: string
 }
 
 export interface Chat {

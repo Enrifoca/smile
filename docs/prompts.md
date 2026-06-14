@@ -10,10 +10,9 @@ Prompts are Markdown files so developers and coding agents can edit behavior wit
 
 ## Connector Prompts
 
-Each connector should own its prompt section:
+Each connector should own its prompt section in the workspace package:
 
-- `src/connectors/jira/prompt.md`
-- `src/connectors/<id>/prompt.md`
+- `<workspace>/.smile/connectors/<id>/prompt.md`
 
 Connector prompts should include:
 
