@@ -17,6 +17,7 @@ import {
 import { UserProfile } from '../agent/types'
 import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { ModelRecommendationText } from '../settings/ModelRecommendationText'
+import { useAppUpdates } from '../context/UpdateContext'
 import {
   AIConfig,
   AIProvider,
@@ -89,6 +90,8 @@ export default function SettingsView() {
   const [keepRecentChats, setKeepRecentChats] = useState(5)
   const [showTrimHistoryModal, setShowTrimHistoryModal] = useState(false)
   const [showClearDataModal, setShowClearDataModal] = useState(false)
+  const { state: updateState, appVersion, checkForUpdates } = useAppUpdates()
+  const updateCheck = useActionFeedback()
 
   const { storage, models: modelCatalogAPI, file } = useElectron()
   const canUseSameReasoningKey = !!aiConfig && aiConfig.provider === reasoningForm.provider
@@ -702,6 +705,56 @@ export default function SettingsView() {
             </div>
           </section>
 
+          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-800 mb-1">App updates</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Installed releases check GitHub automatically on startup. Download installers from your website or GitHub Releases.
+            </p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium text-gray-800">Version {appVersion}</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  {updateState.status === 'checking' || updateCheck.busy
+                    ? 'Checking for updates…'
+                    : updateState.status === 'ready'
+                      ? `Update ${updateState.version} downloaded — restart from the notification.`
+                      : updateState.status === 'downloading'
+                        ? `Downloading ${updateState.version ?? 'update'}${updateState.percent != null ? ` (${Math.round(updateState.percent)}%)` : '…'}`
+                        : updateState.status === 'available'
+                          ? `Update ${updateState.version} available — downloading…`
+                          : updateState.status === 'dev-skipped'
+                            ? updateState.message
+                            : updateState.status === 'error'
+                              ? updateState.message || 'Could not check for updates.'
+                              : updateState.message || 'You are on the latest version.'}
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                disabled={updateCheck.busy}
+                onClick={() => {
+                  updateCheck.run(async () => {
+                    await checkForUpdates()
+                  })
+                }}
+              >
+                Check for updates
+              </Button>
+            </div>
+            <div className="h-5 mt-3">
+              <StatusText
+                busy={updateCheck.busy}
+                status={updateCheck.status}
+                busyMessage="Checking for updates…"
+                successMessage="Update check finished"
+                errorMessage="Update check failed"
+                size="sm"
+              />
+            </div>
+          </section>
+
           <section className="bg-white rounded-xl shadow-sm border border-red-200 p-6">
             <h2 className="text-lg font-semibold text-red-700 mb-4">Danger Zone</h2>
             <div className="space-y-4">
@@ -747,7 +800,7 @@ export default function SettingsView() {
           </section>
 
           <section className="text-center py-4">
-            <p className="text-sm text-gray-500">smile:D v0.1.0 - White-label desktop agent framework</p>
+            <p className="text-sm text-gray-500">smile:D v{appVersion} — White-label desktop agent framework</p>
             <p className="text-xs text-gray-400 mt-1">All data is stored locally on your machine</p>
           </section>
         </div>

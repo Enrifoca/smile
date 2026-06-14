@@ -182,6 +182,14 @@ export interface ElectronAPI {
     readSource: (connectorId: string, scopeId: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
     listSources: () => Promise<{ success: boolean; data?: unknown; error?: string }>
   }
+  app: {
+    getVersion: () => Promise<string>
+  }
+  updates: {
+    check: () => Promise<{ success: boolean; data?: import('../shared/updates').UpdateState; error?: string }>
+    install: () => Promise<{ success: boolean }>
+    onStateChange: (callback: (state: import('../shared/updates').UpdateState) => void) => () => void
+  }
 }
 
 declare global {

@@ -22,21 +22,26 @@ Styles: `.ui-write-action-bar` in `src/styles/globals.css` — white content box
 
 ## Activity status (agent loop)
 
-The agent loop alternates **model calls** and **tool runs**. There is often no second tool happening during a long wait — the model is deciding what to do next.
+The agent loop alternates **model calls** and **tool runs**. Labels are resolved centrally in `src/agent/activityStatus.ts` from tool metadata in `toolEntries.ts` / `connectorToolEntries.ts`.
+
+Full mapping (phases, preamble order, tool summary): [src/agent/activityStatus.md](../../agent/activityStatus.md).
 
 | Status | Meaning |
 | --- | --- |
-| `Working on your request…` | First model call for this message |
-| `Reasoning about next step…` | Reasoning model is working (before tools hit scratchpad) |
-| `Analyzing file contents…` | Model call after a file read — interpreting the document |
-| `Analyzing connector data…` | Model call after a connector read |
+| `Working on your request…` | First model call for this message (fallback when status is unset) |
+| `Reasoning about next step…` | Reasoning model **after** a tool already ran this turn |
+| `{afterLabel}` from last tool | Model call after a tool — e.g. analyzing file, connector, or report results |
 | `Thinking…` | Model reasoning block streaming |
-| `Writing response…` | Model answer streaming |
-| `Drafting markdown report…` / `Drafting report: …` | Model is streaming a `report_write` tool call (can take 20–30s for large specs) |
-| `Saving report…` | Report file is being written to disk |
-| `Summarizing report…` | Model is writing the short follow-up after a report was saved |
-| `Preparing: …` / `Running: …` | Model chose tool(s); about to execute or executing |
+| `Writing response…` | Model answer streaming (intro prose before tools uses this too when streamed) |
+| `{preparingLabel}` | Model is streaming a tool call (any tool — file, connector, report, …) |
+| `{runningLabel}` | Tool executing |
+| `Waiting for your approval: …` | Write action paused for Accept/Refuse |
+| `Reasoning model busy — using chat model…` | Reasoning model fallback |
 | `(Ns)` suffix | Elapsed seconds on steps longer than 3s — not frozen |
+
+**Preamble order:** if the model returns chat prose + tool calls in one response, prose is emitted to the transcript (`emitAssistantPreamble`) **before** tool status / execution — for any tool, not only `report_write`.
+
+Tool-summary rows use the same `ToolEntry` labels — see `src/agent/toolSummary.ts`.
 
 After a tool summary row (e.g. “Explored 1 file”), the next step is always a **model round**, not another tool yet.
 
@@ -53,6 +58,6 @@ When the agent calls `report_write`, a **report card** appears in chat (Manus-st
 | `ChatEmptyState` | Empty transcript placeholder |
 | `ActiveReportPill` | Latest report chip above composer — see artifacts README |
 
-Agent-side status labels and task continuity: [src/agent/taskContinuity.md](../../agent/taskContinuity.md).
+Agent-side status labels and task continuity: [src/agent/activityStatus.md](../../agent/activityStatus.md), [src/agent/taskContinuity.md](../../agent/taskContinuity.md).
 
 Legacy import: `./ActionConfirm` re-exports `WriteActionConfirmModule`.

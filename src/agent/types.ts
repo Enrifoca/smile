@@ -4,11 +4,24 @@ import type { MarkdownArtifact } from './artifacts'
 
 export type { MarkdownArtifact } from './artifacts'
 
+import type { ToolCategory } from '../connectors/types'
+
 /** A single tool operation recorded in a tool-summary block */
 export interface ToolEntry {
   tool: string
+  /** Past-tense label shown in the expanded tool-summary row */
   label: string
+  /** Grouping key: `file`, `memory`, or a connector id */
   group: string
+  category?: ToolCategory
+  /** Display name when group is a connector id */
+  connectorName?: string
+  /** Status while the model streams this tool call */
+  preparingLabel: string
+  /** Status while the tool executes */
+  runningLabel: string
+  /** Status before the next model call after this tool */
+  afterLabel: string
 }
 
 export interface Message {

@@ -17,6 +17,7 @@ import { getMemoryService, MemoryService } from './services/memory'
 import { getContextService, ContextService } from './services/contexts'
 import { getSourceMemoryService } from './services/sourceMemory'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
+import { getUpdateService } from './services/updates'
 
 // Services
 let encryptionService: EncryptionService
@@ -240,8 +241,11 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    getUpdateService().setMainWindow(null)
     mainWindow = null
   })
+
+  getUpdateService().setMainWindow(mainWindow)
 }
 
 // Initialize services
@@ -1170,11 +1174,30 @@ ipcMain.handle('memory:listSources', async () => {
   }
 })
 
+ipcMain.handle('app:getVersion', () => getUpdateService().getVersion())
+
+ipcMain.handle('updates:check', async () => {
+  try {
+    return { success: true, data: await getUpdateService().checkForUpdates() }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Update check failed',
+    }
+  }
+})
+
+ipcMain.handle('updates:install', () => {
+  getUpdateService().quitAndInstall()
+  return { success: true }
+})
+
 // App lifecycle
 app.whenReady().then(async () => {
   await initializeServices()
   void autoConnectAtlassianMcpOnStartup()
   createWindow()
+  getUpdateService().scheduleStartupCheck()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

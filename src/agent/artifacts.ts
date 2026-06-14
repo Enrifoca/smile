@@ -55,11 +55,14 @@ export function buildReportToolResult(path: string, title: string): string {
     `Report saved: ${path}`,
     `Title: ${title}`,
     '',
-    'The user sees this report as a card in chat. Your next message MUST:',
+    'The user sees this report as a card in chat. Opening the card shows a Download menu where they can export the same content as PDF or Word (.doc) without you generating those files.',
+    '',
+    'Your next message MUST:',
     '- Match the report exactly: same item count and same titles (no extras, no omissions, no renames)',
     '- Stay short — one paragraph pointing to the report; do not restate tables or duplicate the spec in chat',
     '- Use file_read on this path when the user wants to revise the report',
     '- When revising, call report_write with the **same path** to overwrite',
     '- Content must be grounded in file_read results or user input — never invent details',
+    '- If the user asks for PDF or Word, point them to the report card Download menu rather than creating duplicate files',
   ].join('\n')
 }
