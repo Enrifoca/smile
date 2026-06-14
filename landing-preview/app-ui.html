@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>smile:D — build vertical AI agents</title>
+  <meta name="description" content="A white-label desktop framework for building vertical AI agents for work. Connector-neutral core, human-in-the-loop writes, editable memory." />
+  <style>
+    /* ── Brand tokens (mirrors src/theme/tokens.css) ───────────────── */
+    :root {
+      --color-primary: #000000;
+      --color-primary-hover: #404040;
+      --color-on-primary: #ffffff;
+      --color-surface: #ffffff;
+      --color-border-strong: #0a0a0a;
+      --color-muted-surface: #f3f4f6;
+      --color-muted-border: #d1d5db;
+      --color-muted-text: #4b5563;
+      --font-app: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+      --sidebar-w: 15rem;
+      --window-maxw: 1280px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font-app);
+      color: var(--color-border-strong);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+      min-height: 100vh;
+      /* desktop backdrop — window floats on top */
+      background:
+        radial-gradient(circle at 1px 1px, #d8d9dc 1px, transparent 0) 0 0 / 22px 22px,
+        #ebecee;
+      /* window sits in the upper-middle */
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 1rem 1.5rem;
+    }
+    button { font-family: inherit; cursor: pointer; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── The window (mac-style, boxed viewport, upper-middle) ──────── */
+    .window {
+      width: min(var(--window-maxw), calc(100vw - 3rem));
+      height: calc(100vh - 2rem);
+      display: flex; flex-direction: column;
+      background: #fff;
+      border: 2px solid var(--color-border-strong);
+      border-radius: 1rem;
+      overflow: hidden;
+      box-shadow: 0 50px 90px -30px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.05);
+    }
+
+    /* mac titlebar spanning the whole window */
+    .winbar {
+      position: relative;
+      height: 2.5rem; flex-shrink: 0;
+      border-bottom: 2px solid var(--color-border-strong);
+      display: flex; align-items: center; padding: 0 1rem;
+    }
+    .traffic { display: flex; gap: .5rem; }
+    .traffic i { width: .75rem; height: .75rem; border-radius: 999px; border: 1.5px solid var(--color-border-strong); background: #fff; display: block; }
+    .traffic i:nth-child(1) { background: #1a1a1a; }
+    .traffic i:nth-child(2) { background: #9ca3af; }
+    .traffic i:nth-child(3) { background: #fff; }
+    .winbar__title {
+      position: absolute; left: 0; right: 0; text-align: center;
+      font-size: 1.375rem; font-weight: 700; letter-spacing: -.02em; user-select: none; pointer-events: none;
+    }
+    .winbar__title .smile { color: #000; }
+
+    /* body of the window: sidebar + content */
+    .window-body { flex: 1; display: flex; min-height: 0; }
+
+    /* sidebar = landing nav, styled like the app sidebar */
+    .sidebar {
+      width: var(--sidebar-w); flex-shrink: 0;
+      background: #fff; border-right: 2px solid var(--color-border-strong);
+      display: flex; flex-direction: column;
+    }
+    .side-head { padding: 1.5rem 1.25rem .75rem; }
+    .side-head .eyebrow { font-size: .6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--color-muted-text); }
+    .side-head h1 { font-size: 1.25rem; line-height: 1.2; letter-spacing: -.02em; margin: .5rem 0 0; font-weight: 800; }
+
+    nav.side-nav { flex: 1; overflow-y: auto; padding: .5rem .75rem; display: flex; flex-direction: column; gap: .25rem; }
+    .nav-label { font-size: .6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #9ca3af; padding: .75rem .75rem .25rem; }
+    .nav-item { display: flex; align-items: center; gap: .75rem; width: 100%; padding: .5rem .75rem; border-radius: .5rem; border: none; background: transparent; color: #262626; font-size: .9375rem; text-align: left; transition: background .15s; }
+    .nav-item:hover { background: var(--color-muted-surface); }
+    .nav-item.active {
+      text-decoration: underline;
+      text-decoration-thickness: 2px;
+      text-underline-offset: 5px;
+      color: var(--color-border-strong);
+      font-weight: 600;
+    }
+    .nav-item svg { width: 1.125rem; height: 1.125rem; flex-shrink: 0; }
+
+    .side-foot { padding: 1rem 1.25rem 1.25rem; display: flex; flex-direction: column; gap: .65rem; }
+    .side-foot .ghost { font-size: .8125rem; color: var(--color-muted-text); }
+    .side-foot .ghost:hover { color: #000; }
+
+    /* buttons (mirror .ui-btn) */
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; font-weight: 500; font-size: .9375rem; border: none; border-radius: .75rem; padding: .7rem 1.4rem; transition: background .2s, color .2s, border-color .2s, transform .12s; }
+    .btn:active { transform: translateY(1px); }
+    .btn--primary { background: var(--color-primary); color: #fff; }
+    .btn--primary:hover { background: var(--color-primary-hover); }
+    .btn--outline { border: 2px solid var(--color-border-strong); background: transparent; color: var(--color-border-strong); }
+    .btn--outline:hover { background: var(--color-primary); color: #fff; }
+    .btn--block { width: 100%; }
+    .btn--sm { padding: .5rem 1rem; font-size: .8125rem; border-radius: .6rem; }
+
+    /* content (scrolls inside the window) */
+    .content { flex: 1; overflow-y: auto; min-width: 0; }
+    .wrap { width: 100%; margin: 0 auto; padding: 0 2.5rem; }
+
+    /* hero — centered, fills the first view */
+    .hero { min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 3.5rem 0; }
+    .hero .eyebrow { display: inline-flex; align-items: center; gap: .5rem; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--color-muted-text); border: 2px solid var(--color-border-strong); border-radius: 999px; padding: .4rem .95rem; margin-bottom: 1.75rem; }
+    .hero .eyebrow .dot { width: .5rem; height: .5rem; border-radius: 999px; background: #000; }
+    .hero h2 { font-size: clamp(2.5rem, 5.5vw, 4.25rem); line-height: 1.03; letter-spacing: -.035em; margin: 0 auto 1.5rem; font-weight: 800; max-width: 22ch; }
+    .hero h2 em { font-style: normal; position: relative; white-space: nowrap; }
+    .hero h2 em::after { content: ""; position: absolute; left: 0; right: 0; bottom: .08em; height: .28em; background: var(--color-muted-surface); z-index: -1; }
+    .hero p.lead { font-size: 1.1875rem; color: var(--color-muted-text); margin: 0 auto 2.25rem; max-width: 52rem; }
+    .hero .cta { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+    .hero .note { font-size: .8125rem; color: var(--color-muted-text); margin-top: 1.5rem; }
+
+    /* sections — centered headers */
+    section.block { padding: 4rem 0; border-top: 2px solid var(--color-border-strong); }
+    .kicker { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--color-muted-text); margin: 0 0 .85rem; text-align: center; }
+    .block h3.title { font-size: clamp(1.75rem, 3.4vw, 2.75rem); letter-spacing: -.02em; margin: 0 0 .85rem; font-weight: 800; text-align: center; }
+    .block p.sub { font-size: 1.125rem; color: var(--color-muted-text); margin: 0 auto 2.75rem; max-width: 52rem; text-align: center; }
+
+    .pillars { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.25rem; }
+    .pillar { border: 2px solid var(--color-border-strong); border-radius: 1rem; padding: 1.5rem; transition: transform .15s, background .15s; }
+    .pillar:hover { transform: translateY(-4px); background: var(--color-muted-surface); }
+    .pillar__n { font-size: .75rem; font-weight: 700; color: #9ca3af; margin-bottom: .75rem; }
+    .pillar h4 { font-size: 1.0625rem; margin: 0 0 .5rem; letter-spacing: -.01em; }
+    .pillar p { font-size: .9375rem; color: var(--color-muted-text); margin: 0; }
+
+    .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.25rem; }
+    .feature { border: 2px solid var(--color-border-strong); border-radius: 1rem; padding: 1.5rem; }
+    .feature h4 { display: flex; align-items: center; gap: .6rem; margin: 0 0 .55rem; font-size: 1.0625rem; letter-spacing: -.01em; }
+    .feature p { margin: 0; font-size: .9375rem; color: var(--color-muted-text); }
+    .feature .tag { display: inline-block; margin-top: .9rem; font-size: .72rem; font-weight: 600; border: 1.5px solid var(--color-border-strong); border-radius: 999px; padding: .2rem .65rem; }
+    .ico { width: 20px; height: 20px; stroke: #000; fill: none; stroke-width: 2; flex-shrink: 0; }
+
+    .neutral-block { background: #000; color: #fff; border-radius: 1.25rem; padding: 3rem 2.5rem; text-align: center; }
+    .neutral-block .kicker { color: #737373; }
+    .neutral-block h3 { color: #fff; }
+    .neutral-block p.sub { color: #a3a3a3; }
+    .chiprow { display: flex; flex-wrap: wrap; gap: .65rem; justify-content: center; }
+    .chip { border: 2px solid #fff; border-radius: .6rem; padding: .45rem .9rem; font-size: .8125rem; font-weight: 600; color: #fff; }
+    .chip--example { background: #fff; color: #000; }
+    .chip--ghost { border-style: dashed; border-color: #4b4b4b; color: #8a8a8a; font-weight: 500; }
+
+    .cta-block { border: 2px solid var(--color-border-strong); border-radius: 1.5rem; padding: 3rem; text-align: center; background: var(--color-muted-surface); }
+    .cta-block h3 { font-size: clamp(1.75rem, 3.5vw, 2.5rem); margin: 0 0 .85rem; letter-spacing: -.02em; font-weight: 800; }
+    .cta-block p { color: var(--color-muted-text); font-size: 1.0625rem; margin: 0 0 1.75rem; }
+    .cta-block .cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+    .foot { border-top: 2px solid var(--color-border-strong); padding: 2rem 0 3rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .foot .b { font-weight: 700; font-size: 1.0625rem; }
+    .foot .links { margin-left: auto; display: flex; gap: 1.5rem; font-size: .8125rem; color: var(--color-muted-text); }
+    .foot .links a:hover { color: #000; }
+    .foot .copy { width: 100%; font-size: .75rem; color: #9ca3af; padding-top: 1rem; border-top: 1px solid #e5e7eb; }
+
+    @media (max-width: 860px) { .pillars, .features { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) {
+      .sidebar { display: none; }
+      .wrap { padding: 0 1.5rem; }
+    }
+    @media (max-width: 560px) {
+      body { padding: 0; }
+      .window { height: 100vh; border: none; border-radius: 0; box-shadow: none; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── The window (boxed viewport, upper-middle) ─────────────────── -->
+  <div class="window">
+
+    <!-- mac titlebar -->
+    <div class="winbar">
+      <span class="traffic"><i></i><i></i><i></i></span>
+      <span class="winbar__title">smile<span class="smile">:D</span></span>
+    </div>
+
+    <div class="window-body">
+
+      <!-- sidebar = landing nav -->
+      <aside class="sidebar">
+        <div class="side-head">
+          <p class="eyebrow">Agent framework</p>
+          <h1>Ship a focused AI agent.</h1>
+        </div>
+        <nav class="side-nav">
+          <span class="nav-label">Explore</span>
+          <a class="nav-item active" href="#overview">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h3v-6h6v6h3a1 1 0 001-1V10"/></svg>
+            <span>Overview</span>
+          </a>
+          <a class="nav-item" href="#pillars">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>
+            <span>Pillars</span>
+          </a>
+          <a class="nav-item" href="#features">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M8 4h7l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg>
+            <span>Features</span>
+          </a>
+          <a class="nav-item" href="#how">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>How it works</span>
+          </a>
+          <a class="nav-item" href="#connectors">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 13.5l3-3m-6 1.5l-1.5 1.5a3 3 0 104.243 4.243l1.5-1.5m4.5-4.5l1.5-1.5A3 3 0 1013.5 6l-1.5 1.5"/></svg>
+            <span>Connectors</span>
+          </a>
+        </nav>
+        <div class="side-foot">
+          <a class="btn btn--primary btn--block btn--sm" href="#start">Download</a>
+          <a class="ghost" href="https://github.com/enrifoca/smile" target="_blank" rel="noopener noreferrer">Go to github →</a>
+        </div>
+      </aside>
+
+      <!-- content -->
+      <div class="content">
+
+        <!-- hero -->
+        <div class="wrap hero" id="overview">
+          <h2>Build <em>vertical AI agents</em> for the work you actually do.</h2>
+          <p class="lead">
+            smile:D gives you the reusable structure — a local desktop shell, a multi-model agent loop,
+            human-in-the-loop approvals, editable memory, and a connector system. Bring a use case,
+            add modules, tune the prompts, and ship.
+          </p>
+          <div class="cta">
+            <a href="#start" class="btn btn--primary">Get started</a>
+            <a href="#how" class="btn btn--outline">See how it works</a>
+          </div>
+          <p class="note">Runs on your machine · your files stay local · you approve every write.</p>
+        </div>
+
+        <!-- pillars -->
+        <section class="block" id="pillars">
+          <div class="wrap">
+            <p class="kicker">Framework pillars</p>
+            <h3 class="title">Four ideas, baked into the core.</h3>
+            <p class="sub">Everything else is a connector or a prompt. The core stays connector-neutral so you can rebrand it for any vertical.</p>
+            <div class="pillars">
+              <div class="pillar"><div class="pillar__n">01</div><h4>Multi-model</h4><p>Configure chat, reasoning, and OCR-capable models independently — the right model for each step.</p></div>
+              <div class="pillar"><div class="pillar__n">02</div><h4>Human in the loop</h4><p>Read tools run freely. Write actions pause for an Accept / Refuse decision above the composer.</p></div>
+              <div class="pillar"><div class="pillar__n">03</div><h4>Craftable modules</h4><p>Connectors contribute tools, prompts, auth UI, previews, and approval copy — outside the core loop.</p></div>
+              <div class="pillar"><div class="pillar__n">04</div><h4>Memory management</h4><p>User memory is authoritative Markdown. Learned notes stay lower priority; scratchpad is per-turn.</p></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- features -->
+        <section class="block" id="features">
+          <div class="wrap">
+            <p class="kicker">What you get</p>
+            <h3 class="title">Productivity primitives, built in.</h3>
+            <p class="sub">The pieces a working agent needs — without rebuilding the shell each time.</p>
+            <div class="features">
+              <div class="feature">
+                <h4><svg class="ico" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M8 4h7l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg> Markdown report artifacts</h4>
+                <p>Long plans and batch specs become a report card in chat — open the full document, then revise the same file in place.</p>
+                <span class="tag">report_write</span>
+              </div>
+              <div class="feature">
+                <h4><svg class="ico" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Approve every write</h4>
+                <p>Connector write actions surface a compact Accept / Refuse bar. Nothing leaves your machine without your say-so.</p>
+                <span class="tag">PendingAction</span>
+              </div>
+              <div class="feature">
+                <h4><svg class="ico" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h18M3 12h18M3 17h12"/></svg> Workspace file access</h4>
+                <p>Agents read, search, OCR, and write inside a folder you choose. PDFs and scans fall back to an OCR model automatically.</p>
+                <span class="tag">sandboxed</span>
+              </div>
+              <div class="feature">
+                <h4><svg class="ico" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg> Editable memory</h4>
+                <p>Durable instructions live in Markdown under <code>.smile/memories</code>. Edit them like a doc — the agent reads them every turn.</p>
+                <span class="tag">.smile/memories</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- how it works -->
+        <section class="block" id="how">
+          <div class="wrap">
+            <p class="kicker">How it works</p>
+            <h3 class="title">From a message to a safe action.</h3>
+            <p class="sub">The agent loop alternates model calls and tool runs, with guards that keep multi-step work on track.</p>
+            <div class="pillars">
+              <div class="pillar"><div class="pillar__n">Step 1</div><h4>Assemble</h4><p>Core prompts, your memory, and connector sections build the system prompt for the turn.</p></div>
+              <div class="pillar"><div class="pillar__n">Step 2</div><h4>Act</h4><p>The model calls core or connector tools — reading files, searching, drafting a report.</p></div>
+              <div class="pillar"><div class="pillar__n">Step 3</div><h4>Approve</h4><p>Write tools become a pending action and wait for your Accept / Refuse before executing.</p></div>
+              <div class="pillar"><div class="pillar__n">Step 4</div><h4>Continue</h4><p>Task-continuity guards nudge read→write workflows so the agent finishes the job.</p></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- connectors -->
+        <section class="block" id="connectors">
+          <div class="wrap">
+            <div class="neutral-block">
+              <p class="kicker">Connector-neutral by design</p>
+              <h3 class="title">One core. Any domain.</h3>
+              <p class="sub">The agent loop and prompts never mention a specific product. Domain behavior lives in connector modules. Jira ships as the reference example, not the identity.</p>
+              <div class="chiprow">
+                <span class="chip chip--example">Jira · example</span>
+                <span class="chip chip--ghost">Your CRM</span>
+                <span class="chip chip--ghost">Your data warehouse</span>
+                <span class="chip chip--ghost">Your ticketing</span>
+                <span class="chip chip--ghost">+ build your own</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- cta -->
+        <section class="block" id="start">
+          <div class="wrap">
+            <div class="cta-block">
+              <h3>Bring a use case. Ship an agent.</h3>
+              <p>Clone the framework, add your connector, tune the prompts, and run it on the desktop.</p>
+              <div class="cta">
+                <a href="#" class="btn btn--primary">npm run electron:dev</a>
+                <a href="#" class="btn btn--outline">Read the docs</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- footer -->
+        <div class="wrap">
+          <div class="foot">
+            <span class="b">smile:D</span>
+            <div class="links">
+              <a href="#pillars">Pillars</a>
+              <a href="#features">Features</a>
+              <a href="#connectors">Connectors</a>
+              <a href="#start">Get started</a>
+            </div>
+            <div class="copy">A white-label desktop framework for building vertical AI agents. Black &amp; white by default — built to be rebranded. MIT licensed.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const content = document.querySelector('.content');
+      const navItems = document.querySelectorAll('.side-nav .nav-item');
+      const sections = [...navItems]
+        .map((item) => {
+          const id = item.getAttribute('href')?.slice(1);
+          return id ? document.getElementById(id) : null;
+        })
+        .filter(Boolean);
+
+      function setActive(id) {
+        navItems.forEach((item) => {
+          item.classList.toggle('active', item.getAttribute('href') === '#' + id);
+        });
+      }
+
+      function updateActive() {
+        const marker = content.getBoundingClientRect().top + 140;
+        let current = sections[0]?.id;
+        for (const section of sections) {
+          if (section.getBoundingClientRect().top <= marker) current = section.id;
+        }
+        if (current) setActive(current);
+      }
+
+      function scrollToSection(target) {
+        const top = target.getBoundingClientRect().top - content.getBoundingClientRect().top + content.scrollTop;
+        content.scrollTo({ top, behavior: 'smooth' });
+      }
+
+      content.addEventListener('scroll', updateActive, { passive: true });
+      window.addEventListener('resize', updateActive);
+      updateActive();
+
+      navItems.forEach((item) => {
+        item.addEventListener('click', (e) => {
+          e.preventDefault();
+          const id = item.getAttribute('href')?.slice(1);
+          const target = id && document.getElementById(id);
+          if (target) scrollToSection(target);
+        });
+      });
+    })();
+  </script>
+
+</body>
+</html>

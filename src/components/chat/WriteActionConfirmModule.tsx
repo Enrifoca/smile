@@ -40,7 +40,7 @@ export function WriteActionConfirmModule({
         <Button variant="primary" size="sm" onClick={onApprove}>
           {resolveApproveLabel(action)}
         </Button>
-        <Button variant="outline" size="sm" onClick={onReject}>
+        <Button variant="secondary" size="sm" onClick={onReject}>
           {labels.refuseLabel}
         </Button>
       </div>

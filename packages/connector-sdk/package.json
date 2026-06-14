@@ -1,0 +1,25 @@
+{
+  "name": "@smile/connector-sdk",
+  "version": "0.1.0",
+  "description": "Types, manifest validation, and test harness for smile:D connector packages",
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "bin": {
+    "smile-connector": "bin/smile-connector.cjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "scripts",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "electron": ">=28.0.0"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
+  }
+}

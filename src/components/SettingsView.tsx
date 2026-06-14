@@ -6,10 +6,18 @@ import {
   Badge,
   Button,
   Callout,
+  ConfirmModal,
+  Field,
+  Input,
+  RangeSlider,
+  Select,
   StatusText,
   Toggle,
 } from './ui'
 import { UserProfile } from '../agent/types'
+import { normalizeUserProfile } from '../agent/communicationPreferences'
+import { ModelRecommendationText } from '../settings/ModelRecommendationText'
+import { useAppUpdates } from '../context/UpdateContext'
 import {
   AIConfig,
   AIProvider,
@@ -26,10 +34,6 @@ import {
   getBundledProviderRole,
 } from '../shared/modelCatalog'
 
-interface SettingsViewProps {
-  onResetOnboarding: () => void
-}
-
 const FolderIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -42,32 +46,18 @@ const RefreshIcon = () => (
   </svg>
 )
 
-const defaultUserProfile: UserProfile = {
-  style: 'balanced',
-  verbosity: 'balanced',
-  tone: 'balanced',
-  writingPatterns: {
-    commonPhrases: [],
-    taskFormat: '',
-    commentStyle: '',
-  },
-  focusProjects: [],
-  confirmAllConnectorActions: true,
-  onboardingCompleted: true,
-}
+type ClearTarget = 'general' | 'reasoning' | 'ocr' | null
 
-export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
+export default function SettingsView() {
   const [aiConfig, setAIConfig] = useState<AIConfig | null>(null)
   const [workspace, setWorkspace] = useState<string | null>(null)
   const aiSave = useActionFeedback()
-  
-  // Agent behavior
+
   const [maxIterations, setMaxIterations] = useState<number>(10)
   const maxIterSave = useActionFeedback()
-  const [agentProfile, setAgentProfile] = useState<UserProfile>(defaultUserProfile)
+  const [agentProfile, setAgentProfile] = useState<UserProfile>(() => normalizeUserProfile(null))
   const agentProfileSave = useActionFeedback({ resetMs: 2000 })
 
-  // Reasoning model
   const [reasoningForm, setReasoningForm] = useState({
     provider: 'anthropic' as AIProvider,
     apiKey: '',
@@ -77,7 +67,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   const [reasoningConfigured, setReasoningConfigured] = useState(false)
   const reasoningSave = useActionFeedback()
 
-  // OCR model
   const [ocrForm, setOcrForm] = useState({
     provider: 'mistral' as OCRProvider,
     apiKey: '',
@@ -86,22 +75,29 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   const [ocrConfigured, setOcrConfigured] = useState(false)
   const ocrSave = useActionFeedback()
 
-  // Form state
   const [aiForm, setAIForm] = useState({
     provider: 'openai' as AIProvider,
     apiKey: '',
     model: '',
   })
-  
+
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null)
   const [refreshingModels, setRefreshingModels] = useState(false)
   const [modelRefreshStatus, setModelRefreshStatus] = useState<'idle' | 'success' | 'error'>('idle')
+
+  const [clearTarget, setClearTarget] = useState<ClearTarget>(null)
+  const [showConnectorWarning, setShowConnectorWarning] = useState(false)
+  const [keepRecentChats, setKeepRecentChats] = useState(5)
+  const [showTrimHistoryModal, setShowTrimHistoryModal] = useState(false)
+  const [showClearDataModal, setShowClearDataModal] = useState(false)
+  const { state: updateState, appVersion, checkForUpdates } = useAppUpdates()
+  const updateCheck = useActionFeedback()
 
   const { storage, models: modelCatalogAPI, file } = useElectron()
   const canUseSameReasoningKey = !!aiConfig && aiConfig.provider === reasoningForm.provider
 
   useEffect(() => {
-    loadSettings()
+    void loadSettings()
   }, [])
 
   const loadModelCatalog = async (refresh = false) => {
@@ -134,7 +130,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     try {
       await loadModelCatalog()
 
-      // Load AI config
       const aiConfigStr = await storage.getSecure('aiConfig')
       if (aiConfigStr) {
         const config = JSON.parse(aiConfigStr) as AIConfig
@@ -146,27 +141,15 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
         })
       }
 
-      // Load workspace
       const workspacePath = await file.getWorkspace()
       setWorkspace(workspacePath)
-      
-      // Load agent behavior settings
+
       const savedMaxIter = await storage.get('agentMaxIterations') as number | null
       if (savedMaxIter !== null && savedMaxIter !== undefined) setMaxIterations(savedMaxIter)
 
       const savedProfile = await storage.get('userProfile') as Partial<UserProfile> | null
-      if (savedProfile) {
-        setAgentProfile({
-          ...defaultUserProfile,
-          ...savedProfile,
-          writingPatterns: {
-            ...defaultUserProfile.writingPatterns,
-            ...savedProfile.writingPatterns,
-          },
-        })
-      }
+      setAgentProfile(normalizeUserProfile(savedProfile))
 
-      // Load reasoning model config (migrates legacy plannerConfig)
       const reasoningConfigStr = await storage.getSecure('reasoningConfig')
         || await storage.getSecure('plannerConfig')
       if (reasoningConfigStr) {
@@ -180,7 +163,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
         })
       }
 
-      // Load OCR model config
       const ocrConfigStr = await storage.getSecure('ocrConfig')
       if (ocrConfigStr) {
         const oc = JSON.parse(ocrConfigStr) as OCRConfig
@@ -191,7 +173,6 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
           model: oc.model || '',
         })
       }
-
     } catch (error) {
       console.error('Failed to load settings:', error)
     }
@@ -264,6 +245,27 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     })
   }
 
+  const clearModelConfig = async (target: ClearTarget) => {
+    if (!target) return
+    if (target === 'general') {
+      await storage.setSecure('aiConfig', '')
+      setAIConfig(null)
+      setAIForm({ provider: 'openai', apiKey: '', model: '' })
+    }
+    if (target === 'reasoning') {
+      await storage.setSecure('reasoningConfig', '')
+      await storage.setSecure('plannerConfig', '')
+      setReasoningConfigured(false)
+      setReasoningForm({ provider: 'anthropic', apiKey: '', model: '', useSameKey: true })
+    }
+    if (target === 'ocr') {
+      await storage.setSecure('ocrConfig', '')
+      setOcrConfigured(false)
+      setOcrForm({ provider: 'mistral', apiKey: '', model: '' })
+    }
+    setClearTarget(null)
+  }
+
   const saveMaxIterations = (value: number) => {
     void maxIterSave.run(async () => {
       await storage.set('agentMaxIterations', value)
@@ -278,24 +280,17 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
   }
 
   const updateAgentProfile = (updates: Partial<UserProfile>) => {
-    const nextProfile = {
-      ...agentProfile,
-      ...updates,
-    }
+    const nextProfile = { ...agentProfile, ...updates }
     setAgentProfile(nextProfile)
     void saveAgentProfile(nextProfile)
   }
 
-  const updateWritingSample = (sample: string) => {
-    setAgentProfile(prev => ({
-      ...prev,
-      writingPatterns: {
-        ...prev.writingPatterns,
-        taskFormat: sample,
-        commentStyle: sample,
-      },
-    }))
-    agentProfileSave.reset()
+  const handleConnectorToggle = (checked: boolean) => {
+    if (!checked && agentProfile.confirmAllConnectorActions) {
+      setShowConnectorWarning(true)
+      return
+    }
+    updateAgentProfile({ confirmAllConnectorActions: checked })
   }
 
   const selectWorkspace = async () => {
@@ -307,6 +302,24 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     } catch (error) {
       console.error('Failed to select workspace:', error)
     }
+  }
+
+  const trimChatHistory = async () => {
+    const history = await storage.get('chatHistory') as Array<{ id: string }> | null
+    const all = history || []
+    await storage.set('chatHistory', all.slice(0, keepRecentChats))
+    setShowTrimHistoryModal(false)
+  }
+
+  const clearAllData = async () => {
+    await storage.set('chatHistory', [])
+    await storage.set('userProfile', null)
+    await storage.setSecure('aiConfig', '')
+    await storage.setSecure('reasoningConfig', '')
+    await storage.setSecure('ocrConfig', '')
+    await storage.set('activeContextId', null)
+    setShowClearDataModal(false)
+    await loadSettings()
   }
 
   const getCatalogModels = (provider: ModelProvider, role: ModelRole, selectedModel?: string) => {
@@ -324,93 +337,102 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
     return 'Using bundled defaults'
   }
 
+  const clearLabels: Record<Exclude<ClearTarget, null>, string> = {
+    general: 'General Model',
+    reasoning: 'Reasoning Model',
+    ocr: 'OCR Model',
+  }
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="content-shell page-shell">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-xl font-medium text-neutral-950">Settings</h1>
-          <p className="text-sm text-neutral-500 mt-1">
-            Configure framework-level model, workspace, and runtime preferences.
-          </p>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-medium text-neutral-950">Settings</h1>
+            <p className="text-sm text-neutral-500 mt-1">
+              Configure framework-level model, workspace, and runtime preferences.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <StatusText
+              status={modelRefreshStatus}
+              successMessage="Models refreshed"
+              errorMessage="Refresh failed"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => loadModelCatalog(true)}
+              disabled={refreshingModels}
+              loading={refreshingModels}
+              loadingLabel="Updating..."
+            >
+              <RefreshIcon />
+              Update model lists
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-6">
-          {/* AI Configuration */}
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">AI Provider</h2>
-              <div className="flex items-center gap-3">
-                <StatusText
-                  status={modelRefreshStatus}
-                  successMessage="Models refreshed"
-                  errorMessage="Refresh failed"
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => loadModelCatalog(true)}
-                  disabled={refreshingModels}
-                  loading={refreshingModels}
-                  loadingLabel="Refreshing..."
-                >
-                  <RefreshIcon />
-                  Refresh Models
-                </Button>
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Workspace Folder</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              This is the folder where the agent can read documents and create outputs.
+            </p>
+            <div className="flex items-center gap-4">
+              <div className="ui-field ui-field--readonly flex flex-1 items-center gap-3 min-w-0">
+                <FolderIcon />
+                <span className="text-sm truncate">
+                  {workspace || 'No folder selected'}
+                </span>
               </div>
+              <Button variant="secondary" size="sm" onClick={selectWorkspace}>
+                {workspace ? 'Change' : 'Select Folder'}
+              </Button>
             </div>
+          </section>
 
+          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4 gap-3">
+              <h2 className="text-lg font-semibold text-gray-800">General Model</h2>
+              {aiConfig && <Badge tone="success">Active</Badge>}
+            </div>
+            <Callout className="mb-5">
+              <p className="text-xs font-normal">
+                <ModelRecommendationText section="general" />
+              </p>
+            </Callout>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Provider
-                </label>
-                <select
+              <Field label="Provider">
+                <Select
                   value={aiForm.provider}
-                  onChange={(e) => setAIForm({ 
-                    ...aiForm, 
-                    provider: e.target.value as AIProvider,
-                    model: '' 
-                  })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  onChange={(e) => setAIForm({ ...aiForm, provider: e.target.value as AIProvider, model: '' })}
                 >
                   {CHAT_PROVIDERS.map(provider => (
                     <option key={provider} value={provider}>{AI_PROVIDER_LABELS[provider]}</option>
                   ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  API Key
-                </label>
-                <input
+                </Select>
+              </Field>
+              <Field label="API Key">
+                <Input
                   type="password"
                   value={aiForm.apiKey}
                   onChange={(e) => setAIForm({ ...aiForm, apiKey: e.target.value })}
                   onFocus={() => aiForm.apiKey === '••••••••' && setAIForm({ ...aiForm, apiKey: '' })}
                   placeholder={`Your ${aiForm.provider} API key`}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Model
-                </label>
-                <select
+              </Field>
+              <Field label="Model" hint={getCatalogStatus(aiForm.provider, 'chat')}>
+                <Select
                   value={aiForm.model}
                   onChange={(e) => setAIForm({ ...aiForm, model: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="">Default</option>
                   {getCatalogModels(aiForm.provider, 'chat', aiForm.model).map(model => (
                     <option key={model} value={model}>{model}</option>
                   ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(aiForm.provider, 'chat')}</p>
-              </div>
-
+                </Select>
+              </Field>
               <ActionRow
                 label="Save"
                 busy={aiSave.busy}
@@ -419,34 +441,38 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 size="sm"
                 successMessage="Saved!"
                 errorMessage="Failed — check API key."
+                extraActions={
+                  <Button variant="secondary" size="sm" onClick={() => setClearTarget('general')}>
+                    Clear
+                  </Button>
+                }
               />
             </div>
           </section>
 
-          {/* Reasoning Model */}
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1 gap-3">
               <div className="flex items-center gap-3">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-800">Reasoning Model</h2>
                   <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
                 </div>
               </div>
-              {reasoningConfigured && <Badge tone="success">Active</Badge>}
+              <div className="flex items-center gap-3">
+                {reasoningConfigured && <Badge tone="success">Active</Badge>}
+              </div>
             </div>
             <p className="text-sm text-gray-500 mb-2">
-              A dedicated model for complex, multi-step tasks. When configured, it takes over automatically whenever the agent needs to plan deeply, such as analyzing documents, creating multiple connector records, or reasoning through ambiguous requests.
+              A dedicated model for complex, multi-step tasks. When configured, it takes over automatically whenever the agent needs to plan deeply.
             </p>
             <Callout className="mb-5">
-              <p className="text-xs">
-                <strong>Best picks:</strong> Claude 3.7 Sonnet (extended thinking), o4-mini / o3-mini (OpenAI reasoning), or DeepSeek-R1 on Groq (free, native chain-of-thought). If you leave this empty, the main model handles everything.
+              <p className="text-xs font-normal">
+                <ModelRecommendationText section="reasoning" />
               </p>
             </Callout>
-
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
-                <select
+              <Field label="Provider">
+                <Select
                   value={reasoningForm.provider}
                   onChange={e => {
                     const provider = e.target.value as AIProvider
@@ -457,14 +483,12 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                       useSameKey: aiConfig?.provider === provider ? reasoningForm.useSameKey : false,
                     })
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   {REASONING_PROVIDERS.map(provider => (
                     <option key={provider} value={provider}>{AI_PROVIDER_LABELS[provider]}</option>
                   ))}
-                </select>
-              </div>
-
+                </Select>
+              </Field>
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2 cursor-pointer">
                   <input
@@ -474,42 +498,31 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     onChange={e => setReasoningForm({ ...reasoningForm, useSameKey: e.target.checked, apiKey: '' })}
                     className="rounded"
                   />
-                  Use same API key as main model
+                  Use same API key as general model
                 </label>
-                {!canUseSameReasoningKey && (
-                  <p className="text-xs text-gray-500 mb-2">
-                    Choose the same provider as your main model to reuse its key.
-                  </p>
-                )}
                 {(!canUseSameReasoningKey || !reasoningForm.useSameKey) && (
-                  <input
+                  <Input
                     type="password"
                     value={reasoningForm.apiKey}
                     onChange={e => setReasoningForm({ ...reasoningForm, apiKey: e.target.value })}
                     onFocus={() => reasoningForm.apiKey === '••••••••' && setReasoningForm({ ...reasoningForm, apiKey: '' })}
                     placeholder={`Your ${reasoningForm.provider} API key`}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 )}
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                <select
+              <Field label="Model" hint={getCatalogStatus(reasoningForm.provider, 'reasoning')}>
+                <Select
                   value={reasoningForm.model}
                   onChange={e => setReasoningForm({ ...reasoningForm, model: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="">Default for provider</option>
                   {getCatalogModels(reasoningForm.provider, 'reasoning', reasoningForm.model).map(m => (
                     <option key={m} value={m}>{m}</option>
                   ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(reasoningForm.provider, 'reasoning')}</p>
-              </div>
-
+                </Select>
+              </Field>
               <ActionRow
-                label="Save Reasoning Model"
+                label="Save"
                 busy={reasoningSave.busy}
                 status={reasoningSave.status}
                 disabled={(!canUseSameReasoningKey || !reasoningForm.useSameKey) && !reasoningForm.apiKey}
@@ -517,72 +530,66 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 size="sm"
                 successMessage="Saved!"
                 errorMessage="Failed — check API key."
+                extraActions={
+                  <Button variant="secondary" size="sm" onClick={() => setClearTarget('reasoning')}>
+                    Clear
+                  </Button>
+                }
               />
             </div>
           </section>
 
-          {/* OCR Model */}
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1 gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-gray-800">OCR Model</h2>
                 <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
               </div>
-              {ocrConfigured && <Badge tone="success">Active</Badge>}
+              <div className="flex items-center gap-3">
+                {ocrConfigured && <Badge tone="success">Active</Badge>}
+              </div>
             </div>
             <p className="text-sm text-gray-500 mb-5">
-              A specialist model for scanned PDFs and image-based documents. When configured, the agent will automatically use OCR if normal PDF text extraction returns nothing or unreadable text.
+              A specialist model for scanned PDFs and image-based documents.
             </p>
-
             <Callout className="mb-5">
-              <p className="text-xs">
-                <strong>Provider notes:</strong> Mistral uses the official OCR API. DeepSeek uses the DeepSeek-OCR model through DeepInfra, so use a DeepInfra API token for that option.
+              <p className="text-xs font-normal">
+                <ModelRecommendationText section="ocr" />
               </p>
             </Callout>
-
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
-                <select
+              <Field label="Provider">
+                <Select
                   value={ocrForm.provider}
                   onChange={e => setOcrForm({ ...ocrForm, provider: e.target.value as OCRProvider, model: '' })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   {OCR_PROVIDERS.map(provider => (
                     <option key={provider} value={provider}>{OCR_PROVIDER_LABELS[provider]}</option>
                   ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                <input
+                </Select>
+              </Field>
+              <Field label="API Key">
+                <Input
                   type="password"
                   value={ocrForm.apiKey}
                   onChange={e => setOcrForm({ ...ocrForm, apiKey: e.target.value })}
                   onFocus={() => ocrForm.apiKey === '••••••••' && setOcrForm({ ...ocrForm, apiKey: '' })}
                   placeholder={ocrForm.provider === 'mistral' ? 'Your Mistral API key' : 'Your DeepInfra API token'}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                <select
+              </Field>
+              <Field label="Model" hint={getCatalogStatus(ocrForm.provider, 'ocr')}>
+                <Select
                   value={ocrForm.model}
                   onChange={e => setOcrForm({ ...ocrForm, model: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="">Default for provider</option>
                   {getCatalogModels(ocrForm.provider, 'ocr', ocrForm.model).map(model => (
                     <option key={model} value={model}>{model}</option>
                   ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">{getCatalogStatus(ocrForm.provider, 'ocr')}</p>
-              </div>
-
+                </Select>
+              </Field>
               <ActionRow
-                label="Save OCR Model"
+                label="Save"
                 busy={ocrSave.busy}
                 status={ocrSave.status}
                 disabled={!ocrForm.apiKey}
@@ -590,202 +597,190 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                 size="sm"
                 successMessage="Saved!"
                 errorMessage="Failed — check API key."
+                extraActions={
+                  <Button variant="secondary" size="sm" onClick={() => setClearTarget('ocr')}>
+                    Clear
+                  </Button>
+                }
               />
             </div>
           </section>
 
-          {/* Workspace */}
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Workspace Folder</h2>
-            
-            <p className="text-sm text-gray-600 mb-4">
-              This is the folder where the agent can read documents and create outputs.
-            </p>
-
-            <div className="flex items-center gap-4">
-              <div className="flex-1 flex items-center gap-3 px-4 py-3 bg-gray-50 rounded-lg">
-                <FolderIcon />
-                <span className="text-sm text-gray-700 truncate">
-                  {workspace || 'No folder selected'}
-                </span>
-              </div>
-              <Button variant="secondary" size="sm" onClick={selectWorkspace}>
-                {workspace ? 'Change' : 'Select Folder'}
-              </Button>
-            </div>
-          </section>
-
-          {/* Agent Behavior */}
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-1">Agent Behavior</h2>
             <p className="text-sm text-gray-500 mb-5">Control how the agent processes your requests.</p>
 
             <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-medium text-gray-800">Max iterations per request</h3>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  How many tool-call loops the agent can run before stopping. Higher values allow more complex tasks.
-                </p>
-              </div>
-              <div className="flex items-center gap-3 ml-6">
-                <select
-                  value={maxIterations}
-                  onChange={e => {
-                    const val = Number(e.target.value)
-                    setMaxIterations(val)
-                    saveMaxIterations(val)
-                  }}
-                  disabled={maxIterSave.busy}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-neutral-300"
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10 (default)</option>
-                  <option value={15}>15</option>
-                  <option value={20}>20</option>
-                  <option value={0}>No limit</option>
-                </select>
-                <StatusText
-                  busy={maxIterSave.busy}
-                  status={maxIterSave.status}
-                  busyMessage="Saving…"
-                  successMessage="Saved"
-                  size="sm"
-                />
-              </div>
-            </div>
-
-            <div className="border-t border-gray-200 pt-5 space-y-5">
-              <div>
-                <h3 className="font-medium text-gray-800">Communication preferences</h3>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  These are the same behavior settings collected during onboarding.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Communication Style
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {(['technical', 'balanced', 'conversational'] as const).map((style) => (
-                    <button
-                      key={style}
-                      onClick={() => updateAgentProfile({ style })}
-                      disabled={agentProfileSave.busy}
-                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
-                        agentProfile.style === style
-                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      {style}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Response Length
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {(['concise', 'balanced', 'detailed'] as const).map((verbosity) => (
-                    <button
-                      key={verbosity}
-                      onClick={() => updateAgentProfile({ verbosity })}
-                      disabled={agentProfileSave.busy}
-                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
-                        agentProfile.verbosity === verbosity
-                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      {verbosity}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tone
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {(['formal', 'balanced', 'casual'] as const).map((tone) => (
-                    <button
-                      key={tone}
-                      onClick={() => updateAgentProfile({ tone })}
-                      disabled={agentProfileSave.busy}
-                      className={`px-4 py-3 rounded-xl border-2 transition-colors capitalize ${
-                        agentProfile.tone === tone
-                          ? 'border-neutral-500 bg-neutral-50 text-neutral-700'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      {tone}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <label className="flex items-start justify-between gap-4 rounded-xl border border-gray-200 p-4">
+              <div className="flex items-center justify-between">
                 <div>
-                  <span className="font-medium text-gray-800">Confirm connector write actions</span>
+                  <h3 className="font-medium text-gray-800">Max iterations per request</h3>
                   <p className="text-sm text-gray-500 mt-0.5">
-                    Ask before the agent creates, edits, sends, uploads, or otherwise writes through a connector.
+                    How many tool-call loops the agent can run before stopping.
                   </p>
                 </div>
-                <Toggle
-                  checked={agentProfile.confirmAllConnectorActions}
-                  onChange={event => updateAgentProfile({ confirmAllConnectorActions: event.target.checked })}
+                <div className="flex items-center gap-3 ml-6">
+                  <Select
+                    value={maxIterations}
+                    onChange={e => {
+                      const val = Number(e.target.value)
+                      setMaxIterations(val)
+                      saveMaxIterations(val)
+                    }}
+                    disabled={maxIterSave.busy}
+                    className="w-auto min-w-[8.5rem]"
+                  >
+                    <option value={5}>5</option>
+                    <option value={10}>10 (default)</option>
+                    <option value={15}>15</option>
+                    <option value={20}>20</option>
+                    <option value={0}>No limit</option>
+                  </Select>
+                  <StatusText
+                    busy={maxIterSave.busy}
+                    status={maxIterSave.status}
+                    busyMessage="Saving…"
+                    successMessage="Saved"
+                    size="sm"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-5 space-y-5">
+                <div>
+                  <h3 className="font-medium text-gray-800">Communication preferences</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Adjust how the agent balances technical depth, detail, and tone.
+                  </p>
+                </div>
+
+                <RangeSlider
+                  minLabel="Technical"
+                  maxLabel="Conversational"
+                  value={agentProfile.styleSpectrum}
                   disabled={agentProfileSave.busy}
-                  label="Confirm connector write actions"
+                  onChange={value => updateAgentProfile({ styleSpectrum: value })}
                 />
-              </label>
+                <RangeSlider
+                  minLabel="Concise"
+                  maxLabel="Detailed"
+                  value={agentProfile.detailSpectrum}
+                  disabled={agentProfileSave.busy}
+                  onChange={value => updateAgentProfile({ detailSpectrum: value })}
+                />
+                <RangeSlider
+                  minLabel="Formal"
+                  maxLabel="Casual"
+                  value={agentProfile.toneSpectrum}
+                  disabled={agentProfileSave.busy}
+                  onChange={value => updateAgentProfile({ toneSpectrum: value })}
+                />
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Writing Sample
-                </label>
-                <textarea
-                  value={agentProfile.writingPatterns.taskFormat}
-                  onChange={event => updateWritingSample(event.target.value)}
-                  onBlur={() => saveAgentProfile(agentProfile)}
-                  placeholder="Paste a sample of how you typically write tasks, comments, emails, or other work output..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-neutral-500 focus:border-transparent h-24 resize-none"
-                />
-              </div>
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 p-4">
+                  <div>
+                    <span className="font-medium text-gray-800">Confirm connector write actions</span>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Ask before the agent creates, edits, sends, uploads, or otherwise writes through a connector.
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={agentProfile.confirmAllConnectorActions}
+                    onChange={event => handleConnectorToggle(event.target.checked)}
+                    disabled={agentProfileSave.busy}
+                    label="Confirm connector write actions"
+                    className="shrink-0"
+                  />
+                </div>
 
-              <div className="h-5">
-                <StatusText
-                  busy={agentProfileSave.busy}
-                  status={agentProfileSave.status}
-                  busyMessage="Saving behavior settings…"
-                  successMessage="Behavior settings saved"
-                  errorMessage="Could not save behavior settings"
-                  size="sm"
-                />
+                <div className="h-5">
+                  <StatusText
+                    busy={agentProfileSave.busy}
+                    status={agentProfileSave.status}
+                    busyMessage="Saving behavior settings…"
+                    successMessage="Behavior settings saved"
+                    errorMessage="Could not save behavior settings"
+                    size="sm"
+                  />
+                </div>
               </div>
-            </div>
             </div>
           </section>
 
-          {/* Danger Zone */}
+          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-800 mb-1">App updates</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Installed releases check GitHub automatically on startup. Download installers from your website or GitHub Releases.
+            </p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium text-gray-800">Version {appVersion}</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  {updateState.status === 'checking' || updateCheck.busy
+                    ? 'Checking for updates…'
+                    : updateState.status === 'ready'
+                      ? `Update ${updateState.version} downloaded — restart from the notification.`
+                      : updateState.status === 'downloading'
+                        ? `Downloading ${updateState.version ?? 'update'}${updateState.percent != null ? ` (${Math.round(updateState.percent)}%)` : '…'}`
+                        : updateState.status === 'available'
+                          ? `Update ${updateState.version} available — downloading…`
+                          : updateState.status === 'dev-skipped'
+                            ? updateState.message
+                            : updateState.status === 'error'
+                              ? updateState.message || 'Could not check for updates.'
+                              : updateState.message || 'You are on the latest version.'}
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                disabled={updateCheck.busy}
+                onClick={() => {
+                  updateCheck.run(async () => {
+                    await checkForUpdates()
+                  })
+                }}
+              >
+                Check for updates
+              </Button>
+            </div>
+            <div className="h-5 mt-3">
+              <StatusText
+                busy={updateCheck.busy}
+                status={updateCheck.status}
+                busyMessage="Checking for updates…"
+                successMessage="Update check finished"
+                errorMessage="Update check failed"
+                size="sm"
+              />
+            </div>
+          </section>
+
           <section className="bg-white rounded-xl shadow-sm border border-red-200 p-6">
             <h2 className="text-lg font-semibold text-red-700 mb-4">Danger Zone</h2>
-            
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h3 className="font-medium text-gray-800">Reset Onboarding</h3>
+                  <h3 className="font-medium text-gray-800">Trim chat history</h3>
                   <p className="text-sm text-gray-500">
-                    Go through the setup process again
+                    Delete older conversations and keep only the most recent ones.
                   </p>
                 </div>
-                <Button variant="secondary" size="sm" onClick={onResetOnboarding}>
-                  Reset
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Select
+                    value={keepRecentChats}
+                    onChange={event => setKeepRecentChats(Number(event.target.value))}
+                    className="w-auto min-w-[7rem]"
+                  >
+                    {Array.from({ length: 16 }, (_, index) => (
+                      <option key={index} value={index}>
+                        Keep {index}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button variant="secondary" size="sm" onClick={() => setShowTrimHistoryModal(true)}>
+                    Trim
+                  </Button>
+                </div>
               </div>
 
               <hr className="border-gray-200" />
@@ -797,35 +792,66 @@ export default function SettingsView({ onResetOnboarding }: SettingsViewProps) {
                     Delete all stored data including credentials and chat history
                   </p>
                 </div>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={async () => {
-                    if (confirm('Are you sure? This will delete all your data including credentials and chat history.')) {
-                      await storage.set('chatHistory', [])
-                      await storage.set('userProfile', null)
-                      await storage.setSecure('aiConfig', '')
-                      onResetOnboarding()
-                    }
-                  }}
-                >
+                <Button variant="danger" size="sm" onClick={() => setShowClearDataModal(true)}>
                   Clear Data
                 </Button>
               </div>
             </div>
           </section>
 
-          {/* About */}
           <section className="text-center py-4">
-            <p className="text-sm text-gray-500">
-              smile:D v0.1.0 - White-label desktop agent framework
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              All data is stored locally on your machine
-            </p>
+            <p className="text-sm text-gray-500">smile:D v{appVersion} — White-label desktop agent framework</p>
+            <p className="text-xs text-gray-400 mt-1">All data is stored locally on your machine</p>
           </section>
         </div>
       </div>
+
+      {clearTarget && (
+        <ConfirmModal
+          title={`Clear ${clearLabels[clearTarget]}?`}
+          description="This removes saved credentials and model selection for this module. You can configure it again later."
+          confirmLabel="Clear"
+          confirmVariant="danger"
+          onConfirm={() => void clearModelConfig(clearTarget)}
+          onCancel={() => setClearTarget(null)}
+        />
+      )}
+
+      {showConnectorWarning && (
+        <ConfirmModal
+          title="Disable write confirmations?"
+          description="The agent will be able to create, edit, send, and upload through connectors without asking for approval first."
+          confirmLabel="Disable confirmations"
+          confirmVariant="danger"
+          onConfirm={() => {
+            updateAgentProfile({ confirmAllConnectorActions: false })
+            setShowConnectorWarning(false)
+          }}
+          onCancel={() => setShowConnectorWarning(false)}
+        />
+      )}
+
+      {showTrimHistoryModal && (
+        <ConfirmModal
+          title="Trim chat history?"
+          description={`Delete all conversations except the ${keepRecentChats} most recent? This cannot be undone.`}
+          confirmLabel="Trim history"
+          confirmVariant="danger"
+          onConfirm={() => void trimChatHistory()}
+          onCancel={() => setShowTrimHistoryModal(false)}
+        />
+      )}
+
+      {showClearDataModal && (
+        <ConfirmModal
+          title="Clear all data?"
+          description="This deletes credentials, chat history, and saved preferences. This cannot be undone."
+          confirmLabel="Clear everything"
+          confirmVariant="danger"
+          onConfirm={() => void clearAllData()}
+          onCancel={() => setShowClearDataModal(false)}
+        />
+      )}
     </div>
   )
 }

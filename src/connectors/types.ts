@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ConfirmationViewModel, ToolEntry } from '../agent/types'
+import { ContextEnvelope } from './contract'
 
 export type ToolCategory =
   | 'connector-read'
@@ -10,11 +11,18 @@ export type ToolCategory =
   | 'file-manage'
   | 'memory'
   | 'scratchpad'
+  | 'context'
 
 export interface ToolDefinition {
   name: string
   description: string
-  schema: z.ZodObject<z.ZodRawShape>
+  /** Zod schema for core/built-in tools. Omit when `jsonSchema` is provided. */
+  schema?: z.ZodObject<z.ZodRawShape>
+  /**
+   * Precomputed JSON Schema for declarative plugin tools (manifest `inputSchema`).
+   * When present it is sent to the model as-is; otherwise `schema` is converted.
+   */
+  jsonSchema?: Record<string, unknown>
   requiresConfirmation: boolean
   category: ToolCategory
 }
@@ -43,6 +51,7 @@ export interface ConnectorDefinition<TContext = unknown> {
   approveAction?: (input: {
     actionType: string
     data: Record<string, unknown>
+    contextEnvelope?: ContextEnvelope
     executeTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
     formatToolResultForAI: (name: string, result: unknown) => string
     updateScratchpadAfterTool: (name: string, args: Record<string, unknown>, formattedResult: string) => void
@@ -54,7 +63,12 @@ export interface ConnectorDefinition<TContext = unknown> {
 export interface ConnectorRuntime<TContext = any> {
   definition: ConnectorDefinition<TContext>
   context?: TContext | null
-  executeTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
+  executeTool: (name: string, args: Record<string, unknown>, context?: ContextEnvelope) => Promise<unknown>
+  /**
+   * Set the active project context envelope for this connector. The runtime
+   * threads it into execution and approval so tools run scoped to the context.
+   */
+  setActiveContext?: (envelope: ContextEnvelope | null) => void
 }
 
 export function ownsTool(connector: ConnectorDefinition, toolName: string): boolean {

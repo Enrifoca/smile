@@ -4,8 +4,8 @@ import {
   Alert,
   Badge,
   Button,
-  ModuleSection,
-  PanelBody,
+  Panel,
+  SectionHeader,
   type ActionStatus,
 } from '../ui'
 
@@ -38,19 +38,20 @@ export function ApiConnectionModule({
   onSave,
   onRemove,
   children,
-  saveLabel = 'Save API connection',
-  removeLabel = 'Remove',
+  saveLabel = 'Save',
+  removeLabel = 'Clear',
   configuredLabel = 'Configured',
   successMessage = 'Saved',
   errorMessage = 'Check all fields',
 }: ApiConnectionModuleProps) {
   return (
-    <ModuleSection
-      title={title}
-      description={description}
-      aside={configured ? <Badge>{configuredLabel}</Badge> : undefined}
-    >
-      <PanelBody variant="emphasis" className="space-y-4">
+    <Panel variant="soft">
+      <SectionHeader
+        title={title}
+        description={description}
+        aside={configured ? <Badge tone="success">{configuredLabel}</Badge> : undefined}
+      />
+      <div className="space-y-4">
         {children}
 
         <ActionRow
@@ -59,16 +60,17 @@ export function ApiConnectionModule({
           status={saveStatus}
           disabled={saveDisabled}
           onAction={onSave}
+          size="sm"
           successMessage={successMessage}
           errorMessage={errorMessage}
           extraActions={configured && onRemove ? (
-            <Button variant="outline" size="md" onClick={onRemove}>
+            <Button variant="secondary" size="sm" onClick={onRemove}>
               {removeLabel}
             </Button>
           ) : undefined}
         />
-      </PanelBody>
-    </ModuleSection>
+      </div>
+    </Panel>
   )
 }
 
@@ -98,8 +100,9 @@ export function CustomSettingsModule({
   footer,
 }: CustomSettingsModuleProps) {
   return (
-    <ModuleSection title={title} description={description} aside={action}>
-      <PanelBody variant="emphasisCompact">{children}</PanelBody>
+    <Panel variant="soft">
+      <SectionHeader title={title} description={description} aside={action} />
+      <div className="space-y-4">{children}</div>
       {save ? (
         <ActionRow
           label={save.label}
@@ -107,13 +110,14 @@ export function CustomSettingsModule({
           status={save.saveStatus}
           disabled={save.saveDisabled}
           onAction={save.onSave}
+          size="sm"
           successMessage={save.successMessage}
           errorMessage={save.errorMessage}
         />
       ) : footer ? (
         <div className="ui-action-row">{footer}</div>
       ) : null}
-    </ModuleSection>
+    </Panel>
   )
 }
 
@@ -145,15 +149,16 @@ export function McpConnectionModule({
   connectingLabel = 'Connecting...',
 }: McpConnectionModuleProps) {
   return (
-    <ModuleSection
-      title={title}
-      description={description}
-      aside={connected ? <Badge tone="success">Connected</Badge> : undefined}
-    >
+    <Panel variant="soft">
+      <SectionHeader
+        title={title}
+        description={description}
+        aside={connected ? <Badge tone="success">Connected</Badge> : undefined}
+      />
       <div className="ui-action-row">
         <Button
           variant="primary"
-          size="lg"
+          size="sm"
           loading={connecting}
           loadingLabel={connectingLabel}
           onClick={onConnect}
@@ -161,15 +166,15 @@ export function McpConnectionModule({
           {connected ? reconnectLabel : connectLabel}
         </Button>
         {connected && onDisconnect && (
-          <Button variant="outline" size="lg" onClick={onDisconnect}>
+          <Button variant="secondary" size="sm" onClick={onDisconnect}>
             {disconnectLabel}
           </Button>
         )}
       </div>
-      {error && <Alert>{error}</Alert>}
-    </ModuleSection>
+      {error && <Alert className="mt-4">{error}</Alert>}
+    </Panel>
   )
 }
 
 /** @deprecated Use ModuleSection directly for new modules */
-export const ConnectorSettingsModule = ModuleSection
+export const ConnectorSettingsModule = SectionHeader

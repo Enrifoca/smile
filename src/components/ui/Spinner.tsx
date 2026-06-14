@@ -6,9 +6,9 @@ export interface SpinnerProps {
 }
 
 const sizeClass: Record<NonNullable<SpinnerProps['size']>, string> = {
-  sm: 'ui-spinner ui-spinner--sm',
-  md: 'ui-spinner ui-spinner--md',
-  lg: 'ui-spinner ui-spinner--lg',
+  sm: 'ui-loading-dots ui-loading-dots--sm',
+  md: 'ui-loading-dots',
+  lg: 'ui-loading-dots ui-loading-dots--lg',
 }
 
 export function Spinner({ size = 'md', className }: SpinnerProps) {
@@ -17,6 +17,10 @@ export function Spinner({ size = 'md', className }: SpinnerProps) {
       className={joinClasses(sizeClass[size], className)}
       role="status"
       aria-label="Loading"
-    />
+    >
+      <span />
+      <span />
+      <span />
+    </div>
   )
 }

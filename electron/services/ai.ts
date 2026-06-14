@@ -115,6 +115,7 @@ interface AIResponse {
 
 export class AIService {
   private config: AIConfig
+  private streamAbortController: AbortController | null = null
 
   constructor(config: AIConfig) {
     this.config = config
@@ -122,6 +123,25 @@ export class AIService {
 
   updateConfig(config: AIConfig) {
     this.config = config
+  }
+
+  /** Cancel an in-flight streaming chat request, if any. */
+  abortStream(): void {
+    this.streamAbortController?.abort()
+  }
+
+  private startStreamAbortScope(): AbortSignal {
+    this.streamAbortController?.abort()
+    this.streamAbortController = new AbortController()
+    return this.streamAbortController.signal
+  }
+
+  private endStreamAbortScope(): void {
+    this.streamAbortController = null
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError'
   }
 
   async chat(messages: Message[], tools?: ToolDefinition[]): Promise<AIResponse> {
@@ -238,11 +258,17 @@ export class AIService {
 
     let lastError: Error | null = null
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const signal = this.startStreamAbortScope()
+      let contentAccum = ''
+      const toolCallMap: Record<number, { id: string; name: string; arguments: string }> = {}
+      const progressNotified = new Map<number, string>()
+
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          signal,
         })
 
         if (!response.ok) {
@@ -259,16 +285,16 @@ export class AIService {
           throw new Error(errMsg)
         }
 
-        // Parse SSE stream
         const reader = response.body!.getReader()
         const decoder = new TextDecoder()
-        let contentAccum = ''
-        // Tool call accumulators: index → { id, name, arguments }
-        const toolCallMap: Record<number, { id: string; name: string; arguments: string }> = {}
-        const progressNotified = new Map<number, string>()
         let buffer = ''
 
         while (true) {
+          if (signal.aborted) {
+            await reader.cancel().catch(() => {})
+            return { content: contentAccum, toolCalls: [] }
+          }
+
           const { done, value } = await reader.read()
           if (done) break
           buffer += decoder.decode(value, { stream: true })
@@ -315,6 +341,9 @@ export class AIService {
 
         return { content: contentAccum, toolCalls }
       } catch (e) {
+        if (this.isAbortError(e) || signal.aborted) {
+          return { content: contentAccum, toolCalls: [] }
+        }
         lastError = e instanceof Error ? e : new Error(String(e))
         if (isRetryableAIError(lastError.message) && attempt < MAX_RETRIES) {
           const waitMs = parseRetryAfterMs(lastError.message, attempt) || (1000 * (attempt + 1))
@@ -322,6 +351,8 @@ export class AIService {
           await sleep(waitMs); continue
         }
         throw lastError
+      } finally {
+        this.endStreamAbortScope()
       }
     }
     throw lastError || new Error('Streaming failed after retries')
@@ -531,96 +562,112 @@ export class AIService {
     const { body, headers } = this.buildAnthropicBody(model, messages, tools, true)
     headers['x-api-key'] = apiKey
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    })
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}))
-      throw new Error((error as { error?: { message?: string } }).error?.message || `Anthropic API error: ${response.status}`)
-    }
-
-    const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
+    const signal = this.startStreamAbortScope()
     let contentAccum = ''
 
-    // Track current content block type so we know how to route deltas
-    type BlockType = 'text' | 'thinking' | 'tool_use' | null
-    let currentBlockType: BlockType = null
-    const toolCallMap: Record<number, { id: string; name: string; input: string }> = {}
-    const progressNotified = new Map<number, string>()
-    let currentToolIdx = -1
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      })
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop() ?? ''
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error((error as { error?: { message?: string } }).error?.message || `Anthropic API error: ${response.status}`)
+      }
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const raw = line.slice(6).trim()
-        if (raw === '[DONE]') break
-        let evt: Record<string, unknown>
-        try { evt = JSON.parse(raw) } catch { continue }
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
 
-        const type = evt.type as string
+      // Track current content block type so we know how to route deltas
+      type BlockType = 'text' | 'thinking' | 'tool_use' | null
+      let currentBlockType: BlockType = null
+      const toolCallMap: Record<number, { id: string; name: string; input: string }> = {}
+      const progressNotified = new Map<number, string>()
+      let currentToolIdx = -1
 
-        if (type === 'content_block_start') {
-          const blk = (evt.content_block as { type: string; id?: string; name?: string }) || {}
-          currentBlockType = blk.type as BlockType
-          if (blk.type === 'thinking') {
-            // Emit opening tag so the live parser shows "Thinking…"
-            onToken('<think>')
-            contentAccum += '<think>'
-          } else if (blk.type === 'tool_use') {
-            currentToolIdx++
-            toolCallMap[currentToolIdx] = { id: blk.id || '', name: blk.name || '', input: '' }
-            notifyToolDraftProgress(
-              Object.values(toolCallMap).map(tc => ({ name: tc.name, arguments: tc.input })),
-              onProgress,
-              progressNotified,
-            )
+      while (true) {
+        if (signal.aborted) {
+          await reader.cancel().catch(() => {})
+          return { content: contentAccum, toolCalls: [] }
+        }
+
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (raw === '[DONE]') break
+          let evt: Record<string, unknown>
+          try { evt = JSON.parse(raw) } catch { continue }
+
+          const type = evt.type as string
+
+          if (type === 'content_block_start') {
+            const blk = (evt.content_block as { type: string; id?: string; name?: string }) || {}
+            currentBlockType = blk.type as BlockType
+            if (blk.type === 'thinking') {
+              onToken('<think>')
+              contentAccum += '<think>'
+            } else if (blk.type === 'tool_use') {
+              currentToolIdx++
+              toolCallMap[currentToolIdx] = { id: blk.id || '', name: blk.name || '', input: '' }
+              notifyToolDraftProgress(
+                Object.values(toolCallMap).map(tc => ({ name: tc.name, arguments: tc.input })),
+                onProgress,
+                progressNotified,
+              )
+            }
+          } else if (type === 'content_block_delta') {
+            const delta = (evt.delta as { type: string; text?: string; thinking?: string; partial_json?: string }) || {}
+            if (currentBlockType === 'thinking' && delta.thinking) {
+              onToken(delta.thinking)
+              contentAccum += delta.thinking
+            } else if (currentBlockType === 'text' && delta.text) {
+              onToken(delta.text)
+              contentAccum += delta.text
+            } else if (currentBlockType === 'tool_use' && delta.partial_json) {
+              if (toolCallMap[currentToolIdx]) toolCallMap[currentToolIdx].input += delta.partial_json
+              notifyToolDraftProgress(
+                Object.values(toolCallMap).map(tc => ({ name: tc.name, arguments: tc.input })),
+                onProgress,
+                progressNotified,
+              )
+            }
+          } else if (type === 'content_block_stop') {
+            if (currentBlockType === 'thinking') {
+              onToken('</think>')
+              contentAccum += '</think>'
+            }
+            currentBlockType = null
           }
-        } else if (type === 'content_block_delta') {
-          const delta = (evt.delta as { type: string; text?: string; thinking?: string; partial_json?: string }) || {}
-          if (currentBlockType === 'thinking' && delta.thinking) {
-            onToken(delta.thinking)
-            contentAccum += delta.thinking
-          } else if (currentBlockType === 'text' && delta.text) {
-            onToken(delta.text)
-            contentAccum += delta.text
-          } else if (currentBlockType === 'tool_use' && delta.partial_json) {
-            if (toolCallMap[currentToolIdx]) toolCallMap[currentToolIdx].input += delta.partial_json
-            notifyToolDraftProgress(
-              Object.values(toolCallMap).map(tc => ({ name: tc.name, arguments: tc.input })),
-              onProgress,
-              progressNotified,
-            )
-          }
-        } else if (type === 'content_block_stop') {
-          if (currentBlockType === 'thinking') {
-            onToken('</think>')
-            contentAccum += '</think>'
-          }
-          currentBlockType = null
         }
       }
+
+      const toolCalls = Object.values(toolCallMap)
+        .filter(tc => tc.name)
+        .map(tc => ({
+          id: tc.id || `tc-${Date.now()}`,
+          name: tc.name,
+          arguments: safeParseToolArgs(tc.input),
+        }))
+
+      return { content: contentAccum, toolCalls }
+    } catch (error) {
+      if (this.isAbortError(error) || signal.aborted) {
+        return { content: contentAccum, toolCalls: [] }
+      }
+      throw error
+    } finally {
+      this.endStreamAbortScope()
     }
-
-    const toolCalls = Object.values(toolCallMap)
-      .filter(tc => tc.name)
-      .map(tc => ({
-        id: tc.id || `tc-${Date.now()}`,
-        name: tc.name,
-        arguments: safeParseToolArgs(tc.input),
-      }))
-
-    return { content: contentAccum, toolCalls }
   }
 
   private async callGroq(

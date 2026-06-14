@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelCatalog, ModelProvider } from '../src/shared/modelCatalog'
+import type { ApproveActionOutcome, ConnectorManifest, ContextEnvelope, ToolResult } from '../src/connectors/contract'
+import type { ProjectContext } from '../src/context/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -27,32 +29,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     refreshProvider: (provider: string) => ipcRenderer.invoke('models:refreshProvider', provider),
   },
 
-  // Jira
-  jira: {
-    configure: (config: { baseUrl: string; email: string; apiToken: string }) => 
-      ipcRenderer.invoke('jira:configure', config),
-    testConnection: () => ipcRenderer.invoke('jira:testConnection'),
-    getProjects: () => ipcRenderer.invoke('jira:getProjects'),
-    searchIssues: (jql: string, maxResults?: number) => 
-      ipcRenderer.invoke('jira:searchIssues', jql, maxResults),
-    getIssue: (issueKey: string) => ipcRenderer.invoke('jira:getIssue', issueKey),
-    createIssue: (issueData: Record<string, unknown>) => 
-      ipcRenderer.invoke('jira:createIssue', issueData),
-    updateIssue: (issueKey: string, updateData: Record<string, unknown>) => 
-      ipcRenderer.invoke('jira:updateIssue', issueKey, updateData),
-    addComment: (issueKey: string, comment: string) => 
-      ipcRenderer.invoke('jira:addComment', issueKey, comment),
-    transitionIssue: (issueKey: string, transitionId: string) => 
-      ipcRenderer.invoke('jira:transitionIssue', issueKey, transitionId),
-    getTransitions: (issueKey: string) => ipcRenderer.invoke('jira:getTransitions', issueKey),
-    getSprints: (boardId: number) => ipcRenderer.invoke('jira:getSprints', boardId),
-    getBoards: () => ipcRenderer.invoke('jira:getBoards'),
-  },
-
   // Files
   file: {
     selectWorkspace: () => ipcRenderer.invoke('file:selectWorkspace'),
     getWorkspace: () => ipcRenderer.invoke('file:getWorkspace'),
+    selectFolderInWorkspace: () => ipcRenderer.invoke('file:selectFolderInWorkspace'),
     list: (relativePath?: string) => ipcRenderer.invoke('file:list', relativePath),
     read: (relativePath: string) => ipcRenderer.invoke('file:read', relativePath),
     readOcr: (relativePath: string) => ipcRenderer.invoke('file:readOcr', relativePath),
@@ -66,13 +47,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ensureAttachmentsDir: () => ipcRenderer.invoke('file:ensureAttachmentsDir'),
     saveAttachment: (fileName: string, data: ArrayBuffer) => 
       ipcRenderer.invoke('file:saveAttachment', fileName, data),
-  },
-
-  // Jira Attachments (REST API)
-  jiraAttachment: {
-    upload: (issueKey: string, filePath: string) => 
-      ipcRenderer.invoke('jiraAttachment:upload', issueKey, filePath),
-    isConfigured: () => ipcRenderer.invoke('jiraAttachment:isConfigured'),
   },
 
   // AI
@@ -150,9 +124,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.send('ai:reasoning:stream', messages, tools)
       })
     },
+    abortStream: () => ipcRenderer.send('ai:abortStream'),
   },
 
-  // Atlassian MCP
+  // MCP connection (OAuth / session lifecycle only; tool calls go through connector sandbox)
   mcp: {
     connect: (options?: { forceReauth?: boolean }) => ipcRenderer.invoke('mcp:connect', options),
     disconnect: () => ipcRenderer.invoke('mcp:disconnect'),
@@ -160,47 +135,58 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getConnectionState: () => ipcRenderer.invoke('mcp:getConnectionState'),
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => {
       ipcRenderer.on('mcp:connectionState', (_, data) => callback(data))
-      // Return cleanup function
       return () => ipcRenderer.removeAllListeners('mcp:connectionState')
     },
-    getProjects: () => ipcRenderer.invoke('mcp:getProjects'),
-    getProjectIssueTypes: (projectKey: string) => ipcRenderer.invoke('mcp:getProjectIssueTypes', projectKey),
-    getFieldMetadata: (projectKey: string, issueTypeId: string) => 
-      ipcRenderer.invoke('mcp:getFieldMetadata', projectKey, issueTypeId),
-    searchIssues: (jql: string, maxResults?: number, fields?: string | string[]) => ipcRenderer.invoke('mcp:searchIssues', jql, maxResults, fields),
-    getIssue: (issueKey: string) => ipcRenderer.invoke('mcp:getIssue', issueKey),
-    createIssue: (projectKey: string, issueTypeId: string, summary: string, description?: string, additionalFields?: Record<string, unknown>) =>
-      ipcRenderer.invoke('mcp:createIssue', projectKey, issueTypeId, summary, description, additionalFields),
-    editIssue: (issueKey: string, fields: Record<string, unknown>) =>
-      ipcRenderer.invoke('mcp:editIssue', issueKey, fields),
-    addComment: (issueKey: string, body: string) => ipcRenderer.invoke('mcp:addComment', issueKey, body),
-    getTransitions: (issueKey: string) => ipcRenderer.invoke('mcp:getTransitions', issueKey),
-    transitionIssue: (issueKey: string, transitionId: string) =>
-      ipcRenderer.invoke('mcp:transitionIssue', issueKey, transitionId),
-    syncMetadata: (projectKeys: string[]) => ipcRenderer.invoke('mcp:syncMetadata', projectKeys),
-    syncAllMetadata: (projectKeys: string[]) => ipcRenderer.invoke('mcp:syncAllMetadata', projectKeys),
-    fetchUsers: (projectKeys: string[]) => ipcRenderer.invoke('mcp:fetchUsers', projectKeys),
-    getAssignableUsers: (projectKey: string) => ipcRenderer.invoke('mcp:getAssignableUsers', projectKey),
-    getCurrentUser: () => ipcRenderer.invoke('mcp:getCurrentUser'),
-    listTools: () => ipcRenderer.invoke('mcp:listTools'),
-    lookupUser: (query: string) => ipcRenderer.invoke('mcp:lookupUser', query),
-  },
-
-  // Jira Metadata
-  jiraMetadata: {
-    get: () => ipcRenderer.invoke('jiraMetadata:get'),
-    setMonitoredProjects: (projects: Array<{ id: string; key: string; name: string; projectTypeKey: string; avatarUrl?: string }>) =>
-      ipcRenderer.invoke('jiraMetadata:setMonitoredProjects', projects),
-    updateProjectMetadata: (projectKey: string, metadata: unknown) =>
-      ipcRenderer.invoke('jiraMetadata:updateProjectMetadata', projectKey, metadata),
-    set: (metadata: unknown) => ipcRenderer.invoke('jiraMetadata:set', metadata),
-    setUsers: (users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>) =>
-      ipcRenderer.invoke('jiraMetadata:setUsers', users),
   },
 
   // Shell
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  },
+
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
+  },
+
+  updates: {
+    check: () => ipcRenderer.invoke('updates:check') as Promise<{ success: boolean; data?: import('../src/shared/updates').UpdateState; error?: string }>,
+    install: () => ipcRenderer.invoke('updates:install') as Promise<{ success: boolean }>,
+    onStateChange: (callback: (state: import('../src/shared/updates').UpdateState) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, state: import('../src/shared/updates').UpdateState) => callback(state)
+      ipcRenderer.on('updates:state', listener)
+      return () => ipcRenderer.removeListener('updates:state', listener)
+    },
+  },
+
+  // Declarative connectors (sandboxed plugins)
+  connectors: {
+    list: () => ipcRenderer.invoke('connectors:list'),
+    execute: (connectorId: string, name: string, args: Record<string, unknown>, context?: ContextEnvelope) =>
+      ipcRenderer.invoke('connectors:execute', connectorId, name, args, context),
+    approve: (connectorId: string, actionType: string, data: Record<string, unknown>, context?: ContextEnvelope) =>
+      ipcRenderer.invoke('connectors:approve', connectorId, actionType, data, context),
+    getKnowledge: (contextId: string, connectorId: string) =>
+      ipcRenderer.invoke('connectors:getKnowledge', contextId, connectorId),
+    saveKnowledge: (contextId: string, connectorId: string, markdown: string) =>
+      ipcRenderer.invoke('connectors:saveKnowledge', contextId, connectorId, markdown),
+    deletePackage: (connectorId: string) => ipcRenderer.invoke('connectors:deletePackage', connectorId),
+    installPackage: (connectorId: string) => ipcRenderer.invoke('connectors:installPackage', connectorId),
+    getIcon: (connectorId: string) => ipcRenderer.invoke('connectors:getIcon', connectorId),
+    getBundledIcon: (connectorId: string) => ipcRenderer.invoke('connectors:getBundledIcon', connectorId),
+  },
+
+  // Project contexts (Context management)
+  contexts: {
+    list: () => ipcRenderer.invoke('contexts:list'),
+    create: (name: string) => ipcRenderer.invoke('contexts:create', name),
+    save: (context: ProjectContext) => ipcRenderer.invoke('contexts:save', context),
+    delete: (contextId: string) => ipcRenderer.invoke('contexts:delete', contextId),
+    readMarkdown: (contextId: string) => ipcRenderer.invoke('contexts:readMarkdown', contextId),
+    getPromptBody: (contextId: string) => ipcRenderer.invoke('contexts:getPromptBody', contextId),
+    appendSection: (contextId: string, section: string, content: string) =>
+      ipcRenderer.invoke('contexts:appendSection', contextId, section, content),
+    replaceSection: (contextId: string, heading: string, content: string) =>
+      ipcRenderer.invoke('contexts:replaceSection', contextId, heading, content),
   },
 
   // Memory
@@ -258,23 +244,10 @@ export interface ElectronAPI {
     refresh: () => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
     refreshProvider: (provider: ModelProvider) => Promise<{ success: boolean; data?: ModelCatalog; error?: string }>
   }
-  jira: {
-    configure: (config: { baseUrl: string; email: string; apiToken: string }) => Promise<{ success: boolean }>
-    testConnection: () => Promise<{ success: boolean; error?: string; user?: unknown }>
-    getProjects: () => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    searchIssues: (jql: string, maxResults?: number) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getIssue: (issueKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    createIssue: (issueData: Record<string, unknown>) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    updateIssue: (issueKey: string, updateData: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>
-    addComment: (issueKey: string, comment: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    transitionIssue: (issueKey: string, transitionId: string) => Promise<{ success: boolean; error?: string }>
-    getTransitions: (issueKey: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    getSprints: (boardId: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    getBoards: () => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-  }
   file: {
     selectWorkspace: () => Promise<{ success: boolean; path?: string }>
     getWorkspace: () => Promise<string | null>
+    selectFolderInWorkspace: () => Promise<{ success: boolean; path?: string; error?: string }>
     list: (relativePath?: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
     read: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     readOcr: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
@@ -284,10 +257,6 @@ export interface ElectronAPI {
     getFileInfo: (relativePath: string) => Promise<{ success: boolean; data?: { name: string; size: number; isDirectory: boolean; mimeType?: string }; error?: string }>
     ensureAttachmentsDir: () => Promise<{ success: boolean; path?: string; error?: string }>
     saveAttachment: (fileName: string, data: ArrayBuffer) => Promise<{ success: boolean; path?: string; error?: string }>
-  }
-  jiraAttachment: {
-    upload: (issueKey: string, filePath: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    isConfigured: () => Promise<{ configured: boolean }>
   }
   ai: {
     configure: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
@@ -328,43 +297,52 @@ export interface ElectronAPI {
   mcp: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
     disconnect: () => Promise<{ success: boolean }>
-    status: () => Promise<{ connected: boolean; mode: 'api' | 'mcp' | null }>
+    status: () => Promise<{ connected: boolean }>
     getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
-    getProjects: () => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getProjectIssueTypes: (projectKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getFieldMetadata: (projectKey: string, issueTypeId: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    searchIssues: (jql: string, maxResults?: number, fields?: string | string[]) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getIssue: (issueKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    createIssue: (projectKey: string, issueTypeName: string, summary: string, description?: string, additionalFields?: Record<string, unknown>) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    editIssue: (issueKey: string, fields: Record<string, unknown>) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    addComment: (issueKey: string, body: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getTransitions: (issueKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    transitionIssue: (issueKey: string, transitionId: string) => Promise<{ success: boolean; error?: string }>
-    syncMetadata: (projectKeys: string[]) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    syncAllMetadata: (projectKeys: string[]) => Promise<{ success: boolean; metadata?: unknown; error?: string }>
-    fetchUsers: (projectKeys: string[]) => Promise<{ success: boolean; users?: unknown[]; error?: string }>
-    getAssignableUsers: (projectKey: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-    getCurrentUser: () => Promise<{ success: boolean; data?: unknown; error?: string }>
-    listTools: () => Promise<{ success: boolean; data?: unknown; error?: string }>
-    lookupUser: (query: string) => Promise<{ success: boolean; data?: unknown; error?: string }>
-  }
-  jiraMetadata: {
-    get: () => Promise<{
-      monitoredProjects: Array<{ id: string; key: string; name: string; projectTypeKey: string; avatarUrl?: string }>
-      projectMetadata: Record<string, unknown>
-      standardFields: unknown[]
-      users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>
-      lastSynced: string | null
-      syncedProjects: string[]
-    }>
-    setMonitoredProjects: (projects: Array<{ id: string; key: string; name: string; projectTypeKey: string; avatarUrl?: string }>) => Promise<{ success: boolean }>
-    updateProjectMetadata: (projectKey: string, metadata: unknown) => Promise<{ success: boolean }>
-    set: (metadata: unknown) => Promise<{ success: boolean }>
-    setUsers: (users: Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrl?: string; active: boolean }>) => Promise<{ success: boolean }>
   }
   shell: {
     openExternal: (url: string) => Promise<{ success: boolean }>
+  }
+  app: {
+    getVersion: () => Promise<string>
+  }
+  updates: {
+    check: () => Promise<{ success: boolean; data?: import('../src/shared/updates').UpdateState; error?: string }>
+    install: () => Promise<{ success: boolean }>
+    onStateChange: (callback: (state: import('../src/shared/updates').UpdateState) => void) => () => void
+  }
+  connectors: {
+    list: () => Promise<{
+      success: boolean
+      data?: {
+        connectors: Array<{ manifest: ConnectorManifest; promptMarkdown: string }>
+        errors: Array<{ id: string; errors: string[] }>
+      }
+      error?: string
+    }>
+    execute: (connectorId: string, name: string, args: Record<string, unknown>, context?: ContextEnvelope) => Promise<ToolResult>
+    approve: (connectorId: string, actionType: string, data: Record<string, unknown>, context?: ContextEnvelope) => Promise<ApproveActionOutcome>
+    getKnowledge: (contextId: string, connectorId: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
+    saveKnowledge: (contextId: string, connectorId: string, markdown: string) => Promise<{ success: boolean; error?: string }>
+    deletePackage: (connectorId: string) => Promise<{ success: boolean; error?: string }>
+    installPackage: (connectorId: string) => Promise<{ success: boolean; data?: ConnectorManifest; error?: string }>
+    getIcon: (connectorId: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
+    getBundledIcon: (connectorId: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
+  }
+  contexts: {
+    list: () => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
+    create: (name: string) => Promise<{ success: boolean; data?: ProjectContext[]; context?: ProjectContext; error?: string }>
+    save: (context: ProjectContext) => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
+    delete: (contextId: string) => Promise<{ success: boolean; data?: ProjectContext[]; error?: string }>
+    readMarkdown: (contextId: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    getPromptBody: (contextId: string) => Promise<{
+      success: boolean
+      data?: import('../context/promptInjection').ContextPromptBody
+      error?: string
+    }>
+    appendSection: (contextId: string, section: string, content: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    replaceSection: (contextId: string, heading: string, content: string) => Promise<{ success: boolean; data?: string; error?: string }>
   }
   memory: {
     getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>

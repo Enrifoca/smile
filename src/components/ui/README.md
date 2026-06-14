@@ -1,6 +1,6 @@
 # UI kit
 
-Single source for smile:D shell UI. **Do not hand-roll buttons, alerts, form fields, or feedback text in feature views** — compose these primitives and edit look-and-feel in one place.
+React primitives that implement [`docs/ui-guidelines.md`](../../docs/ui-guidelines.md). **Do not hand-roll buttons, alerts, form fields, or feedback text in feature views** — compose these components and edit look-and-feel in tokens + `.ui-*` rules.
 
 ## Layers (one logic for editing UI)
 
@@ -29,7 +29,7 @@ Rebrand the app: change tokens + `.ui-*` rules first. Components pick up changes
 | `PanelBody` | Bordered inner panel (connector forms) |
 | `ModuleSection` | Connector module title + content |
 | `Page`, `PageStack` | Page shell + vertical spacing |
-| `Spinner` | Loading indicators |
+| `Spinner` | Three-dot loading wave (`.ui-loading-dots`) |
 
 ## Chat extensions (built on the kit)
 

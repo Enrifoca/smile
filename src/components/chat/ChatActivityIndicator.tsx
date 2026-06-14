@@ -25,7 +25,7 @@ export function ChatActivityIndicator({ status, className }: ChatActivityIndicat
     return () => window.clearInterval(timer)
   }, [status])
 
-  const label = status || 'Working…'
+  const label = status || 'Working on your request…'
   const showElapsed = elapsedSec >= 3
 
   return (

@@ -21,7 +21,13 @@ const DocIcon = () => (
 /** Active report chip above the composer — click to open, × to dismiss. */
 export function ActiveReportPill({ artifact, messageId, onDismiss, className }: ActiveReportPillProps) {
   const [open, setOpen] = useState(false)
-  const { content, error, loading } = useArtifactContent(artifact.path, messageId)
+  const reloadKey = `${messageId}:${artifact.path}:${artifact.title}`
+  const { content, error, loading, reload } = useArtifactContent(artifact.path, reloadKey)
+
+  const handleOpen = () => {
+    reload()
+    setOpen(true)
+  }
 
   return (
     <>
@@ -33,13 +39,16 @@ export function ActiveReportPill({ artifact, messageId, onDismiss, className }: 
           <button
             type="button"
             className="ui-chat-report-pill-trigger"
-            onClick={() => setOpen(true)}
+            onClick={handleOpen}
             title={`${artifact.title}\n${artifact.path}\nClick to read full report`}
             aria-labelledby={`active-report-${messageId}`}
             aria-describedby={loading ? `active-report-status-${messageId}` : undefined}
           >
             <DocIcon />
-            <span className="ui-chat-report-pill-title">{artifact.title}</span>
+            <span className="ui-chat-report-pill-text">
+              <span className="ui-chat-report-pill-title">{artifact.title}</span>
+              <span className="ui-chat-report-pill-path">{artifact.path}</span>
+            </span>
             {loading ? (
               <span className="ui-chat-report-pill-status" id={`active-report-status-${messageId}`}>Loading…</span>
             ) : null}
