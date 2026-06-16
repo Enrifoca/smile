@@ -61,13 +61,14 @@ Core tools: `toolEntries.ts`. Connectors: `getConnectorToolEntry()` from manifes
 
 | Phase | Set when | Label |
 | --- | --- | --- |
-| `awaiting_model` | Start of each `callAI` | `Working on your request…`, or `Reasoning about next step…` if reasoning model **and** a tool already ran this turn, or `{lastEntry.afterLabel}` |
+| `awaiting_model` | Start of each `callAI` | `Understanding your request…` on first reasoning iteration; `Reasoning about next step…` if reasoning **and** a tool already ran; `{lastEntry.afterLabel}`; else `Working on your request…` |
 | `streaming_thinking` | Stream opens `<think>` | `Thinking…` |
 | `streaming_text` | First visible answer token | `Writing response…` |
 | `streaming_tool_draft` | `handleStreamProgress` (tool name/args streaming) | `{entry.preparingLabel}` |
 | `preparing_tools` | Stream ended with tool calls | First entry's `preparingLabel`, or `Preparing N actions…` |
 | `running_tool` | Before `executeTool` | `{entry.runningLabel}` |
 | `awaiting_approval` | Write tool needs confirmation | `Waiting for your approval: {entry.label}` |
+| `deep_thinking` | During `deep_thinking` tool | `Deep thinking…` |
 | `reasoning_fallback` | Reasoning model retry on chat model | `Reasoning model busy — using chat model…` |
 
 Status is cleared to `null` only at end of `processMessage` (or `abort()`).
@@ -78,7 +79,7 @@ Fallback when status is null: `Working on your request…` in `ChatActivityIndic
 
 ```text
 processMessage(userMessage)
-  inferTurnIntent → scratchpad note (nudges only, NOT status)
+  toolsRunThisTurn + scratchpad → shouldNudgeIncompleteWorkflow (nudges only, NOT status)
   runAgentLoop:
     loop:
       callAI()
@@ -106,10 +107,12 @@ processMessage(userMessage)
 
 | Condition | Model |
 | --- | --- |
-| Scratchpad empty this turn + reasoning configured | Reasoning model (`callAIReasoningStream`) |
-| Scratchpad has content | Main chat model |
+| First loop iteration + reasoning configured | Reasoning model (light thinking prompt in Turn tier) |
+| Loop iteration 2+ | Main chat model |
+| `deep_thinking` tool | Reasoning model (one-shot, no tools) |
+| History compression | Main chat model only |
 
-Reasoning is for initial analysis; execution steps use the faster chat model once the scratchpad is populated.
+Reasoning orients on the first iteration; execution uses the chat model afterward. `deep_thinking` is optional for deeper analysis — after it runs, the agent should update **Current plan** if the analysis changes next steps.
 
 ## Stream progress (tool args)
 

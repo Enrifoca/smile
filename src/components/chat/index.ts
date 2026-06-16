@@ -1,6 +1,5 @@
 export {
   WriteActionConfirmModule,
-  default as WriteActionConfirm,
   type WriteActionConfirmModuleProps,
 } from './WriteActionConfirmModule'
 
@@ -12,6 +11,7 @@ export {
 export { ChatBanner, type ChatBannerProps, type ChatBannerVariant } from './ChatBanner'
 export { ChatEmptyState, type ChatEmptyStateProps } from './ChatEmptyState'
 export { ChatActivityIndicator, type ChatActivityIndicatorProps } from './ChatActivityIndicator'
+export { ChatLoadingDots } from './ChatLoadingDots'
 export {
   ActiveReportPill,
   MarkdownArtifactCard,

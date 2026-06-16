@@ -86,8 +86,6 @@ export function useElectron() {
 
   const aiConfigure = useCallback(async (config: AIConfig) => api.ai.configure(config), [])
   const aiConfigureReasoning = useCallback(async (config: AIConfig) => api.ai.configureReasoning(config), [])
-  const aiConfigurePlanner = useCallback(async (config: AIConfig) => api.ai.configurePlanner(config), [])
-  const aiPlan = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => api.ai.plan(messages), [])
   const aiChat = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chat(messages, tools), [])
   const aiChatReasoning = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chatReasoning(messages, tools), [])
   const aiChatStream = useCallback((
@@ -107,15 +105,13 @@ export function useElectron() {
     () => ({
       configure: aiConfigure,
       configureReasoning: aiConfigureReasoning,
-      configurePlanner: aiConfigurePlanner,
-      plan: aiPlan,
       chat: aiChat,
       chatReasoning: aiChatReasoning,
       chatStream: aiChatStream,
       chatReasoningStream: aiChatReasoningStream,
       abortStream: aiAbortStream,
     }),
-    [aiConfigure, aiConfigureReasoning, aiConfigurePlanner, aiPlan, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream, aiAbortStream],
+    [aiConfigure, aiConfigureReasoning, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream, aiAbortStream],
   )
 
   const shellOpenExternal = useCallback(async (url: string) => api.shell.openExternal(url), [])
@@ -179,6 +175,7 @@ export function useElectron() {
   const contextsGetPromptBody = useCallback(async (contextId: string) => api.contexts.getPromptBody(contextId), [])
   const contextsAppendSection = useCallback(async (contextId: string, section: string, content: string) => api.contexts.appendSection(contextId, section, content), [])
   const contextsReplaceSection = useCallback(async (contextId: string, heading: string, content: string) => api.contexts.replaceSection(contextId, heading, content), [])
+  const contextsOnChanged = useCallback((callback: (contexts: import('../context/types').ProjectContext[]) => void) => api.contexts.onChanged(callback), [])
   const contexts = useMemo(
     () => ({
       list: contextsList,
@@ -189,6 +186,7 @@ export function useElectron() {
       getPromptBody: contextsGetPromptBody,
       appendSection: contextsAppendSection,
       replaceSection: contextsReplaceSection,
+      onChanged: contextsOnChanged,
     }),
     [
       contextsList,
@@ -199,6 +197,7 @@ export function useElectron() {
       contextsGetPromptBody,
       contextsAppendSection,
       contextsReplaceSection,
+      contextsOnChanged,
     ],
   )
 

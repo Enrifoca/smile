@@ -5,7 +5,6 @@ Core prompts are Markdown files.
 ## Files
 
 - `core/system.md`: connector-neutral agent behavior.
-- `core/planner.md`: planner behavior.
 - `index.ts`: prompt assembly.
 - `loader.ts`: simple template rendering helpers.
 

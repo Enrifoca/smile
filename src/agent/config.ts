@@ -56,4 +56,6 @@ export interface AgentConfig {
   ) => Promise<{ success: boolean; data?: AIResponse; error?: string }>
   /** Cancel an in-flight streaming chat request, if any. */
   abortAIStream?: () => void
+  /** Estimated model context window for history compression (tokens). Default 128000. */
+  contextWindowTokens?: number
 }

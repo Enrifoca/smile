@@ -55,11 +55,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('ai:configure', config),
     configureReasoning: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) =>
       ipcRenderer.invoke('ai:configureReasoning', config),
-    // Legacy alias kept for backward compatibility
-    configurePlanner: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) =>
-      ipcRenderer.invoke('ai:configurePlanner', config),
-    plan: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) =>
-      ipcRenderer.invoke('ai:plan', messages),
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) =>
       ipcRenderer.invoke('ai:chat', messages, tools),
     chatReasoning: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) =>
@@ -187,6 +182,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('contexts:appendSection', contextId, section, content),
     replaceSection: (contextId: string, heading: string, content: string) =>
       ipcRenderer.invoke('contexts:replaceSection', contextId, heading, content),
+    onChanged: (callback: (contexts: ProjectContext[]) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, contexts: ProjectContext[]) => callback(contexts)
+      ipcRenderer.on('contexts:changed', handler)
+      return () => ipcRenderer.removeListener('contexts:changed', handler)
+    },
   },
 
   // Memory
@@ -261,8 +261,6 @@ export interface ElectronAPI {
   ai: {
     configure: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
     configureReasoning: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
-    configurePlanner: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
-    plan: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => Promise<{ success: boolean; plan?: string; error?: string }>
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
@@ -343,6 +341,7 @@ export interface ElectronAPI {
     }>
     appendSection: (contextId: string, section: string, content: string) => Promise<{ success: boolean; data?: string; error?: string }>
     replaceSection: (contextId: string, heading: string, content: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    onChanged: (callback: (contexts: ProjectContext[]) => void) => () => void
   }
   memory: {
     getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>

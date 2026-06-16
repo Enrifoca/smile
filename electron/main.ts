@@ -76,9 +76,21 @@ async function uploadJiraAttachmentFromWorkspace(issueKey: string, filePath: str
 
 function ensureContextService(): ContextService {
   contextService = getContextService()
+  contextService.setOnFilesystemChange(notifyContextFilesystemChange)
   const workspace = storageService.getWorkspacePath()
   if (workspace) contextService.setWorkspace(workspace)
   return contextService
+}
+
+function notifyContextFilesystemChange(): void {
+  try {
+    const contexts = listContextsWithMigration()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('contexts:changed', contexts)
+    }
+  } catch (error) {
+    console.warn('[Contexts] Filesystem rescan failed:', error instanceof Error ? error.message : error)
+  }
 }
 
 function listContextsWithMigration(): ProjectContext[] {
@@ -577,14 +589,8 @@ ipcMain.handle('ai:configure', async (_, config: AIConfig) => {
   return { success: true }
 })
 
-// Reasoning model configuration (replaces the old "planner" concept)
+// Reasoning model configuration
 ipcMain.handle('ai:configureReasoning', async (_, config: AIConfig) => {
-  reasoningAiService = new AIService(withReasoningDefault(config))
-  return { success: true }
-})
-
-// Legacy alias — kept so old plannerConfig stored values still work on first load
-ipcMain.handle('ai:configurePlanner', async (_, config: AIConfig) => {
   reasoningAiService = new AIService(withReasoningDefault(config))
   return { success: true }
 })
@@ -609,20 +615,6 @@ ipcMain.handle('ai:chatReasoning', async (_, messages: Array<{ role: 'system' | 
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Reasoning model request failed'
     console.error('[AI:chatReasoning] Error:', msg)
-    return { success: false, error: msg }
-  }
-})
-
-// Legacy — kept for backward compatibility
-ipcMain.handle('ai:plan', async (_, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => {
-  if (!reasoningAiService) {
-    return { success: false, error: 'Reasoning model not configured' }
-  }
-  try {
-    const response = await reasoningAiService.chat(messages)
-    return { success: true, plan: response.content }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Request failed'
     return { success: false, error: msg }
   }
 })
@@ -1214,6 +1206,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   stopMcpKeepAlive()
+  contextService?.stopFilesystemWatch()
   if (mcpService) {
     void mcpService.disconnect()
   }

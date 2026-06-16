@@ -5,7 +5,6 @@ Prompts are Markdown files so developers and coding agents can edit behavior wit
 ## Core Prompts
 
 - `src/prompts/core/system.md` is the connector-neutral system prompt.
-- `src/prompts/core/planner.md` is the optional planner prompt.
 - `src/prompts/index.ts` assembles Markdown with memory, user profile, mode, and connector context.
 
 ## Connector Prompts

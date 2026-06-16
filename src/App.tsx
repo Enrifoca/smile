@@ -21,6 +21,7 @@ import ContextNewView from './components/ContextNewView'
 import MacWindowChrome from './components/MacWindowChrome'
 import { UpdateToast } from './components/UpdateToast'
 import { UpdateProvider } from './context/UpdateContext'
+import { ChatActivityProvider } from './chat/ChatActivityContext'
 
 import { useElectron } from './hooks/useElectron'
 
@@ -57,6 +58,32 @@ function App() {
     void loadInitialState()
 
   }, [])
+
+
+
+  useEffect(() => {
+
+    return contextsAPI.onChanged(nextContexts => {
+
+      setContexts(nextContexts)
+
+      setActiveContextId(prev => {
+
+        if (prev && !nextContexts.some(context => context.id === prev)) {
+
+          void storage.set('activeContextId', null)
+
+          return null
+
+        }
+
+        return prev
+
+      })
+
+    })
+
+  }, [contextsAPI, storage])
 
 
 
@@ -146,6 +173,16 @@ function App() {
 
 
 
+  const handleChatCreated = (chatId: string) => {
+
+    setCurrentChatId(chatId)
+
+    setCurrentView('chat')
+
+  }
+
+
+
   const handleNewChat = () => {
 
     setCurrentChatId(null)
@@ -189,6 +226,8 @@ function App() {
   return shell(
 
     <UpdateProvider>
+
+      <ChatActivityProvider>
 
       <>
 
@@ -294,13 +333,15 @@ function App() {
 
         <div className="flex-1 overflow-hidden">
 
-          {currentView === 'chat' && (
+          <div className={currentView === 'chat' ? 'h-full' : 'hidden'} aria-hidden={currentView !== 'chat'}>
 
             <ChatView
 
               chatId={currentChatId}
 
-              onChatCreated={setCurrentChatId}
+              isVisible={currentView === 'chat'}
+
+              onChatCreated={handleChatCreated}
 
               onOpenSettings={() => setCurrentView('settings')}
 
@@ -308,7 +349,7 @@ function App() {
 
             />
 
-          )}
+          </div>
 
           {currentView === 'memories' && <MemoriesView />}
 
@@ -334,6 +375,8 @@ function App() {
 
               contextId={contextDetailId}
 
+              contexts={contexts}
+
               onContextsChange={setContexts}
 
               onActiveContextChange={handleSetActiveContextId}
@@ -355,6 +398,8 @@ function App() {
       <UpdateToast />
 
       </>
+
+      </ChatActivityProvider>
 
     </UpdateProvider>,
 

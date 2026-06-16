@@ -26,9 +26,7 @@ Rebrand the app: change tokens + `.ui-*` rules first. Components pick up changes
 | `Toggle` | Boolean settings |
 | `Field`, `Input`, `Textarea`, `Select` | Form controls |
 | `Panel` | Settings page sections (`soft`, `emphasis`, `danger`) |
-| `PanelBody` | Bordered inner panel (connector forms) |
-| `ModuleSection` | Connector module title + content |
-| `Page`, `PageStack` | Page shell + vertical spacing |
+| `SectionHeader` | Module title + description row (connector settings) |
 | `Spinner` | Three-dot loading wave (`.ui-loading-dots`) |
 
 ## Chat extensions (built on the kit)
@@ -42,8 +40,6 @@ Chat-specific compositions live in **`src/components/chat/`** — they use kit p
 | `ChatEmptyState` | New-chat suggestion chips |
 
 Styles: `.ui-write-action-bar`, `.ui-chat-*`. Defaults: `src/components/chat/writeActionConfirmDefaults.ts`. Guide: `src/components/chat/README.md`.
-
-Legacy aliases (`SaveActionRow`, `SaveFeedback`, `useSaveAction`) remain for older imports but new code should use `ActionRow`, `ActionFeedback`, `useActionFeedback`.
 
 ## Feedback hook
 

@@ -1,4 +1,5 @@
-import { ConnectorDefinition, ConnectorRuntime, ToolDefinition } from './types'
+import { buildBatchPreviewLabel, buildConfirmationItemsFromArgs } from './confirmationFromArgs'
+import type { ConnectorDefinition, ConnectorRuntime, ToolDefinition } from './types'
 import { ConnectorManifest, ContextEnvelope, ToolManifest } from './contract'
 import { ConfirmationViewModel } from '../agent/types'
 import { ElectronAPI } from '../types/electron'
@@ -61,10 +62,19 @@ export function createPluginConnectorRuntime(
     getActionConfirmation: (name, args) => {
       const tool = toolByName.get(name)
       if (!tool?.confirmation) return null
+      const items = buildConfirmationItemsFromArgs(args)
+      const title = tool.confirmation.title ? renderTemplate(tool.confirmation.title, args) : tool.name
+      const description = tool.confirmation.summary ? renderTemplate(tool.confirmation.summary, args) : undefined
+      const preview = items?.length
+        ? buildBatchPreviewLabel(items)
+        : tool.preview
+          ? renderTemplate(tool.preview, args)
+          : undefined
       const confirmation: ConfirmationViewModel = {
-        title: tool.confirmation.title ? renderTemplate(tool.confirmation.title, args) : tool.name,
-        description: tool.confirmation.summary ? renderTemplate(tool.confirmation.summary, args) : undefined,
-        preview: tool.preview ? renderTemplate(tool.preview, args) : undefined,
+        title,
+        description,
+        preview,
+        items,
       }
       return confirmation
     },

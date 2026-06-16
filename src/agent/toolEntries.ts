@@ -146,12 +146,22 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
     case 'scratchpad_write':
       return {
         tool: name,
-        label: 'Updated scratchpad',
+        label: 'Updated working notes',
         group: 'memory',
         category: 'scratchpad',
-        preparingLabel: 'Updating scratchpad…',
-        runningLabel: 'Updating scratchpad…',
-        afterLabel: 'Reasoning about next step…',
+        preparingLabel: 'Updating working notes…',
+        runningLabel: 'Updating working notes…',
+        afterLabel: 'Continuing…',
+      }
+    case 'deep_thinking':
+      return {
+        tool: name,
+        label: 'Deep thinking',
+        group: 'memory',
+        category: 'analysis',
+        preparingLabel: 'Deep thinking…',
+        runningLabel: 'Deep thinking…',
+        afterLabel: 'Reviewing analysis…',
       }
     case 'context_read':
       return {

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 
+import { useChatActivity } from '../chat/ChatActivityContext'
 import { useElectron } from '../hooks/useElectron'
+import { ChatLoadingDots } from './chat/ChatLoadingDots'
 
 import type { ProjectContext } from '../context/types'
 
@@ -204,6 +206,7 @@ export default function Sidebar({
   const [chats, setChats] = useState<Chat[]>([])
 
   const { storage, platform, contexts: contextsAPI } = useElectron()
+  const chatActivity = useChatActivity()
 
   const isMac = platform === 'darwin'
 
@@ -213,7 +216,7 @@ export default function Sidebar({
 
     loadChats()
 
-  }, [currentChatId])
+  }, [currentChatId, chatActivity.revision])
 
 
 
@@ -601,15 +604,23 @@ export default function Sidebar({
                 <div key={group} className="space-y-1">
                   <p className="ui-sidebar-subitem-group-label">{group}</p>
                   <div className="space-y-1">
-                    {groupChats.map(chat => (
+                    {groupChats.map(chat => {
+                      const activity = chatActivity.getActivity(chat.id)
+                      return (
                       <button
                         key={chat.id}
                         onClick={() => onSelectChat(chat.id)}
-                        className={`ui-sidebar-subitem truncate ${currentView === 'chat' && currentChatId === chat.id ? 'ui-sidebar-subitem--current' : ''}`}
+                        className={`ui-sidebar-subitem ui-sidebar-chat-row ${currentView === 'chat' && currentChatId === chat.id ? 'ui-sidebar-subitem--current' : ''}`}
                       >
-                        {chat.title || 'New Chat'}
+                        <span className="truncate flex-1 min-w-0">{chat.title || 'New Chat'}</span>
+                        {activity?.kind === 'running' ? (
+                          <ChatLoadingDots />
+                        ) : activity?.kind === 'unread' ? (
+                          <span className="ui-chat-unread-dot" title="New response" aria-label="New response" />
+                        ) : null}
                       </button>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               ))}

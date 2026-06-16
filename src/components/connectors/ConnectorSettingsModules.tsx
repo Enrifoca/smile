@@ -9,8 +9,6 @@ import {
   type ActionStatus,
 } from '../ui'
 
-export type { ActionStatus as SaveStatus }
-
 interface ApiConnectionModuleProps {
   title: string
   description: string
@@ -74,53 +72,6 @@ export function ApiConnectionModule({
   )
 }
 
-interface CustomSettingsModuleProps {
-  title: string
-  description: string
-  children: ReactNode
-  action?: ReactNode
-  save?: {
-    label: string
-    saving: boolean
-    saveStatus: ActionStatus
-    saveDisabled?: boolean
-    onSave: () => void
-    successMessage?: string
-    errorMessage?: string
-  }
-  footer?: ReactNode
-}
-
-export function CustomSettingsModule({
-  title,
-  description,
-  children,
-  action,
-  save,
-  footer,
-}: CustomSettingsModuleProps) {
-  return (
-    <Panel variant="soft">
-      <SectionHeader title={title} description={description} aside={action} />
-      <div className="space-y-4">{children}</div>
-      {save ? (
-        <ActionRow
-          label={save.label}
-          busy={save.saving}
-          status={save.saveStatus}
-          disabled={save.saveDisabled}
-          onAction={save.onSave}
-          size="sm"
-          successMessage={save.successMessage}
-          errorMessage={save.errorMessage}
-        />
-      ) : footer ? (
-        <div className="ui-action-row">{footer}</div>
-      ) : null}
-    </Panel>
-  )
-}
-
 interface McpConnectionModuleProps {
   title: string
   description: string
@@ -175,6 +126,3 @@ export function McpConnectionModule({
     </Panel>
   )
 }
-
-/** @deprecated Use ModuleSection directly for new modules */
-export const ConnectorSettingsModule = SectionHeader

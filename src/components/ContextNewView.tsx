@@ -49,7 +49,7 @@ export default function ContextNewView({ onContextsChange, onOpenContext, onCanc
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <Field label="Name" hint="Used for the folder and context files (e.g. acme → acme.json, acme.md)">
+          <Field label="Name" hint="Creates a folder under .smile/contexts/ with smile.json and smile.md">
             <Input
               value={name}
               placeholder="e.g. Acme Website"

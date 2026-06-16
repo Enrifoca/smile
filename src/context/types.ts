@@ -2,8 +2,8 @@
  * Context management: a portable project scope stored under `.smile/contexts/<slug>/`.
  *
  * Each context folder contains:
- * - `<slug>.json` — metadata and connector configuration (no secrets)
- * - `<slug>.md` — textual knowledge the agent maintains via context tools
+ * - `smile.json` — metadata and connector configuration (no secrets)
+ * - `smile.md` — textual knowledge the agent maintains via context tools
  * - `history/` — automatic backups before agent writes
  *
  * Activate one context globally from the sidebar. When active, only enabled
@@ -14,6 +14,10 @@
 export const WORKSPACE_KNOWLEDGE_CONTEXT_ID = '__workspace__'
 
 export const CONTEXT_FILE_VERSION = 1
+
+/** Fixed filenames inside each context folder (`.smile/contexts/<slug>/`). */
+export const CONTEXT_JSON_FILENAME = 'smile.json'
+export const CONTEXT_MARKDOWN_FILENAME = 'smile.md'
 
 export interface ContextConnectorConfig {
   enabled: boolean
@@ -58,12 +62,4 @@ export function getEnabledConnectorIds(context: ProjectContext): string[] {
 /** Workspace-relative path to the context folder (e.g. `.smile/contexts/acme`). */
 export function getContextFolderPath(context: ProjectContext): string {
   return `.smile/contexts/${context.slug}`
-}
-
-export function getContextJsonPath(context: ProjectContext): string {
-  return `${getContextFolderPath(context)}/${context.slug}.json`
-}
-
-export function getContextMarkdownPath(context: ProjectContext): string {
-  return `${getContextFolderPath(context)}/${context.slug}.md`
 }

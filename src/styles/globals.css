@@ -1020,6 +1020,7 @@ input:focus, textarea:focus, select:focus {
 .ui-range-slider-track {
   @apply relative flex w-full cursor-pointer items-center;
   height: 1.25rem;
+  touch-action: pan-y;
 }
 
 .ui-range-slider-track-line {
@@ -1111,6 +1112,42 @@ input:focus, textarea:focus, select:focus {
   @apply h-2 w-2 shrink-0 rounded-full bg-green-600;
 }
 
+.ui-chat-unread-dot {
+  @apply h-2 w-2 shrink-0 rounded-full bg-neutral-950;
+}
+
+.ui-chat-loading-dots {
+  @apply inline-flex shrink-0 items-center gap-0.5;
+}
+
+.ui-chat-loading-dots span {
+  @apply h-1 w-1 rounded-full bg-neutral-400;
+  animation: ui-chat-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.ui-chat-loading-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.ui-chat-loading-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes ui-chat-dot-pulse {
+  0%, 80%, 100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.ui-sidebar-chat-row {
+  @apply flex w-full items-center gap-2;
+}
+
 .ui-sidebar-context-row {
   @apply flex w-full items-center gap-2 border-0 cursor-default text-sm;
 }
@@ -1199,6 +1236,22 @@ input:focus, textarea:focus, select:focus {
 
 .ui-write-action-bar {
   @apply flex flex-col gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2;
+}
+
+.ui-write-action-bar-title {
+  @apply text-sm font-medium text-gray-900;
+}
+
+.ui-write-action-bar-items {
+  @apply space-y-1 text-sm text-gray-800 list-none pl-0 m-0;
+}
+
+.ui-write-action-bar-item-title {
+  @apply font-medium;
+}
+
+.ui-write-action-bar-item-subtitle {
+  @apply ml-1 text-gray-500;
 }
 
 .ui-write-action-bar-summary {

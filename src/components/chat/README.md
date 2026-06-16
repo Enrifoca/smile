@@ -59,5 +59,3 @@ When the agent calls `report_write`, a **report card** appears in chat (Manus-st
 | `ActiveReportPill` | Latest report chip above composer — see artifacts README |
 
 Agent-side status labels and task continuity: [src/agent/activityStatus.md](../../agent/activityStatus.md), [src/agent/taskContinuity.md](../../agent/taskContinuity.md).
-
-Legacy import: `./ActionConfirm` re-exports `WriteActionConfirmModule`.

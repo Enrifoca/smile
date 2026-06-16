@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 
+import { CONTEXT_MARKDOWN_FILENAME } from '../../context/types'
 import { useElectron } from '../../hooks/useElectron'
 import { MarkdownArtifactModal } from '../chat/artifacts/MarkdownArtifactModal'
 import { joinClasses } from '../ui/classNames'
@@ -18,7 +19,7 @@ export function ContextKnowledgeCard({ contextId, contextName, slug, className }
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
 
-  const filePath = `.smile/contexts/${slug}/${slug}.md`
+  const filePath = `.smile/contexts/${slug}/${CONTEXT_MARKDOWN_FILENAME}`
 
   const loadMarkdown = useCallback(async () => {
     setLoading(true)

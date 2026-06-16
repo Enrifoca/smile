@@ -13,7 +13,7 @@ Theme tokens: **`src/theme/tokens.css`**. Semantic styles: **`src/styles/globals
 ## Belongs here
 
 - Chat UI (`chat/` — write action bar, banner, empty state)
-- Write action bar above composer (`ActionConfirm.tsx` re-exports `WriteActionConfirmModule`)
+- Write action bar above composer (`WriteActionConfirmModule` in `chat/`)
 - Settings shell
 - Connector catalog and connected connector list
 - Reusable connector setup layout modules (`connectors/ConnectorSettingsModules.tsx`)

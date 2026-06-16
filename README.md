@@ -141,9 +141,8 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 
 | Doc | Purpose |
 | --- | --- |
-| [src/prompts/README.md](src/prompts/README.md) | Editing `core/system.md`, planner, assembly |
+| [src/prompts/README.md](src/prompts/README.md) | Editing `core/system.md` and prompt assembly |
 | `src/prompts/core/system.md` | Live core system prompt (Markdown) |
-| `src/prompts/core/planner.md` | Live planner prompt (Markdown) |
 
 ### Connectors
 

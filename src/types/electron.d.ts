@@ -37,8 +37,6 @@ export interface ElectronAPI {
   ai: {
     configure: (config: AIConfig) => Promise<{ success: boolean }>
     configureReasoning: (config: AIConfig) => Promise<{ success: boolean }>
-    configurePlanner: (config: AIConfig) => Promise<{ success: boolean }>
-    plan: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => Promise<{ success: boolean; plan?: string; error?: string }>
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
@@ -146,6 +144,7 @@ export interface ElectronAPI {
       heading: string,
       content: string,
     ) => Promise<{ success: boolean; data?: string; error?: string }>
+    onChanged: (callback: (contexts: import('../context/types').ProjectContext[]) => void) => () => void
   }
   memory: {
     getAll: () => Promise<{ success: boolean; data?: unknown; error?: string }>

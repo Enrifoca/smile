@@ -50,8 +50,7 @@ All guards are documented in [src/agent/HELPERS.md § Loop guards](../src/agent/
 
 | Guard | Module | One-line |
 | --- | --- | --- |
-| Action-first | `actionGuards.ts` | Plan in chat instead of tools |
-| Task continuity | `taskContinuity.ts` | Read without write on edit tasks |
+| Task continuity | `taskContinuity.ts` | Read without write; chat prose without tools |
 | Tool errors | `toolErrors.ts` + `shared/aiErrors.ts` | Failed tools and provider overload |
 | Think-only | `index.ts` | Thinking block with no follow-up |
 

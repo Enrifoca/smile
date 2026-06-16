@@ -8,6 +8,7 @@ import { ContextKnowledgeCard } from './context/ContextKnowledgeCard'
 
 interface ContextDetailViewProps {
   contextId: string
+  contexts: ProjectContext[]
   onContextsChange: (contexts: ProjectContext[]) => void
   onActiveContextChange: (contextId: string | null) => void
   activeContextId: string | null
@@ -16,6 +17,7 @@ interface ContextDetailViewProps {
 
 export default function ContextDetailView({
   contextId,
+  contexts,
   onContextsChange,
   onActiveContextChange,
   activeContextId,
@@ -28,22 +30,11 @@ export default function ContextDetailView({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    let active = true
-    void (async () => {
-      setLoading(true)
-      try {
-        const result = await contextsAPI.list()
-        if (!active) return
-        const found = result.data?.find(item => item.id === contextId) ?? null
-        setContext(found)
-      } finally {
-        if (active) setLoading(false)
-      }
-    })()
-    return () => {
-      active = false
-    }
-  }, [contextId, contextsAPI])
+    setLoading(true)
+    const found = contexts.find(item => item.id === contextId) ?? null
+    setContext(found)
+    setLoading(false)
+  }, [contextId, contexts])
 
   async function handleDelete() {
     setDeleting(true)

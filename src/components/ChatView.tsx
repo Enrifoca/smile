@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { flushSync } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
 import { Agent, Message, PendingAction, UserProfile } from '../agent'
@@ -14,9 +15,11 @@ import type { ContextPromptBody } from '../context/promptInjection'
 import ChatMessage from './ChatMessage'
 import { Button } from './ui/Button'
 import { ChatBanner, ChatEmptyState, ChatActivityIndicator, WriteActionConfirmModule, ActiveReportPill } from './chat'
+import { useChatActivity } from '../chat/ChatActivityContext'
 
 interface ChatViewProps {
   chatId: string | null
+  isVisible: boolean
   onChatCreated: (chatId: string) => void
   onOpenSettings: () => void
   activeContext: ProjectContext | null
@@ -49,11 +52,9 @@ const StopIcon = () => (
   </svg>
 )
 
-export default function ChatView({ chatId, onChatCreated, onOpenSettings, activeContext }: ChatViewProps) {
+export default function ChatView({ chatId, isVisible, onChatCreated, onOpenSettings, activeContext }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [agent, setAgent] = useState<Agent | null>(null)
   const [isConfigured, setIsConfigured] = useState(false)
@@ -77,6 +78,40 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
   // so concurrent saves never race against each other via storage reads.
   const chatHistoryRef = useRef<Array<{ id: string; title: string; date: string; messages: Message[] }>>([])
   const historyLoadedRef = useRef(false)
+  const runningChatIdRef = useRef<string | null>(null)
+  const activeChatIdRef = useRef<string | null>(null)
+  const pendingByChatRef = useRef<Map<string, PendingAction>>(new Map())
+  const lastBackgroundSyncRef = useRef<string | null>(null)
+  const messagesRef = useRef<Message[]>([])
+  const chatIdRef = useRef(chatId)
+  const isVisibleRef = useRef(isVisible)
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const streamRafRef = useRef<number | null>(null)
+  const streamPendingRef = useRef<{ targetId: string; id: string; token: string; epoch: number } | null>(null)
+  /** Bumped when a stream is finalised — stale rAF callbacks must not re-open isStreaming. */
+  const streamEpochRef = useRef<Map<string, number>>(new Map())
+  isVisibleRef.current = isVisible
+  chatIdRef.current = chatId
+  messagesRef.current = messages
+
+  const agentCallbacksRef = useRef<{
+    onMessage: (message: Message) => void
+    onUpdateMessage: (id: string, token: string, isStreaming: boolean) => void
+    onPendingAction: (action: PendingAction) => void
+  }>({
+    onMessage: () => {},
+    onUpdateMessage: () => {},
+    onPendingAction: () => {},
+  })
+
+  const chatActivity = useChatActivity()
+  const visibleChatId = chatId ?? sessionChatIdRef.current
+  const visibleActivity = visibleChatId ? chatActivity.getActivity(visibleChatId) : null
+  const isLoading = visibleActivity?.kind === 'running'
+  const agentStatus = visibleActivity?.agentStatus ?? null
+  const otherChatRunning = Boolean(
+    chatActivity.runningChatId && chatActivity.runningChatId !== visibleChatId,
+  )
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -206,26 +241,74 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
   // Load chat if chatId provided. Also reset the session ID ref whenever the
   // active chat changes (so a new chat doesn't reuse a stale generated ID).
   useEffect(() => {
+    activeChatIdRef.current = chatId
     sessionChatIdRef.current = chatId
+
+    if (chatId && isVisible) {
+      chatActivity.clearUnread(chatId)
+    }
+
+    const runningElsewhere = chatActivity.runningChatId && chatActivity.runningChatId !== chatId
+
+    if (runningElsewhere) {
+      if (chatId) {
+        void loadMessagesOnly(chatId)
+      } else {
+        setMessages([])
+      }
+      setPendingAction(pendingByChatRef.current.get(chatId ?? '') ?? null)
+      setDismissedReportMessageId(null)
+      return
+    }
+
     if (chatId) {
-      loadChat(chatId)
-      // Re-sync the in-memory cache in case other sessions wrote to storage
-      // (e.g. the user was looking at another chat while this one was saved)
-      storage.get('chatHistory').then(h => {
-        const arr = h as Array<{ id: string; title: string; date: string; messages: Message[] }> | null
-        if (arr) chatHistoryRef.current = arr
-      }).catch(() => {/* keep existing cache */})
+      const isActiveRun = runningChatIdRef.current === chatId
+        || chatActivity.runningChatId === chatId
+      if (isActiveRun) {
+        // Don't clobber live streaming UI when chatId is assigned mid-run (new chat).
+        if (messagesRef.current.length === 0) {
+          const cached = chatHistoryRef.current.find(c => c.id === chatId)
+          if (cached) setMessages(cached.messages)
+        }
+      } else {
+        if (!applyCachedChat(chatId, true)) {
+          void loadChat(chatId)
+        }
+      }
     } else {
       setMessages([])
       agent?.clearHistory()
     }
+    setPendingAction(pendingByChatRef.current.get(chatId ?? '') ?? null)
     setDismissedReportMessageId(null)
-  }, [chatId, agent])
+  }, [chatId, agent, chatActivity.runningChatId, isVisible])
+
+  // When returning to a chat that is still running in the background, hydrate once if empty.
+  useEffect(() => {
+    if (!isVisible || !visibleChatId) return
+    if (chatActivity.runningChatId !== visibleChatId) {
+      lastBackgroundSyncRef.current = null
+      return
+    }
+    const syncKey = `${visibleChatId}:running`
+    if (lastBackgroundSyncRef.current === syncKey) return
+    lastBackgroundSyncRef.current = syncKey
+    if (messagesRef.current.length > 0) return
+    const cached = chatHistoryRef.current.find(c => c.id === visibleChatId)
+    if (cached) setMessages(cached.messages)
+  }, [isVisible, visibleChatId, chatActivity.runningChatId])
 
   // Auto-scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Focus composer when starting a new chat
+  useEffect(() => {
+    if (!chatId && isVisible) {
+      textareaRef.current?.focus()
+    }
+  }, [chatId, isVisible])
 
   const CHAT_INPUT_MAX_HEIGHT_PX = 150
 
@@ -291,10 +374,14 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
           await memoryAPI.appendSourceLeaf(leaf)
         },
         maxIterations,
-        onMessage: handleNewMessage,
-        onUpdateMessage: handleUpdateMessage,
-        onPendingAction: handlePendingAction,
-        onAgentStatus: setAgentStatus,
+        onMessage: (message) => agentCallbacksRef.current.onMessage(message),
+        onUpdateMessage: (id, token, streaming) =>
+          agentCallbacksRef.current.onUpdateMessage(id, token, streaming),
+        onPendingAction: (action) => agentCallbacksRef.current.onPendingAction(action),
+        onAgentStatus: (status) => {
+          const id = runningChatIdRef.current
+          if (id) chatActivity.setAgentStatus(id, status)
+        },
         executeFileTool,
         executeMemoryTool,
         executeContextTool,
@@ -328,7 +415,42 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
     }
   }
 
+  const loadMessagesOnly = async (id: string) => {
+    const cached = chatHistoryRef.current.find(c => c.id === id)
+    if (cached) {
+      setMessages(clearStreamingFlags(cached.messages))
+      return
+    }
+
+    try {
+      const history = await storage.get('chatHistory') as Array<{
+        id: string
+        messages: Message[]
+      }> | null
+
+      if (history) chatHistoryRef.current = history as typeof chatHistoryRef.current
+      const chat = history?.find(c => c.id === id)
+      if (chat) setMessages(clearStreamingFlags(chat.messages))
+    } catch (error) {
+      console.error('Failed to load chat messages:', error)
+    }
+  }
+
+  const clearStreamingFlags = (msgs: Message[]): Message[] =>
+    msgs.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
+
+  const applyCachedChat = (id: string, loadAgentHistory: boolean): boolean => {
+    const cached = chatHistoryRef.current.find(c => c.id === id)
+    if (!cached) return false
+    const msgs = clearStreamingFlags(cached.messages)
+    setMessages(msgs)
+    if (loadAgentHistory) agent?.loadHistory(msgs)
+    return true
+  }
+
   const loadChat = async (id: string) => {
+    if (applyCachedChat(id, true)) return
+
     try {
       const history = await storage.get('chatHistory') as Array<{
         id: string
@@ -337,115 +459,280 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
       
       const chat = history?.find(c => c.id === id)
       if (chat) {
-        setMessages(chat.messages)
-        agent?.loadHistory(chat.messages)
+        chatHistoryRef.current = history as typeof chatHistoryRef.current
+        const msgs = clearStreamingFlags(chat.messages)
+        setMessages(msgs)
+        agent?.loadHistory(msgs)
       }
     } catch (error) {
       console.error('Failed to load chat:', error)
     }
   }
 
-  const saveChat = useCallback((chatMessages: Message[]) => {
+  const resolveChatId = useCallback((targetChatId?: string): string => {
+    if (targetChatId) return targetChatId
+    if (chatIdRef.current) return chatIdRef.current
+    if (sessionChatIdRef.current) return sessionChatIdRef.current
+    const newId = uuidv4()
+    sessionChatIdRef.current = newId
+    return newId
+  }, [])
+
+  const updateHistoryRef = useCallback((currentId: string, chatMessages: Message[]): boolean => {
+    const firstUserMsg = chatMessages.find(m => m.role === 'user')
+    const title = firstUserMsg?.content.substring(0, 50) || 'New Chat'
+    const chatData = {
+      id: currentId,
+      title,
+      date: new Date().toISOString(),
+      messages: chatMessages,
+    }
+    const history = chatHistoryRef.current
+    const existingIndex = history.findIndex(c => c.id === currentId)
+    const isFirstPersist = existingIndex < 0
+    if (existingIndex >= 0) {
+      history[existingIndex] = chatData
+    } else {
+      history.unshift(chatData)
+      if (history.length > 100) history.pop()
+    }
+    return isFirstPersist
+  }, [])
+
+  const persistHistoryNow = useCallback(() => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current)
+      persistTimerRef.current = null
+    }
+    storage.set('chatHistory', chatHistoryRef.current).catch(err =>
+      console.error('Failed to persist chat:', err),
+    )
+  }, [storage])
+
+  const schedulePersist = useCallback(() => {
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null
+      persistHistoryNow()
+    }, 400)
+  }, [persistHistoryNow])
+
+  const getViewingChatId = useCallback((): string | null => {
+    if (!isVisibleRef.current) return null
+    return activeChatIdRef.current
+      ?? chatIdRef.current
+      ?? sessionChatIdRef.current
+  }, [])
+
+  const isViewingChat = useCallback((targetId: string): boolean => {
+    if (!targetId) return false
+    return targetId === getViewingChatId()
+  }, [getViewingChatId])
+
+  const getMessagesForChat = useCallback((targetId: string): Message[] => {
+    if (isViewingChat(targetId)) return messagesRef.current
+    return chatHistoryRef.current.find(c => c.id === targetId)?.messages ?? []
+  }, [isViewingChat])
+
+  /** Update in-memory cache + UI immediately; debounce disk persist unless immediate. */
+  const commitMessages = useCallback((
+    targetId: string,
+    next: Message[],
+    options?: { immediate?: boolean; sync?: boolean },
+  ) => {
+    const isFirstPersist = updateHistoryRef(targetId, next)
+    if (isViewingChat(targetId)) {
+      messagesRef.current = next
+      if (options?.sync) {
+        flushSync(() => setMessages(next))
+      } else {
+        setMessages(next)
+      }
+    }
+    if (options?.immediate) {
+      persistHistoryNow()
+    } else {
+      schedulePersist()
+    }
+    if (isFirstPersist) {
+      setTimeout(() => onChatCreated(targetId), 0)
+    }
+  }, [updateHistoryRef, isViewingChat, persistHistoryNow, schedulePersist, onChatCreated])
+
+  const saveChat = useCallback((chatMessages: Message[], targetChatId?: string) => {
     try {
-      // Resolve the chat ID for this session — synchronous, no storage read needed.
-      let currentId: string
-      let isNew = false
-      if (chatId) {
-        currentId = chatId
-      } else if (sessionChatIdRef.current) {
-        currentId = sessionChatIdRef.current
-      } else {
-        currentId = uuidv4()
-        sessionChatIdRef.current = currentId
-        isNew = true
-      }
-
-      const firstUserMsg = chatMessages.find(m => m.role === 'user')
-      const title = firstUserMsg?.content.substring(0, 50) || 'New Chat'
-
-      const chatData = {
-        id: currentId,
-        title,
-        date: new Date().toISOString(),
-        messages: chatMessages,
-      }
-
-      // Update the in-memory history ref synchronously — no race condition.
-      const history = chatHistoryRef.current
-      const existingIndex = history.findIndex(c => c.id === currentId)
-      if (existingIndex >= 0) {
-        history[existingIndex] = chatData
-      } else {
-        history.unshift(chatData)
-        // Trim to 100 entries
-        if (history.length > 100) history.pop()
-      }
-
-      // Flush to storage asynchronously (fire-and-forget — the ref is already updated)
-      storage.set('chatHistory', history).catch(err =>
-        console.error('Failed to persist chat:', err)
-      )
-
-      // Notify parent about new chat ID outside the storage path.
-      // Use setTimeout(0) so this never runs inside a React state updater context.
-      if (isNew) {
-        setTimeout(() => onChatCreated(currentId), 0)
-      }
+      commitMessages(resolveChatId(targetChatId), chatMessages, { immediate: true })
     } catch (error) {
       console.error('Failed to save chat:', error)
     }
-  }, [chatId, onChatCreated, storage])
+  }, [commitMessages, resolveChatId])
+
+  const resolveTargetChatId = useCallback((): string | null => {
+    return runningChatIdRef.current
+      ?? activeChatIdRef.current
+      ?? chatIdRef.current
+      ?? sessionChatIdRef.current
+  }, [])
+
+  const resolveFinalMessages = useCallback((msgs: Message[]): Message[] =>
+    msgs.map(m => {
+      if (!m.isStreaming) return m
+      const snap = streamingContentRef.current.get(m.id)
+      return { ...m, content: snap ?? m.content, isStreaming: false }
+    }), [])
+
+  const applyStreamUpdate = useCallback((
+    targetId: string,
+    id: string,
+    token: string,
+    isStreaming: boolean,
+  ) => {
+    const prev = getMessagesForChat(targetId)
+    let next: Message[]
+    if (isStreaming) {
+      streamingContentRef.current.set(id, token)
+      next = prev.some(m => m.id === id)
+        ? prev.map(m => m.id === id ? { ...m, content: token, isStreaming: true } : m)
+        : [...prev, { id, role: 'assistant' as const, content: token, timestamp: new Date().toISOString(), isStreaming: true }]
+      commitMessages(targetId, next)
+      return
+    }
+
+    const existing = prev.find(m => m.id === id)
+    const snap = streamingContentRef.current.get(id)
+    streamingContentRef.current.delete(id)
+    const bestContent = [token, snap, existing?.content]
+      .filter((v): v is string => !!v)
+      .reduce((a, b) => (a.length >= b.length ? a : b), token)
+    const exists = !!existing
+    next = exists
+      ? prev.map(m => m.id === id ? { ...m, content: bestContent, isStreaming: false } : m)
+      : [...prev, { id, role: 'assistant' as const, content: bestContent, timestamp: new Date().toISOString() }]
+    commitMessages(targetId, next, { sync: true, immediate: true })
+  }, [commitMessages, getMessagesForChat])
+
+  const flushPendingStream = useCallback(() => {
+    streamRafRef.current = null
+    const pending = streamPendingRef.current
+    if (!pending) return
+    streamPendingRef.current = null
+    const currentEpoch = streamEpochRef.current.get(pending.id) ?? 0
+    if (pending.epoch !== currentEpoch) return
+    applyStreamUpdate(pending.targetId, pending.id, pending.token, true)
+  }, [applyStreamUpdate])
+
+  const bumpStreamEpoch = useCallback((id: string) => {
+    streamEpochRef.current.set(id, (streamEpochRef.current.get(id) ?? 0) + 1)
+  }, [])
+
+  const finishAgentRun = useCallback((targetChatId: string) => {
+    if (streamRafRef.current !== null) {
+      cancelAnimationFrame(streamRafRef.current)
+      streamRafRef.current = null
+    }
+    if (streamPendingRef.current) {
+      flushPendingStream()
+    }
+
+    runningChatIdRef.current = null
+    lastBackgroundSyncRef.current = null
+
+    const cached = chatHistoryRef.current.find(c => c.id === targetChatId)
+    const fromCache = resolveFinalMessages(cached?.messages ?? [])
+    const fromLive = resolveFinalMessages(messagesRef.current)
+    const resolved = fromCache.length >= fromLive.length ? fromCache : fromLive
+    const viewing = isViewingChat(targetChatId)
+
+    if (viewing) {
+      messagesRef.current = resolved
+      flushSync(() => setMessages(resolved))
+    }
+
+    if (resolved.length > 0) {
+      updateHistoryRef(targetChatId, resolved)
+      persistHistoryNow()
+    }
+
+    streamingContentRef.current.clear()
+    streamPendingRef.current = null
+    streamEpochRef.current.clear()
+    chatActivity.finishRunning(targetChatId, viewing ? targetChatId : null)
+  }, [
+    chatActivity,
+    flushPendingStream,
+    isViewingChat,
+    persistHistoryNow,
+    resolveFinalMessages,
+    updateHistoryRef,
+  ])
 
   const handleNewMessage = useCallback((message: Message) => {
-    setMessages(prev => {
-      const exists = prev.find(m => m.id === message.id)
-      const newMessages = exists
-        ? prev.map(m => m.id === message.id ? message : m)
-        : [...prev, message]
-      saveChat(newMessages)
-      return newMessages
-    })
-  }, [saveChat])
+    const targetId = resolveTargetChatId()
+    if (!targetId) return
+
+    const prev = getMessagesForChat(targetId)
+    const exists = prev.find(m => m.id === message.id)
+    const next = exists
+      ? prev.map(m => m.id === message.id ? message : m)
+      : [...prev, message]
+    commitMessages(targetId, next, { sync: true })
+  }, [resolveTargetChatId, getMessagesForChat, commitMessages])
 
   /**
    * Called by the agent during streaming:
    * - token = '' and isStreaming = false → remove the streaming placeholder (tool call round)
    * - token = full content and isStreaming = false → finalise the message
-   * - token = partial and isStreaming = true → append token
+   * - token = full content snapshot and isStreaming = true → replace message content
    */
   const handleUpdateMessage = useCallback((id: string, token: string, isStreaming: boolean) => {
+    const targetId = resolveTargetChatId()
+    if (!targetId) return
+
     if (!isStreaming && token === '') {
-      // Cancel — remove the streaming placeholder
+      bumpStreamEpoch(id)
       streamingContentRef.current.delete(id)
-      setMessages(prev => prev.filter(m => m.id !== id))
+      streamEpochRef.current.delete(id)
+      if (streamRafRef.current !== null) {
+        cancelAnimationFrame(streamRafRef.current)
+        streamRafRef.current = null
+      }
+      streamPendingRef.current = null
+      const prev = getMessagesForChat(targetId)
+      commitMessages(targetId, prev.filter(m => m.id !== id), { sync: true })
       return
     }
+
     if (isStreaming) {
-      setMessages(prev => {
-        // Use existing message content as fallback for the first append call
-        // (streamingContentRef is only populated after the first onUpdateMessage call)
-        const existing = prev.find(m => m.id === id)
-        const base = streamingContentRef.current.get(id) ?? (existing?.content || '')
-        const next = base + token
-        streamingContentRef.current.set(id, next)
-        return prev.map(m => m.id === id ? { ...m, content: next, isStreaming: true } : m)
-      })
-    } else {
-      // Finalise
-      streamingContentRef.current.delete(id)
-      setMessages(prev => {
-        const newMessages = prev.map(m =>
-          m.id === id ? { ...m, content: token, isStreaming: false } : m
-        )
-        saveChat(newMessages)
-        return newMessages
-      })
+      const epoch = streamEpochRef.current.get(id) ?? 0
+      streamPendingRef.current = { targetId, id, token, epoch }
+      if (streamRafRef.current === null) {
+        streamRafRef.current = requestAnimationFrame(flushPendingStream)
+      }
+      return
     }
-  }, [saveChat])
+
+    bumpStreamEpoch(id)
+    if (streamRafRef.current !== null) {
+      cancelAnimationFrame(streamRafRef.current)
+      streamRafRef.current = null
+    }
+    streamPendingRef.current = null
+    applyStreamUpdate(targetId, id, token, false)
+  }, [resolveTargetChatId, getMessagesForChat, commitMessages, flushPendingStream, applyStreamUpdate, bumpStreamEpoch])
 
   const handlePendingAction = useCallback((action: PendingAction) => {
-    setPendingAction(action)
-  }, [])
+    const targetId = resolveTargetChatId()
+    if (targetId) pendingByChatRef.current.set(targetId, action)
+    if (targetId && isViewingChat(targetId)) {
+      setPendingAction(action)
+    }
+  }, [resolveTargetChatId, isViewingChat])
+
+  agentCallbacksRef.current = {
+    onMessage: handleNewMessage,
+    onUpdateMessage: handleUpdateMessage,
+    onPendingAction: handlePendingAction,
+  }
 
   const executeFileTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
@@ -730,14 +1017,15 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
   }
 
   const handleStop = useCallback(() => {
-    if (!agent) return
+    if (!agent || !runningChatIdRef.current) return
+    if (runningChatIdRef.current !== visibleChatId) return
+    const targetChatId = runningChatIdRef.current
     agent.abort()
-    setIsLoading(false)
-    setAgentStatus(null)
-  }, [agent])
+    finishAgentRun(targetChatId)
+  }, [agent, finishAgentRun, visibleChatId])
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading || !agent) return
+    if (!input.trim() || !agent || isLoading || otherChatRunning) return
 
     let userMessage = input.trim()
     if (attachedFiles.length > 0) {
@@ -748,17 +1036,29 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
     setInput('')
     setAttachedFiles([])
     memoryUpdateCountRef.current = 0
-    setIsLoading(true)
+
+    const targetChatId = chatId ?? sessionChatIdRef.current ?? uuidv4()
+    const isNewChat = !chatId
+    if (!chatId && !sessionChatIdRef.current) {
+      sessionChatIdRef.current = targetChatId
+    }
+    if (isNewChat) {
+      onChatCreated(targetChatId)
+    }
 
     try {
       if (await handleDirectMemoryCommand(userMessage)) {
         if (pendingAction) {
           const actionId = pendingAction.id
           setPendingAction(null)
+          pendingByChatRef.current.delete(targetChatId)
           agent.rejectAction(actionId, { silent: true })
         }
         return
       }
+
+      runningChatIdRef.current = targetChatId
+      chatActivity.startRunning(targetChatId)
 
       if (pendingAction) {
         await handleReiterateAction(userMessage)
@@ -768,8 +1068,9 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
         await agent.processMessage(userMessage)
       }
     } finally {
-      setIsLoading(false)
-      setAgentStatus(null)
+      if (runningChatIdRef.current === targetChatId) {
+        finishAgentRun(targetChatId)
+      }
     }
   }
 
@@ -781,10 +1082,16 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
   }
 
   const handleApproveAction = async () => {
-    if (!pendingAction || !agent) return
+    if (!pendingAction || !agent || otherChatRunning) return
     const action = pendingAction
+    const targetChatId = chatId ?? sessionChatIdRef.current ?? uuidv4()
+    if (!chatId && !sessionChatIdRef.current) {
+      sessionChatIdRef.current = targetChatId
+    }
     setPendingAction(null)
-    setIsLoading(true)
+    pendingByChatRef.current.delete(targetChatId)
+    runningChatIdRef.current = targetChatId
+    chatActivity.startRunning(targetChatId)
 
     try {
       agent.setActiveContext(activeContext)
@@ -792,15 +1099,16 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
     } catch (error) {
       console.error('Failed to execute action:', error)
     } finally {
-      setIsLoading(false)
-      setAgentStatus(null)
+      finishAgentRun(targetChatId)
     }
   }
 
   const handleRejectAction = () => {
     if (!pendingAction || !agent) return
     const actionId = pendingAction.id
+    const targetId = resolveTargetChatId()
     setPendingAction(null)
+    if (targetId) pendingByChatRef.current.delete(targetId)
     agent.rejectAction(actionId)
   }
 
@@ -838,7 +1146,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
       return (
         <ChatBanner
           variant="info"
-          message="Connecting to connector..."
+          message="Checking the connectors..."
         />
       )
     }
@@ -861,6 +1169,13 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
     <div className="flex-1 flex flex-col h-full">
       {/* Connection Status Banner */}
       {renderConnectionStatus()}
+
+      {otherChatRunning && (
+        <ChatBanner
+          variant="info"
+          message="The agent is still working in another chat. You can open it from Chat History."
+        />
+      )}
       
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto page-shell">
@@ -971,7 +1286,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
               onKeyDown={handleKeyDown}
               placeholder={
                 mcpConnectionState === 'connecting'
-                  ? 'Connecting to connector...'
+                  ? 'Checking the connectors...'
                   : showActiveReport
                     ? 'Ask about this report, or dismiss it to chat about something else…'
                     : 'Ask me anything...'
@@ -995,7 +1310,7 @@ export default function ChatView({ chatId, onChatCreated, onOpenSettings, active
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={!input.trim() || mcpConnectionState === 'connecting'}
+                disabled={!input.trim() || isLoading || otherChatRunning || mcpConnectionState === 'connecting'}
                 className="ui-chat-input-action ui-chat-input-action--end text-neutral-700 hover:text-neutral-950 disabled:text-gray-300"
                 title="Send message"
                 aria-label="Send message"

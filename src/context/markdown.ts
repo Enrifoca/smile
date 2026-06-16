@@ -1,15 +1,5 @@
 export function buildDefaultContextMarkdown(name: string): string {
-  return `# ${name}
-
-## Overview
-(Describe the project goal, stakeholders, and constraints)
-
-## Decisions
-(Log of decisions made)
-
-## Notes
-(Operational notes the agent updates over time)
-`
+  return `# ${name}\n`
 }
 
 /**

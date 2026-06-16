@@ -11,6 +11,7 @@ export type ToolCategory =
   | 'file-manage'
   | 'memory'
   | 'scratchpad'
+  | 'analysis'
   | 'context'
 
 export interface ToolDefinition {

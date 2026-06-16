@@ -181,8 +181,7 @@ inner emphasis (optional): Panel variant="emphasis" — 2px strong border, round
 Preferred components:
 
 - **`Panel`** `variant="soft"` — light grey border (`#e5e7eb`), subtle shadow (catalog cards, outer sections)
-- **`PanelBody`** `variant="emphasis"` — **2px black border** for nested forms inside a module (connector API connection)
-- **`ModuleSection`** — title + description + content stack (Connectors settings)
+- **`SectionHeader`** — title + description row inside a module (connector settings)
 
 Rules:
 
@@ -292,7 +291,7 @@ When building Connectors catalog/settings (Install flow, Hermes-style):
 | Active context indicator | `ui-context-active-dot` on sidebar Context label |
 | Context name active (toggle on) | `ui-sidebar-context-name--active` |
 | Snippet | `Callout` |
-| Content box | `Panel`, `PanelBody`, `ModuleSection`, Settings `section` with `border border-gray-200` |
+| Content box | `Panel`, `SectionHeader`, Settings `section` with `border border-gray-200` |
 | Form fields | `Field`, `Input`, `Select`, `Textarea` |
 | Save + feedback | `ActionRow` + `useActionFeedback` |
 | Page layout | `content-shell`, `page-shell` |

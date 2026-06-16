@@ -28,13 +28,33 @@ export function WriteActionConfirmModule({
   className,
 }: WriteActionConfirmModuleProps) {
   const labels = { ...defaultWriteActionBarLabels, ...labelOverrides }
+  const confirmation = action.confirmation
+  const items = confirmation?.items
 
   return (
     <div className={joinClasses('ui-write-action-bar', className)} role="region" aria-label="Pending write action">
-      {(action.confirmation?.preview || action.preview) ? (
+      {confirmation?.title ? (
+        <p className="ui-write-action-bar-title">{confirmation.title}</p>
+      ) : null}
+      {items && items.length > 0 ? (
+        <ul className="ui-write-action-bar-items">
+          {items.map((item, index) => (
+            <li key={`${item.title}-${index}`}>
+              <span className="ui-write-action-bar-item-title">
+                {item.badge ? `[${item.badge}] ` : ''}{item.title}
+              </span>
+              {item.subtitle ? (
+                <span className="ui-write-action-bar-item-subtitle">{item.subtitle}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (confirmation?.preview || action.preview) ? (
         <p className="ui-write-action-bar-summary">
-          {action.confirmation?.preview || action.preview}
+          {confirmation?.preview || action.preview}
         </p>
+      ) : confirmation?.description ? (
+        <p className="ui-write-action-bar-summary">{confirmation.description}</p>
       ) : null}
       <div className="ui-write-action-bar-actions">
         <Button variant="primary" size="sm" onClick={onApprove}>

@@ -2,7 +2,7 @@
  * Context Service
  *
  * Portable project contexts stored under `.smile/contexts/<slug>/`.
- * Each folder contains `<slug>.json`, `<slug>.md`, and a `history/` backup dir.
+ * Each folder contains `smile.json`, `smile.md`, and a `history/` backup dir.
  */
 
 import * as fs from 'fs'
@@ -19,6 +19,8 @@ import { resolveContextPromptBody, type ContextPromptBody } from '../../src/cont
 import { resolveUniqueSlug, slugifyContextName } from '../../src/context/slug'
 import {
   CONTEXT_FILE_VERSION,
+  CONTEXT_JSON_FILENAME,
+  CONTEXT_MARKDOWN_FILENAME,
   ContextConnectorConfig,
   LegacyProjectContext,
   ProjectContext,
@@ -34,11 +36,68 @@ interface ContextFilePayload {
   connectors: Record<string, ContextConnectorConfig>
 }
 
+const WATCH_DEBOUNCE_MS = 300
+
 export class ContextService {
   private workspacePath: string | null = null
+  private onFilesystemChange: (() => void) | null = null
+  private watchStop: (() => void) | null = null
 
   setWorkspace(workspacePath: string): void {
+    if (this.workspacePath === workspacePath) return
     this.workspacePath = workspacePath
+    this.restartFilesystemWatch()
+  }
+
+  setOnFilesystemChange(callback: (() => void) | null): void {
+    this.onFilesystemChange = callback
+  }
+
+  stopFilesystemWatch(): void {
+    this.watchStop?.()
+    this.watchStop = null
+  }
+
+  private restartFilesystemWatch(): void {
+    this.stopFilesystemWatch()
+    const root = this.getContextsRoot()
+    if (!root) return
+
+    try {
+      this.ensureContextsRoot()
+    } catch {
+      return
+    }
+
+    let timer: NodeJS.Timeout | null = null
+    const notify = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => this.onFilesystemChange?.(), WATCH_DEBOUNCE_MS)
+    }
+
+    try {
+      const watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
+        if (filename && !this.shouldRescan(filename)) return
+        notify()
+      })
+      this.watchStop = () => {
+        watcher.close()
+        if (timer) clearTimeout(timer)
+      }
+    } catch (error) {
+      console.warn('[Contexts] Recursive watch unavailable; watching root only:', error)
+      const watcher = fs.watch(root, () => notify())
+      this.watchStop = () => {
+        watcher.close()
+        if (timer) clearTimeout(timer)
+      }
+    }
+  }
+
+  private shouldRescan(filename: string): boolean {
+    const normalized = filename.replace(/\\/g, '/')
+    if (normalized.includes('/history/') || normalized.startsWith('history/')) return false
+    return true
   }
 
   private getContextsRoot(): string | null {
@@ -62,13 +121,13 @@ export class ContextService {
   private jsonPath(slug: string): string {
     const dir = this.getContextDir(slug)
     if (!dir) throw new Error('Workspace not configured')
-    return path.join(dir, `${slug}.json`)
+    return path.join(dir, CONTEXT_JSON_FILENAME)
   }
 
   private markdownPath(slug: string): string {
     const dir = this.getContextDir(slug)
     if (!dir) throw new Error('Workspace not configured')
-    return path.join(dir, `${slug}.md`)
+    return path.join(dir, CONTEXT_MARKDOWN_FILENAME)
   }
 
   private historyDir(slug: string): string {
@@ -77,7 +136,26 @@ export class ContextService {
     return path.join(dir, 'history')
   }
 
+  /** Rename legacy `<slug>.json` / `<slug>.md` files to fixed smile.* names. */
+  private migrateLegacyFiles(slug: string): void {
+    const dir = this.getContextDir(slug)
+    if (!dir || !fs.existsSync(dir)) return
+
+    const jsonTarget = path.join(dir, CONTEXT_JSON_FILENAME)
+    const mdTarget = path.join(dir, CONTEXT_MARKDOWN_FILENAME)
+    const legacyJson = path.join(dir, `${slug}.json`)
+    const legacyMd = path.join(dir, `${slug}.md`)
+
+    if (!fs.existsSync(jsonTarget) && fs.existsSync(legacyJson)) {
+      fs.renameSync(legacyJson, jsonTarget)
+    }
+    if (!fs.existsSync(mdTarget) && fs.existsSync(legacyMd)) {
+      fs.renameSync(legacyMd, mdTarget)
+    }
+  }
+
   private readJsonFile(slug: string): ContextFilePayload {
+    this.migrateLegacyFiles(slug)
     const raw = fs.readFileSync(this.jsonPath(slug), 'utf-8')
     return JSON.parse(raw) as ContextFilePayload
   }
@@ -112,6 +190,7 @@ export class ContextService {
     const contexts: ProjectContext[] = []
     for (const slug of this.listSlugs()) {
       try {
+        this.migrateLegacyFiles(slug)
         const jsonFile = this.jsonPath(slug)
         if (!fs.existsSync(jsonFile)) continue
         contexts.push(this.payloadToContext(this.readJsonFile(slug)))
@@ -189,6 +268,7 @@ export class ContextService {
   readMarkdown(contextId: string): string {
     const context = this.findById(contextId)
     if (!context) throw new Error('Context not found')
+    this.migrateLegacyFiles(context.slug)
     const filePath = this.markdownPath(context.slug)
     if (!fs.existsSync(filePath)) return ''
     return fs.readFileSync(filePath, 'utf-8')

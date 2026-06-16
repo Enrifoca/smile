@@ -2,58 +2,53 @@
 
 Framework guards that keep multi-step **read → write** workflows from stopping early or drifting from source material.
 
-Used by `index.ts` on every user turn. Connector-neutral — uses tool **categories** (`connector-read`, `file-write`, etc.), not product-specific tool names.
+Used by `index.ts` on every user turn. Connector-neutral — uses tool **categories** (`connector-read`, `file-write`, etc.) and **tool run records**, not user-message keyword lists.
 
 ## Problem it solves
 
 | Failure | Example |
 | --- | --- |
-| **Early stop** | User asks to update a report → agent `file_read`s → chat says “done” → no `report_write` |
-| **Invented output** | Agent reads a report then `report_write`s a new file with made-up tasks/counts |
+| **Early stop** | Agent `file_read`s → chat says “done” → no `report_write` |
+| **Ack-only stop** | Agent streams a short acknowledgment → no tools called |
+| **Invented output** | Agent reads a report then `report_write`s with made-up content |
 
 ## How it works
 
 ```text
-User message
-  → inferTurnIntent()           (update_report, update_file, draft_report, general)
-  → scratchpad + system prompt  ("User goal this turn: …")
+User message (in conversation history — no keyword intent layer)
   → agent loop (tools + model)
-  → shouldNudgeIncompleteWorkflow()
-       if edit intent + read ran + no write + prose reply
-       → [SYSTEM] nudge: call report_write / file_write, same path, grounded content
+  → shouldNudgeIncompleteWorkflow(toolsRunThisTurn, responseText)
+       structural signals only:
+         - read/gather without write this turn
+         - chat prose with zero tools this turn
+       → [SYSTEM] nudge from buildIncompleteWorkflowNudge(toolsRunThisTurn)
 ```
 
 ## Module API (`taskContinuity.ts`)
 
 | Export | Role |
 | --- | --- |
-| `inferTurnIntent(userMessage)` | Classify the turn from user text (English keywords + `.md` paths) |
-| `formatTurnIntentForScratchpad(intent)` | One-line goal for session scratchpad |
+| `ToolRunRecord` | Tool name, category, optional path from args |
 | `isReadOnlyTool` / `isWriteTool` | Classify tools via `ToolCategory` + core tool names |
-| `shouldNudgeIncompleteWorkflow` | Detect read-without-write on edit tasks |
+| `shouldNudgeIncompleteWorkflow` | Detect incomplete workflows from tool runs (+ non-empty prose with zero tools) |
 | `buildIncompleteWorkflowNudge` | System message injected to continue the loop |
 | `buildReportGroundingHint(path)` | Appended to `file_read` results for report paths |
+| `buildPendingWriteScratchpadSuffix` | Scratchpad hint after reads (path-based) |
 
 ## Related files
 
 | File | Role |
 | --- | --- |
-| `index.ts` | Wires intent, tracking, nudges into the agent loop |
+| `index.ts` | Tracks `toolsRunThisTurn`, wires nudges into the agent loop |
 | `toolResults.ts` | Appends grounding hints after `file_read` |
 | `artifacts.ts` | Report tool result text (same-path revise rules) |
 | `toolErrors.ts` | Detect failed tool results for retry loops |
-| `actionGuards.ts` | Action-first guard — [HELPERS.md § Loop guards](./HELPERS.md#loop-guards) |
-| `../prompts/core/system.md` | Reports section — grounding + same-path overwrite |
+| `../prompts/core/system.md` | Action-first contract — model-side, not keyword guards |
 | `../components/chat/artifacts/README.md` | Report card UI |
-
-## Customization
-
-- **New workflow types:** add a `TurnIntentKind` + nudge in `buildIncompleteWorkflowNudge`.
-- **Connector read/write detection:** uses `ToolDefinition.category` from `src/connectors/types.ts` — no connector ids in this module.
 
 ## Rules
 
 - Do not add connector-specific tool name lists here — use categories.
+- Do not add user-message keyword or locale matching — the user's message is already in history for the model.
 - Do not put user-facing copy in this file; nudges are `[SYSTEM]` messages for the model.
 - Prompt-level behavior belongs in `src/prompts/core/system.md`.
-- Keep keyword lists **English only** — smile:D framework copy and intent heuristics are English; do not add locale-specific phrases to core code.

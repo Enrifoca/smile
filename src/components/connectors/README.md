@@ -25,8 +25,8 @@ Fork-level custom settings pages are optional; most packages only need manifest-
 | --- | --- |
 | `McpConnectionModule` | MCP or OAuth connection (Connect / Reconnect / Disconnect) |
 | `ApiConnectionModule` | API key or token credentials with Save / Remove |
-| `CustomSettingsModule` | Provider-specific scopes: projects, domains, labels, folders, presets |
-| `ModuleSection` | Low-level shell if none of the above fit |
+
+For provider-specific scopes (projects, domains, labels), compose `Panel` + `SectionHeader` + `ActionRow` from the UI kit.
 
 ### `McpConnectionModule`
 
@@ -36,35 +36,30 @@ Props: `title`, `description`, `connected`, `connecting`, `onConnect`, optional 
 
 Props: `title`, `description`, `configured`, `saving`, `saveDisabled`, `saveStatus`, `onSave`, optional `onRemove`, `children` (form fields), optional labels.
 
-### `CustomSettingsModule`
-
-Props: `title`, `description`, `children`, optional `action` (header button), optional `save` (ActionRow props), optional `footer`.
-
 ## Example composition
 
 ```tsx
 import { useActionFeedback } from '../hooks/useActionFeedback'
-import {
-  McpConnectionModule,
-  ApiConnectionModule,
-  CustomSettingsModule,
-} from './connectors/ConnectorSettingsModules'
+import { McpConnectionModule, ApiConnectionModule } from './connectors/ConnectorSettingsModules'
+import { Panel, SectionHeader, ActionRow, Button } from '../components/ui'
 
 const scopeSave = useActionFeedback()
 
-<CustomSettingsModule
-  title="Monitored workspaces"
-  description="Limit which workspaces the agent can access."
-  action={<Button variant="outline" size="sm" onClick={loadWorkspaces}>Load workspaces</Button>}
-  save={{
-    label: 'Save selection',
-    saving: scopeSave.busy,
-    saveStatus: scopeSave.status,
-    onSave: () => void saveSelection(),
-  }}
->
+<Panel variant="soft">
+  <SectionHeader
+    title="Monitored workspaces"
+    description="Limit which workspaces the agent can access."
+    aside={<Button variant="outline" size="sm" onClick={loadWorkspaces}>Load workspaces</Button>}
+  />
   {/* Checkboxes, lists, or other controls */}
-</CustomSettingsModule>
+  <ActionRow
+    label="Save selection"
+    busy={scopeSave.busy}
+    status={scopeSave.status}
+    onAction={() => void saveSelection()}
+    size="sm"
+  />
+</Panel>
 ```
 
 See `src/components/ui/README.md` for the full component list.

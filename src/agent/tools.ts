@@ -65,7 +65,13 @@ export const memoryDeleteSchema = z.object({
 // ============ SCRATCHPAD TOOL ============
 
 export const scratchpadWriteSchema = z.object({
-  note: z.string().describe('The note to add to your session scratchpad. Use this to record key findings, decisions, or progress so you can refer back without re-running tools. Examples: "Document has 4 sections: Setup, API, Deployment, FAQ. Records to create: 6 total.", "Using the default connector scope and record type for all items."'),
+  note: z.string().describe('Short note for working notes (this turn). Use update_plan: true to set or revise the current plan (max 3 bullets) — required after deep_thinking if the analysis changes your next steps.'),
+  update_plan: z.boolean().optional().describe('When true, replaces the Current plan section with this note. Use after deep_thinking or when the plan changes.'),
+})
+
+export const deepThinkingSchema = z.object({
+  question: z.string().describe('What you need analyzed (mapping, risks, next steps, ambiguities).'),
+  context: z.string().optional().describe('Optional excerpts or facts already known (from reads, scratchpad, user message). Do not paste entire files.'),
 })
 
 export const contextReadSchema = z.object({})
@@ -157,10 +163,17 @@ export const toolDefinitions: ToolDefinition[] = [
   // Scratchpad
   {
     name: 'scratchpad_write',
-    description: 'Add a note to your session scratchpad — a private, always-visible notepad that persists for the entire conversation turn. Use this to record key facts (e.g. what a document contains, which connector scope or record type to use, how many records to create) so you can refer back to them without re-reading files or re-running searches.',
+    description: 'Add a short note to working notes, or update the current plan (update_plan: true). Use after deep_thinking when the analysis changes your next steps. Do not paste file contents — knowledge stays in history.',
     schema: scratchpadWriteSchema,
     requiresConfirmation: false,
     category: 'scratchpad',
+  },
+  {
+    name: 'deep_thinking',
+    description: 'Request deeper analysis from the reasoning model when light thinking and reads are not enough (ambiguous mapping, multi-source conflicts, complex batch plans). Not for simple tasks. After results, update the plan if needed before write tools.',
+    schema: deepThinkingSchema,
+    requiresConfirmation: false,
+    category: 'analysis',
   },
 
   // Active context tools (require an active project context)
