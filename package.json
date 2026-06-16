@@ -1,6 +1,6 @@
 {
   "name": "smile",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "White-label desktop framework for building vertical AI agents",
   "main": "dist-electron/main.js",
   "author": "smile:D",
