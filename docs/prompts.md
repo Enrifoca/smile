@@ -4,9 +4,28 @@ Prompts are Markdown files so developers and coding agents can edit behavior wit
 
 ## Core Prompts
 
-- `src/prompts/core/system.md` is the connector-neutral system prompt.
-- `src/prompts/core/planner.md` is the optional planner prompt.
-- `src/prompts/index.ts` assembles Markdown with memory, user profile, mode, and connector context.
+- `src/prompts/core/system.md` is the connector-neutral system prompt (identity, tools, capability boundary, response style).
+- `src/prompts/index.ts` assembles Markdown with memory, user profile, and connector context.
+
+## Prompt tiers
+
+Each model call assembles three layers (`src/agent/promptTiers.ts`):
+
+| Tier | Source | Stability |
+| --- | --- | --- |
+| **Foundation** | `system.md` (core rules) | Stable |
+| **Scope** | User profile (communication preferences), connector `prompt.md` sections | Semi-stable per session |
+| **Turn** | Memory, enabled capabilities, scratchpad, active context, current plan, analysis | Changes every iteration |
+
+### Enabled capabilities (dynamic)
+
+`src/agent/capabilities.ts` builds a **Enabled capabilities** section from the live tool registry (core tools + enabled connectors). Injected each turn so the model does not rely on static deny-lists in `system.md`.
+
+Connectors may declare optional `agentCapabilities` tokens in `manifest.json` (e.g. `"email"`, `"web-search"`) for human-readable capability labels — see [creating-a-connector.md](./creating-a-connector.md).
+
+### Deep thinking context
+
+The `deep_thinking` tool sets a pending flag; the **next** model call uses the reasoning model and injects `buildDeepThinkingTurnSection()` into the Turn tier. No separate system prompt or subprocess. See [src/agent/deepThinking.md](../src/agent/deepThinking.md).
 
 ## Connector Prompts
 
@@ -17,6 +36,7 @@ Each connector should own its prompt section in the workspace package:
 Connector prompts should include:
 
 - Domain-specific tool usage rules.
+- Read-before-write gates, especially when duplicate detection, existence checks, or external state can change whether a write is needed.
 - Default heuristics.
 - When to ask a clarifying question.
 - How to interpret connector metadata.
@@ -32,4 +52,16 @@ Connector prompts should not include:
 
 Prompt templates use simple `{{variable}}` placeholders rendered by `src/prompts/loader.ts`.
 
-Keep interpolation simple. If logic becomes complex, compute the text in TypeScript and inject it as one variable.
+Keep interpolation simple. If logic becomes complex, compute the text in TypeScript and inject it as one variable (as with enabled capabilities and user communication preferences).
+
+## User communication preferences
+
+Settings → Behavior → Communication preferences (technical/conversational, concise/detailed, formal/casual) are rendered into the **User Context** scope block via `src/agent/communicationPreferences.ts`. They affect the main agent's visible replies, including a `deep_thinking` turn because deep thinking is a mode switch in the same prompt pipeline.
+
+## Tool Results In History
+
+Tool results are execution records, not visible assistant prose. The agent stores them as private model-visible messages so later loop iterations and reloaded chats can use the facts gathered by tools.
+
+Prompts should refer to `[tool_result: ...]` entries as internal evidence only. The model must not reproduce those markers in user-facing replies.
+
+When a requested write depends on a read/search/list result, the prompt should tell the model to run the reads first and inspect their tool results before proposing a write.

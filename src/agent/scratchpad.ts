@@ -1,9 +1,59 @@
 const str = (value: unknown) => (value as string) || ''
 
+const MAX_LINES = 30
+
+export class SessionScratchpad {
+  private lines: string[] = []
+
+  appendGoal(text: string): void {
+    const line = text.startsWith('→') ? text : `→ ${text}`
+    if (this.lines.length === 0) {
+      this.lines.push(line)
+      return
+    }
+    if (this.lines[0].startsWith('→')) {
+      this.lines[0] = line
+      return
+    }
+    this.lines.unshift(line)
+    this.trim()
+  }
+
+  appendDone(note: string): void {
+    if (!note.trim()) return
+    const line = note.startsWith('✓') ? note : `✓ ${note}`
+    this.lines.push(line)
+    this.trim()
+  }
+
+  appendNote(note: string): void {
+    if (!note.trim()) return
+    const line = note.startsWith('•') ? note : `• ${note}`
+    this.lines.push(line)
+    this.trim()
+  }
+
+  serialize(): string {
+    return this.lines.join('\n')
+  }
+
+  isEmpty(): boolean {
+    return this.lines.length === 0
+  }
+
+  private trim(): void {
+    if (this.lines.length <= MAX_LINES) return
+    const goal = this.lines[0]?.startsWith('→') ? this.lines[0] : null
+    const rest = goal ? this.lines.slice(1) : this.lines
+    const kept = rest.slice(-(MAX_LINES - (goal ? 1 : 0)))
+    this.lines = goal ? [goal, ...kept] : kept
+  }
+}
+
 export function getCoreScratchpadNote(
   toolName: string,
   args: Record<string, unknown>,
-  formattedResult: string
+  formattedResult: string,
 ): string {
   if (toolName === 'file_read' || toolName === 'file_read_ocr') {
     const fname = str(args.path).split(/[\\/]/).pop() || str(args.path)
@@ -25,10 +75,10 @@ export function getCoreScratchpadNote(
     return `Report saved: ${str(args.title)} (${str(args.path) || '.smile/reports/'})`
   }
 
+  if (toolName === 'deep_thinking') {
+    return 'Deep thinking: extended reasoning scheduled for next step'
+  }
+
   return ''
 }
 
-export function formatScratchpadNote(note: string): string {
-  if (!note) return ''
-  return note.startsWith('✓') ? note : `✓ ${note}`
-}

@@ -24,6 +24,20 @@ export interface ToolEntry {
   afterLabel: string
 }
 
+export type AgentActivityKind = 'model' | 'thinking' | 'tool' | 'approval' | 'task'
+export type AgentActivityStatus = 'running' | 'completed' | 'waiting' | 'error'
+
+/** Structured activity row shown in the transcript without becoming assistant prose. */
+export interface AgentActivity {
+  kind: AgentActivityKind
+  status: AgentActivityStatus
+  label: string
+  detail?: string
+  toolEntry?: ToolEntry
+  startedAt?: string
+  completedAt?: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -37,10 +51,14 @@ export interface Message {
    * Message type:
    *  - undefined / omitted → normal response bubble
    *  - 'thinking'      → "Thought for Xs" collapsible reasoning block
-   *  - 'tool_summary'  → grouped tool-call summary row
+   *  - 'tool_summary'  → grouped tool-call summary row (legacy saved history)
+   *  - 'activity'      → structured lifecycle row for model/tool/task progress
    *  - 'artifact'      → markdown report card (see artifact)
+   *  - 'tool_result'   → private model-visible tool output; persisted but hidden from chat UI
    */
-  type?: 'thinking' | 'tool_summary' | 'artifact'
+  type?: 'thinking' | 'tool_summary' | 'activity' | 'artifact' | 'tool_result'
+  /** Structured activity row (set on type:'activity' messages) */
+  activity?: AgentActivity
   /** Markdown report shown as an in-chat card + modal */
   artifact?: MarkdownArtifact
   /** Elapsed thinking time in ms (set on type:'thinking' messages) */

@@ -55,7 +55,7 @@ export class ModelCatalogService {
   private getConfiguredProviders(): ConfiguredProvider[] {
     const configs: ConfiguredProvider[] = []
 
-    for (const key of ['aiConfig', 'reasoningConfig', 'plannerConfig']) {
+    for (const key of ['aiConfig', 'reasoningConfig']) {
       const raw = this.storage.getSecure(key)
       if (!raw) continue
 

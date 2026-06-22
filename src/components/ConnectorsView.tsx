@@ -33,7 +33,7 @@ function CatalogEntryIcon({
       <img
         src={src}
         alt=""
-        className="connector-card-icon rounded-md object-contain"
+        className="connector-card-icon object-contain"
       />
     )
   }
@@ -65,7 +65,7 @@ function ConnectorCard({
       <CatalogEntryIcon connector={connector} iconDataUrl={iconDataUrl} />
       <span className="connector-card-name">{connector.name}</span>
       {typeLabel && (
-        <Badge className="connector-card-type-badge text-[10px] font-normal">
+        <Badge className="connector-card-type-badge ui-text-meta font-normal">
           {typeLabel}
         </Badge>
       )}
@@ -110,7 +110,7 @@ function ConnectorInstallView({
   const typeLabel = entry.integrationType ? INTEGRATION_TYPE_LABELS[entry.integrationType] : null
 
   return (
-    <div className="h-full overflow-y-auto bg-white">
+    <div className="ui-page-frame">
       <div className="content-shell page-shell space-y-6">
         <ConnectorPageHeader
           name={entry.name}
@@ -120,9 +120,9 @@ function ConnectorInstallView({
         />
 
         <Panel variant="soft" className="space-y-4">
-          <p className="text-sm text-neutral-600">
+          <p className="ui-type-ui">
             Install copies this connector into your workspace at{' '}
-            <code className="bg-gray-100 px-1 py-0.5 rounded">.smile/connectors/{entry.id}/</code>.
+            <code className="ui-inline-code">.smile/connectors/{entry.id}/</code>.
             You can configure credentials after installation.
           </p>
           {installError && <Alert>{installError}</Alert>}
@@ -174,7 +174,7 @@ function ConnectorDetailView({
   return (
     <div className="content-shell page-shell">
       <Alert>Connector not found.</Alert>
-      <button type="button" className="mt-4 text-sm underline" onClick={onBack}>
+      <button type="button" className="mt-4 ui-text-base underline" onClick={onBack}>
         Back to catalog
       </button>
     </div>
@@ -344,13 +344,13 @@ export default function ConnectorsView() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-white">
+    <div className="ui-page-frame">
       <div className="content-shell page-shell space-y-8">
         <section>
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-medium text-neutral-950">Connected</h1>
+            <h1 className="ui-page-title">Connected</h1>
             {loadingConnectionState && (
-              <div className="flex items-center gap-2 text-sm text-neutral-500">
+              <div className="flex items-center gap-2 ui-type-ui">
                 <Spinner size="sm" />
                 <span>Checking...</span>
               </div>
@@ -358,7 +358,7 @@ export default function ConnectorsView() {
           </div>
           <div className="mt-5 flex flex-wrap gap-4">
             {!loadingConnectionState && connectedCatalog.length === 0 ? (
-              <p className="text-sm text-neutral-500">No connectors configured yet.</p>
+              <p className="ui-type-ui">No connectors configured yet.</p>
             ) : (
               connectedCatalog.map(connector => (
                 <ConnectorCard
@@ -375,12 +375,12 @@ export default function ConnectorsView() {
 
         <section className="space-y-4">
           <div className="flex items-center gap-3">
-            <h2 className="text-xl font-medium text-neutral-950">Catalog</h2>
+            <h2 className="ui-section-title">Catalog</h2>
             {loadingCatalog && <Spinner size="sm" />}
           </div>
-          <p className="text-sm text-neutral-500">
-            Install connectors from the catalog into <code>.smile/connectors/&lt;id&gt;/</code>, or author custom packages — see{' '}
-            <code>docs/creating-a-connector.md</code>.
+          <p className="ui-type-ui">
+            Install connectors from the catalog into <code className="ui-inline-code">.smile/connectors/&lt;id&gt;/</code>, or author custom packages — see{' '}
+            <code className="ui-inline-code">docs/creating-a-connector.md</code>.
           </p>
           <Input
             value={search}
@@ -399,7 +399,7 @@ export default function ConnectorsView() {
               />
             ))}
             {!loadingCatalog && filteredCatalog.length === 0 && (
-              <p className="text-sm text-neutral-500">No connectors match your search.</p>
+              <p className="ui-type-ui">No connectors match your search.</p>
             )}
           </div>
         </section>

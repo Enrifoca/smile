@@ -55,11 +55,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('ai:configure', config),
     configureReasoning: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) =>
       ipcRenderer.invoke('ai:configureReasoning', config),
-    // Legacy alias kept for backward compatibility
-    configurePlanner: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) =>
-      ipcRenderer.invoke('ai:configurePlanner', config),
-    plan: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) =>
-      ipcRenderer.invoke('ai:plan', messages),
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) =>
       ipcRenderer.invoke('ai:chat', messages, tools),
     chatReasoning: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) =>
@@ -261,8 +256,6 @@ export interface ElectronAPI {
   ai: {
     configure: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
     configureReasoning: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
-    configurePlanner: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) => Promise<{ success: boolean }>
-    plan: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => Promise<{ success: boolean; plan?: string; error?: string }>
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }

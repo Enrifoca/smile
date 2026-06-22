@@ -12,6 +12,7 @@ Theme tokens: **`src/theme/tokens.css`**. Semantic styles: **`src/styles/globals
 
 ## Belongs here
 
+- App shell layout (`shell/` — titlebar, chat history sidebar, tabs, inspector, status bar; see `shell/README.md`)
 - Chat UI (`chat/` — write action bar, banner, empty state)
 - Write action bar above composer (`ActionConfirm.tsx` re-exports `WriteActionConfirmModule`)
 - Settings shell

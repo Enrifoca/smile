@@ -36,6 +36,18 @@ export function WriteActionConfirmModule({
           {action.confirmation?.preview || action.preview}
         </p>
       ) : null}
+      {action.confirmation?.items?.length ? (
+        <ol className="ui-write-action-bar-items">
+          {action.confirmation.items.map((item, index) => (
+            <li key={`${item.title}-${index}`}>
+              <span className="ui-write-action-bar-item-title">{item.title}</span>
+              {item.subtitle ? (
+                <span className="ui-write-action-bar-item-subtitle">{item.subtitle}</span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
       <div className="ui-write-action-bar-actions">
         <Button variant="primary" size="sm" onClick={onApprove}>
           {resolveApproveLabel(action)}

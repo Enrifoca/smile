@@ -1,6 +1,6 @@
 # Activity status & tool-call UX
 
-How the composer status line, chat transcript, and tool-summary rows stay aligned during an agent turn.
+How the composer status line, chat transcript, and structured activity rows stay aligned during an agent turn.
 
 ## Scope
 
@@ -23,23 +23,22 @@ Agent (index.ts)
     → getConnectorToolEntry()    [connectorToolEntries.ts]
     → getCoreToolEntry()         [toolEntries.ts]
 
-  after tool batch
-    → onMessage(type: tool_summary, toolEntries)
-      → summariseToolEntries()   [toolSummary.ts]
-        → ToolSummaryBlock       [ChatMessage.tsx]
+  tool lifecycle
+    → onMessage(type: activity, activity)
+      → ActivityBlock            [ChatMessage.tsx]
 ```
 
 ## Two UI channels
 
 | Channel | Where | When updated | Source |
 | --- | --- | --- | --- |
-| **Activity status** | Above composer (`ChatActivityIndicator`) | Live during the turn | `AgentPhase` → `resolveActivityLabel` |
-| **Tool summary** | In transcript (`type: 'tool_summary'`) | After each tool batch completes | `ToolEntry.label` (past tense), collapsed via `summariseToolEntries` |
-| **Assistant prose** | Normal chat bubble | Streamed or emitted before tools | `emitAssistantPreamble` / streaming `onUpdateMessage` |
+| **Live status** | Above composer (`ChatActivityIndicator`) | Current operation only | `AgentPhase` → `resolveActivityLabel` |
+| **Activity stream** | In transcript (`type: 'activity'`) | Tool/approval lifecycle updates | `AgentActivity` + `ToolEntry` |
+| **Assistant prose** | Normal chat bubble | Intent, confirmation copy, final answer | `emitAssistantPreamble` / streaming `onUpdateMessage` |
 | **Thinking block** | Collapsible row (`type: 'thinking'`) | When `</think>` closes | Stream parser in `callAI` |
 | **Report artifact** | Report card (`type: 'artifact'`) | After successful `report_write` | `emitArtifactMessageFromResult` |
 
-Status and tool summary share the same `ToolEntry` builder; they differ in **tense** (running vs past) and **timing** (live vs post-batch).
+Live status and activity rows share the same `ToolEntry` builder. Status is ephemeral; activity rows persist in the transcript and update in place from running to completed, waiting, or error.
 
 ## ToolEntry shape
 
@@ -61,42 +60,44 @@ Core tools: `toolEntries.ts`. Connectors: `getConnectorToolEntry()` from manifes
 
 | Phase | Set when | Label |
 | --- | --- | --- |
-| `awaiting_model` | Start of each `callAI` | `Working on your request…`, or `Reasoning about next step…` if reasoning model **and** a tool already ran this turn, or `{lastEntry.afterLabel}` |
+| `awaiting_model` | Start of each `callAI` | `{lastEntry.afterLabel}` after a tool; `Planning next step…` on the first reasoning iteration; `Reasoning about next step…` for other reasoning calls; else `Working…` |
 | `streaming_thinking` | Stream opens `<think>` | `Thinking…` |
 | `streaming_text` | First visible answer token | `Writing response…` |
 | `streaming_tool_draft` | `handleStreamProgress` (tool name/args streaming) | `{entry.preparingLabel}` |
 | `preparing_tools` | Stream ended with tool calls | First entry's `preparingLabel`, or `Preparing N actions…` |
 | `running_tool` | Before `executeTool` | `{entry.runningLabel}` |
 | `awaiting_approval` | Write tool needs confirmation | `Waiting for your approval: {entry.label}` |
+| `awaiting_model` + deep mode | Next iteration after `deep_thinking` | `Deep thinking…` (`isDeepThinkingIteration`) |
 | `reasoning_fallback` | Reasoning model retry on chat model | `Reasoning model busy — using chat model…` |
 
 Status is cleared to `null` only at end of `processMessage` (or `abort()`).
 
-Fallback when status is null: `Working on your request…` in `ChatActivityIndicator`.
+Fallback when status is null: `Working on your request…` in `ChatActivityIndicator`. Active agent phases should normally provide a more specific label.
 
 ## Turn flow (one user message)
 
 ```text
 processMessage(userMessage)
-  inferTurnIntent → scratchpad note (nudges only, NOT status)
+  toolsRunThisTurn + scratchpad → shouldNudgeIncompleteWorkflow (nudges only, NOT status)
   runAgentLoop:
     loop:
       callAI()
         [awaiting_model]
         stream tokens → thinking / text / tool-draft progress
         if toolCalls:
-          emitAssistantPreamble(prose)   ← prose in chat BEFORE tools
+          emitAssistantPreamble(prose)   ← optional short intent/conversation copy
           [preparing_tools]
         return response
 
       if toolCalls:
         for each tool:
+          emit/update type:activity (running)
           [running_tool]
-          if requiresConfirmation → [awaiting_approval] → return
+          if requiresConfirmation → update activity (waiting) → [awaiting_approval] → return
           executeTool
+          update activity (completed/error)
           push [tool_result: …] to history (model context)
           optional artifact (report_write)
-        emit tool_summary message (UI only, not in model history)
         continue loop
 
       else final text → break
@@ -106,10 +107,12 @@ processMessage(userMessage)
 
 | Condition | Model |
 | --- | --- |
-| Scratchpad empty this turn + reasoning configured | Reasoning model (`callAIReasoningStream`) |
-| Scratchpad has content | Main chat model |
+| First loop iteration + reasoning configured | Reasoning model (light thinking prompt in Turn tier) |
+| Loop iteration 2+ | Main chat model |
+| `deep_thinking` tool | Reasoning model on the **next** loop iteration; Turn-tier **Deep thinking (ACTIVE)** section — [deepThinking.md](./deepThinking.md) |
+| History compression | Main chat model only |
 
-Reasoning is for initial analysis; execution steps use the faster chat model once the scratchpad is populated.
+Reasoning orients on the first iteration; execution uses the chat model afterward. `deep_thinking` schedules one **extended reasoning iteration** with a dedicated Turn-tier section — for deep analysis or a sharper scratchpad plan. After that step, the agent continues with tools on the chat model.
 
 ## Stream progress (tool args)
 
@@ -118,7 +121,20 @@ Reasoning is for initial analysis; execution steps use the faster chat model onc
 - Fires as soon as the tool **name** appears (not only when `report_write` title is parseable).
 - Agent maps event → `getToolEntry` → `streaming_tool_draft`.
 
-## Tool summary aggregation
+## Activity rows and legacy tool summaries
+
+New agent turns emit `type: 'activity'` rows for tool and approval lifecycle. The row keeps one message id and is updated in place:
+
+| Status | Meaning |
+| --- | --- |
+| `running` | Tool or approved write is executing |
+| `completed` | Tool finished or approval was cancelled/completed |
+| `waiting` | Write action is paused for user approval |
+| `error` | Tool failed; compact detail is available in the row |
+
+Legacy saved chats may still contain `type: 'tool_summary'`; `ChatMessage.tsx` keeps rendering them.
+
+## Tool summary aggregation (legacy)
 
 `summariseToolEntries` groups by `category` / `group`:
 

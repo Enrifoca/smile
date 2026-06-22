@@ -75,8 +75,8 @@ export default function ContextDetailView({
   if (!context) {
     return (
       <div className="content-shell page-shell py-8">
-        <p className="text-sm text-neutral-500">Context not found.</p>
-        <button type="button" className="mt-4 text-sm text-neutral-700 underline" onClick={onBack}>
+        <p className="ui-type-ui">Context not found.</p>
+        <button type="button" className="mt-4 ui-text-base text-neutral-700 underline" onClick={onBack}>
           Back to chat
         </button>
       </div>
@@ -88,8 +88,8 @@ export default function ContextDetailView({
       <div className="content-shell page-shell space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-medium text-neutral-950">{context.name}</h1>
-            <p className="mt-1 text-sm text-neutral-500">
+            <h1 className="ui-page-title">{context.name}</h1>
+            <p className="mt-1 ui-type-ui">
               Enable connectors and configure scope for this project context.
             </p>
           </div>

@@ -19,7 +19,7 @@ The stable, **language-neutral** boundary that connectors are written against. N
 
 ## Package layout (`.smile/connectors/<id>/`)
 
-- `manifest.json` — validated by `validateManifest` (optional `integrationType`, `catalog.icon`)
+- `manifest.json` — validated by `validateManifest` (optional `integrationType`, `catalog.icon`, `agentCapabilities`)
 - `prompt.md` — domain prompt section
 - `handler.js` — sandboxed module matching `ConnectorHandlerModule` (**required when `handlerKind` is `code`**, the default)
 - `icon.png` — optional catalog image (path overridable via `catalog.icon`)

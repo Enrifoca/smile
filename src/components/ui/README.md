@@ -39,7 +39,7 @@ Chat-specific compositions live in **`src/components/chat/`** — they use kit p
 | --- | --- |
 | `WriteActionConfirmModule` | Accept / Refuse bar above the composer during pending write actions |
 | `ChatBanner` | Connector connection status |
-| `ChatEmptyState` | New-chat suggestion chips |
+| `ChatEmptyState` | New-chat empty transcript (heading; optional suggestions via props) |
 
 Styles: `.ui-write-action-bar`, `.ui-chat-*`. Defaults: `src/components/chat/writeActionConfirmDefaults.ts`. Guide: `src/components/chat/README.md`.
 

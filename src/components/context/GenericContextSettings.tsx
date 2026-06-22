@@ -44,7 +44,7 @@ function fieldPlaceholder(key: string, fieldSchema: JSONSchema): string {
 export function GenericContextSettings({ schema, value, onChange }: GenericContextSettingsProps) {
   const properties = schema.properties
   if (!properties || Object.keys(properties).length === 0) {
-    return <p className="text-xs text-neutral-400">This connector declares no per-context configuration.</p>
+    return <p className="ui-text-meta">This connector declares no per-context configuration.</p>
   }
 
   return (
@@ -54,8 +54,8 @@ export function GenericContextSettings({ schema, value, onChange }: GenericConte
         const hint = fieldSchema.description
         return (
           <label key={key} className="block space-y-1.5">
-            <span className="text-sm font-medium text-neutral-900">{label}</span>
-            {hint ? <span className="block text-xs text-neutral-500">{hint}</span> : null}
+            <span className="ui-field-label">{label}</span>
+            {hint ? <span className="block ui-text-meta">{hint}</span> : null}
             <Input
               value={fieldValueToString(value[key])}
               placeholder={fieldPlaceholder(key, fieldSchema)}
