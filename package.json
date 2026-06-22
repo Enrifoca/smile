@@ -2,6 +2,7 @@
   "name": "smile",
   "version": "0.1.1",
   "description": "White-label desktop framework for building vertical AI agents",
+  "license": "MIT",
   "main": "dist-electron/main.js",
   "author": "smile:D",
   "repository": {
@@ -9,7 +10,7 @@
     "url": "https://github.com/enrifoca/smile.git"
   },
   "scripts": {
-    "dev": "node scripts/dev-electron.mjs",
+    "dev": "node scripts/brand-electron.mjs && node scripts/dev-electron.mjs",
     "build": "tsc && vite build && electron-builder",
     "build:win": "tsc && vite build && electron-builder --win",
     "build:mac": "tsc && vite build && electron-builder --mac",
@@ -17,13 +18,15 @@
     "release:win": "tsc && vite build && electron-builder --win --publish always",
     "release:mac": "tsc && vite build && electron-builder --mac --publish always",
     "preview": "vite preview",
-    "electron:dev": "node scripts/dev-electron.mjs",
+    "electron:dev": "node scripts/brand-electron.mjs && node scripts/dev-electron.mjs",
     "typecheck": "tsc --noEmit",
     "validate:sandbox": "electron scripts/validate-sandbox.cjs",
     "validate:contract": "node packages/connector-sdk/bin/smile-connector.cjs check-contract",
     "validate:connector": "node packages/connector-sdk/bin/smile-connector.cjs validate",
     "test:connector": "node packages/connector-sdk/bin/smile-connector.cjs test",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs && node scripts/brand-electron.mjs",
+    "brand-electron": "node scripts/brand-electron.mjs",
+    "postinstall": "node scripts/brand-electron.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^0.0.55",
@@ -61,6 +64,7 @@
     "electron-builder": "^24.13.0",
     "png2icons": "^2.0.1",
     "postcss": "^8.4.38",
+    "rcedit": "^5.0.2",
     "sharp": "^0.35.1",
     "tailwindcss": "^3.4.4",
     "to-ico": "^1.1.5",

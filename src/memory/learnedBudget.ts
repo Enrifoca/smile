@@ -75,7 +75,7 @@ export function selectLearnedNotesForPrompt(memory: MemoryStore): LearnedPromptS
 
 /**
  * When learned notes grow past the rollup threshold, condense older entries into learnedRollup.
- * Full entries remain on disk for memory_read.
+ * Full entries remain on disk.
  */
 export function reconcileLearnedMemoryBudget(memory: MemoryStore): MemoryStore {
   const entries = learnedEntries(memory)

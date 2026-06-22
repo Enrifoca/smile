@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { useElectron } from '../hooks/useElectron'
 import { Alert, Button, Spinner } from './ui'
+import { ConfirmModal } from './ui/ConfirmModal'
 import type { ProjectContext } from '../context/types'
 import { ContextConnectorsPanel } from './context/ContextConnectorsPanel'
 import { ContextKnowledgeCard } from './context/ContextKnowledgeCard'
@@ -25,6 +26,7 @@ export default function ContextDetailView({
   const [context, setContext] = useState<ProjectContext | null>(null)
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -75,8 +77,8 @@ export default function ContextDetailView({
   if (!context) {
     return (
       <div className="content-shell page-shell py-8">
-        <p className="text-sm text-neutral-500">Context not found.</p>
-        <button type="button" className="mt-4 text-sm text-neutral-700 underline" onClick={onBack}>
+        <p className="ui-type-ui">Context not found.</p>
+        <button type="button" className="mt-4 ui-text-base text-neutral-700 underline" onClick={onBack}>
           Back to chat
         </button>
       </div>
@@ -88,12 +90,12 @@ export default function ContextDetailView({
       <div className="content-shell page-shell space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-medium text-neutral-950">{context.name}</h1>
-            <p className="mt-1 text-sm text-neutral-500">
+            <h1 className="ui-page-title">{context.name}</h1>
+            <p className="mt-1 ui-type-ui">
               Enable connectors and configure scope for this project context.
             </p>
           </div>
-          <Button variant="danger" onClick={() => void handleDelete()} loading={deleting}>
+          <Button variant="danger" onClick={() => setShowDeleteModal(true)} loading={deleting}>
             Delete context
           </Button>
         </div>
@@ -115,6 +117,24 @@ export default function ContextDetailView({
 
         {error && <Alert>{error}</Alert>}
       </div>
+
+      {showDeleteModal && (
+        <ConfirmModal
+          title="Delete context?"
+          description={
+            <>
+              Are you sure you want to delete <strong>{context.name}</strong>? This will remove the context folder and all its knowledge. This cannot be undone.
+            </>
+          }
+          confirmLabel="Delete"
+          confirmVariant="danger"
+          onConfirm={() => {
+            setShowDeleteModal(false)
+            void handleDelete()
+          }}
+          onCancel={() => setShowDeleteModal(false)}
+        />
+      )}
     </div>
   )
 }

@@ -1,18 +1,31 @@
 import { v4 as uuidv4 } from 'uuid'
-import { Message, PendingAction, ToolEntry, UserProfile } from './types'
+import { AgentActivity, Message, PendingAction, ToolEntry, UserProfile, type AgentContextSnapshot } from './types'
 import { AIResponse, AgentConfig } from './config'
 import { shouldAdmitSourceLeaf } from '../memory/sourceAdmission'
 import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
-import { getSystemPrompt } from './prompts'
+import { SessionScratchpad, getCoreScratchpadNote } from './scratchpad'
+import {
+  assemblePromptTiers,
+  buildPlanSection,
+  buildReasoningLightSection,
+  buildScratchpadSection,
+} from './promptTiers'
+import {
+  buildDeepThinkingTurnSection,
+  formatDeepThinkingToolAck,
+  type DeepThinkingRequest,
+} from './deepThinking'
+import { buildEnabledCapabilitiesSection, type ConnectorCapabilitySummary } from './capabilities'
+import { maybeCompressConversationHistory, estimateTokens } from './historyCompression'
+import { selectLearnedNotesForPrompt } from '../memory/learnedBudget'
+import { formatActiveScopesForPrompt } from '../memory/promptSections'
 import { toolDefinitions } from './tools'
 import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
 import type { ContextEnvelope } from '../connectors/contract'
 import type { ProjectContext } from '../context/types'
 import { getConnectorScopeConfig, getEnabledConnectorIds, getContextFolderPath } from '../context/types'
 import type { ContextPromptBody } from '../context/promptInjection'
-import { shouldNudgeActionFirst } from './actionGuards'
 import { zodToJsonSchema } from './jsonSchema'
-import { formatScratchpadNote, getCoreScratchpadNote } from './scratchpad'
 import { getCoreToolEntry, ensureToolEntryActivity } from './toolEntries'
 import { getConnectorToolEntry } from './connectorToolEntries'
 import { resolveActivityLabel, type AgentPhase } from './activityStatus'
@@ -20,10 +33,8 @@ import { formatCoreToolResultForAI } from './toolResults'
 import { isFailedToolResult } from './toolErrors'
 import {
   buildIncompleteWorkflowNudge,
-  formatTurnIntentForScratchpad,
-  inferTurnIntent,
+  buildPendingWriteScratchpadSuffix,
   shouldNudgeIncompleteWorkflow,
-  type TurnIntent,
   type ToolRunRecord,
 } from './taskContinuity'
 import { compressToolResult } from './compression'
@@ -36,10 +47,8 @@ const THINK_OPEN = '<think>'
 const THINK_CLOSE = '</think>'
 const THINK_BLOCK_REGEX = new RegExp(`${THINK_OPEN}[\\s\\S]*?${THINK_CLOSE.replace('/', '\\/')}`, 'gi')
 
-// Re-export types and utilities
+// Re-export types
 export * from './types'
-export * from './tools'
-export * from './prompts'
 
 /**
  * smile:D Agent Runtime
@@ -54,27 +63,23 @@ export class Agent {
   // Active project context (sticky for the conversation); null = no context.
   private activeContext: ProjectContext | null = null
   private activeContextBody: ContextPromptBody | null = null
-  // Deduplication cache: maps "toolName:JSON(args)" → formatted result string.
+  // Deduplication cache: maps "toolName:JSON(args)" -> formatted result string.
   // Cleared at the start of each processMessage call. Write operations trigger
   // targeted invalidation so read-after-write always returns fresh data.
   private toolResultCache = new Map<string, string>()
-  // Manus-style session scratchpad: a running text note block injected into
-  // every system prompt. Auto-populated after file/search tool calls; also
-  // writable by the agent via the scratchpad_write tool. Cleared each turn.
-  private sessionScratchpad = ''
-  // Set to true by abort() to stop the agent loop after the current iteration.
+  // Tracks tool signatures already shown in a tool_summary this turn, so the UI
+  // does not repeat identical operations across iterations.
+  private summarizedToolSignatures = new Set<string>()
+  // Results from tool calls in the current turn, surfaced in the context inspector.
+  private latestToolResultsThisTurn: NonNullable<AgentContextSnapshot['latestToolResults']> = []
+  private sessionScratchpad = new SessionScratchpad()
+  private turnPlan = ''
+  private pendingDeepThinking: DeepThinkingRequest | null = null
+  private agentLoopIteration = 0
   private abortFlag = false
-  // Planning gate: tracks whether the agent has written at least one
-  // scratchpad entry this turn before calling a write/create tool.
-  // Reset each processMessage call.
-  private scratchpadWrittenThisTurn = false
-  private scratchpadToolWrittenThisTurn = false
-  // Prevents action requests from turning into long prose instead of tool calls.
-  // Reset each processMessage call; used at most once to avoid loops.
-  private actionFirstNudgedThisTurn = false
+  private thinkOnlyNudgedThisTurn = false
   private reportWriteSucceededThisTurn = false
   private taskContinuationNudgedThisTurn = false
-  private turnIntent: TurnIntent = { kind: 'general', summary: '' }
   private toolsRunThisTurn: ToolRunRecord[] = []
   private lastToolEntryThisTurn: ToolEntry | null = null
 
@@ -82,8 +87,51 @@ export class Agent {
     this.config.onAgentStatus?.(status)
   }
 
+  private toolRunRecordForCall(toolCall: NonNullable<AIResponse['toolCalls']>[number]): ToolRunRecord {
+    const toolPath = typeof toolCall.arguments.path === 'string' ? toolCall.arguments.path : undefined
+    const reportReadPendingWrite = (
+      (toolCall.name === 'file_read' || toolCall.name === 'file_read_ocr')
+      && toolPath
+      && isReportArtifactPath(toolPath)
+    )
+    return {
+      name: toolCall.name,
+      category: this.getToolDefinition(toolCall.name)?.category,
+      path: toolPath,
+      pendingWriteTool: reportReadPendingWrite ? 'report_write' : undefined,
+      pendingWritePath: reportReadPendingWrite ? toolPath : undefined,
+    }
+  }
+
+  private persistToolResultMessage(toolName: string, formattedResult: string, isFromCache: boolean): void {
+    const msg: Message = {
+      id: uuidv4(),
+      role: 'assistant',
+      type: 'tool_result',
+      content: `[tool_result: ${toolName}]${isFromCache ? ' [cached]' : ''}\n${formattedResult}`,
+      timestamp: new Date().toISOString(),
+    }
+    this.conversationHistory.push(msg)
+    this.config.onMessage(msg)
+  }
+
   private setActivityPhase(phase: AgentPhase): void {
     this.setAgentStatus(resolveActivityLabel(phase))
+  }
+
+  private emitActivityMessage(id: string, activity: AgentActivity): void {
+    this.config.onMessage({
+      id,
+      role: 'assistant',
+      content: activity.label,
+      timestamp: activity.startedAt || new Date().toISOString(),
+      type: 'activity',
+      activity,
+    })
+  }
+
+  private activityMessageIdForToolCall(toolCallId: string): string {
+    return `activity:${toolCallId}`
   }
 
   private handleStreamProgress(event: AIStreamProgressEvent): void {
@@ -126,6 +174,29 @@ export class Agent {
     }
 
     return messageId
+  }
+
+  /**
+   * Generate a brief fallback preamble when the model returns tool calls without
+   * any visible prose. This keeps the UI from silently launching into tools.
+   */
+  private fallbackPreambleForToolCalls(toolCalls: NonNullable<AIResponse['toolCalls']>): string {
+    const entries = toolCalls.map(tc => this.getToolEntry(tc.name, tc.arguments))
+    const hasWrite = entries.some(e =>
+      e.category === 'connector-write'
+      || e.category === 'connector-attachment'
+      || e.category === 'file-write'
+    )
+    const hasRead = entries.some(e =>
+      e.category === 'connector-read'
+      || e.category === 'file-read'
+      || e.category === 'file-manage'
+      || e.category === 'context'
+      || e.category === 'memory'
+    )
+    if (hasWrite) return "I'll make the requested change."
+    if (hasRead) return "I'll look into that for you."
+    return "I'll handle that."
   }
 
   constructor(config: AgentConfig) {
@@ -204,7 +275,7 @@ export class Agent {
 
     const lines = [`\n\n## Active Context: ${context.name}`]
     lines.push(`The user scoped this conversation to the "${context.name}" project. Only connectors enabled for this context are available.`)
-    lines.push(`Context folder: \`${getContextFolderPath(context)}\` (portable — share this folder with teammates).`)
+    lines.push(`Context folder: \`${getContextFolderPath(context)}\` (portable - share this folder with teammates).`)
 
     const enabledScopes = Object.entries(context.connectors).filter(([, entry]) => entry.enabled)
     if (enabledScopes.length > 0) {
@@ -217,13 +288,13 @@ export class Agent {
 
     if (body?.injectFull && body.markdown) {
       lines.push(`\n### Context knowledge (full)\n${body.markdown}`)
-      lines.push(`\nUpdate this file with \`context_append\` or \`context_replace_section\` — never file_write on the context markdown.`)
+      lines.push(`\nUpdate this file with \`context_append\` or \`context_replace_section\` - never file_write on the context markdown.`)
     } else if (body && !body.injectFull && body.length > 0) {
       lines.push(
-        `\nThe context file is ${body.length.toLocaleString()} characters — too large to inject verbatim.`,
+        `\nThe context file is ${body.length.toLocaleString()} characters - too large to inject verbatim.`,
       )
       lines.push(`Call \`context_read\` before starting work on this project so you have the full picture.`)
-      lines.push(`Update it with \`context_append\` or \`context_replace_section\` — never file_write on the context markdown.`)
+      lines.push(`Update it with \`context_append\` or \`context_replace_section\` - never file_write on the context markdown.`)
     } else {
       lines.push(`\nUse \`context_read\` when you need project knowledge. Update with \`context_append\` or \`context_replace_section\`.`)
     }
@@ -275,26 +346,44 @@ export class Agent {
   private getToolEntry(name: string, args: Record<string, unknown>): ToolEntry {
     const connector = this.getConnectorForTool(name)
     const custom = connector?.definition.getToolEntry?.(name, args)
+    let entry: ToolEntry
     if (custom) {
-      return ensureToolEntryActivity(custom, this.getToolDefinition(name)?.category)
-    }
-    if (connector) {
+      entry = ensureToolEntryActivity(custom, this.getToolDefinition(name)?.category)
+    } else if (connector) {
       const tool = this.getToolDefinition(name)
-      return getConnectorToolEntry(
+      entry = getConnectorToolEntry(
         connector.definition.id,
         connector.definition.name,
         name,
         tool?.category ?? 'connector-read',
         args,
       )
+    } else {
+      entry = getCoreToolEntry(name, args)
     }
-    return getCoreToolEntry(name, args)
+    return { ...entry, args }
   }
 
   private getConnectorPromptSections(): string[] {
     return this.getEnabledConnectors()
       .map(connector => connector.definition.getPromptSection?.(connector.context) || '')
       .filter(Boolean)
+  }
+
+  private getConnectorCapabilitySummaries(): ConnectorCapabilitySummary[] {
+    return this.getEnabledConnectors().map(connector => ({
+      name: connector.definition.name,
+      agentCapabilities: connector.definition.agentCapabilities,
+      tools: connector.definition.tools,
+    }))
+  }
+
+  private buildCapabilitiesSection(): string {
+    const body = buildEnabledCapabilitiesSection(
+      this.getAllToolDefinitions(),
+      this.getConnectorCapabilitySummaries(),
+    )
+    return body.trim() ? `## Enabled capabilities\n\n${body}` : ''
   }
 
   /** Stop the agent and cancel any in-flight AI stream. */
@@ -308,20 +397,17 @@ export class Agent {
     await this.syncActiveContextFromSource()
     this.abortFlag = false
     this.toolResultCache.clear()
-    this.sessionScratchpad = ''
-    this.scratchpadWrittenThisTurn = false
-    this.scratchpadToolWrittenThisTurn = false
-    this.actionFirstNudgedThisTurn = false
+    this.summarizedToolSignatures.clear()
+    this.latestToolResultsThisTurn = []
+    this.sessionScratchpad = new SessionScratchpad()
+    this.turnPlan = ''
+    this.pendingDeepThinking = null
+    this.agentLoopIteration = 0
+    this.thinkOnlyNudgedThisTurn = false
     this.reportWriteSucceededThisTurn = false
     this.taskContinuationNudgedThisTurn = false
     this.toolsRunThisTurn = []
     this.lastToolEntryThisTurn = null
-    this.turnIntent = inferTurnIntent(userMessage)
-    const intentNote = formatTurnIntentForScratchpad(this.turnIntent)
-    if (intentNote) {
-      this.sessionScratchpad = formatScratchpadNote(intentNote)
-      this.scratchpadWrittenThisTurn = true
-    }
     const userMsg: Message = {
       id: uuidv4(),
       role: 'user',
@@ -340,6 +426,7 @@ export class Agent {
     }
 
     try {
+      await this.maybeCompressHistoryOnce()
       await this.runAgentLoop()
     } catch (error) {
       const errorMsg: Message = {
@@ -371,24 +458,34 @@ export class Agent {
 
       iterations++
       console.log(`[Agent] Loop iteration ${iterations}${hasLimit ? `/${maxIterations}` : ''}`)
+      this.agentLoopIteration = iterations
 
       const { response, wasStreamed, assistantPreamble, preambleMessageId, aborted } = await this.callAI()
+
       if (aborted) {
         console.log('[Agent] Aborted by user.')
         break
       }
       if (!response) throw new Error('No response from AI')
 
+      if (response.toolCalls?.length && assistantPreamble?.trim()) {
+        this.sessionScratchpad.appendGoal(assistantPreamble.trim())
+      }
+
       if (response.toolCalls && response.toolCalls.length > 0) {
         let hadError = false
         let abortedDuringTools = false
-        const toolEntries: ToolEntry[] = []
+        const toolEntries = response.toolCalls.map(toolCall =>
+          this.getToolEntry(toolCall.name, toolCall.arguments),
+        )
+        const toolSummaryEntries: ToolEntry[] = []
 
         if (assistantPreamble?.trim() && !preambleMessageId) {
           this.emitAssistantPreamble(assistantPreamble.trim())
         }
 
-        for (const toolCall of response.toolCalls) {
+        for (let i = 0; i < response.toolCalls.length; i++) {
+          const toolCall = response.toolCalls[i]
           if (this.abortFlag) {
             this.abortFlag = false
             abortedDuringTools = true
@@ -397,21 +494,19 @@ export class Agent {
           }
 
           console.log('[Agent] Tool call:', toolCall.name, toolCall.arguments)
-          this.toolsRunThisTurn.push({
-            name: toolCall.name,
-            category: this.getToolDefinition(toolCall.name)?.category,
-          })
-          const toolEntry = this.getToolEntry(toolCall.name, toolCall.arguments)
+          this.toolsRunThisTurn.push(this.toolRunRecordForCall(toolCall))
+          const toolEntry = toolEntries[i]
           this.lastToolEntryThisTurn = toolEntry
+          const activityMessageId = this.activityMessageIdForToolCall(toolCall.id)
+          const activityStartedAt = new Date().toISOString()
+          this.emitActivityMessage(activityMessageId, {
+            kind: 'tool',
+            status: 'running',
+            label: toolEntry.runningLabel,
+            toolEntry,
+            startedAt: activityStartedAt,
+          })
           this.setActivityPhase({ kind: 'running_tool', entry: toolEntry })
-
-          if (!this.scratchpadWrittenThisTurn) {
-            const plannedNote = this.getConnectorForTool(toolCall.name)?.definition.getScratchpadNote?.(toolCall.name, toolCall.arguments, '')
-            if (plannedNote) {
-              this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + plannedNote
-              this.scratchpadWrittenThisTurn = true
-            }
-          }
 
           if (this.requiresConfirmation(toolCall.name)) {
             const confirmation = this.getActionConfirmation(toolCall.name, toolCall.arguments)
@@ -431,6 +526,14 @@ export class Agent {
               response.content,
               preambleMessageId,
             )
+            this.emitActivityMessage(activityMessageId, {
+              kind: 'approval',
+              status: 'waiting',
+              label: `Waiting for approval: ${toolEntry.label}`,
+              detail: pendingAction.description,
+              toolEntry,
+              startedAt: activityStartedAt,
+            })
             this.setActivityPhase({ kind: 'awaiting_approval', entry: toolEntry })
             return
           }
@@ -442,11 +545,21 @@ export class Agent {
           const cached = this.toolResultCache.get(cacheKey)
           let formattedResult: string
           let isFromCache = false
+          let toolIsError = false
 
           if (cached !== undefined) {
             formattedResult = cached
             isFromCache = true
-            console.log(`[Agent] Cache hit — skipping re-execution of ${toolCall.name}`)
+            console.log(`[Agent] Cache hit - skipping re-execution of ${toolCall.name}`)
+            this.emitActivityMessage(activityMessageId, {
+              kind: 'tool',
+              status: 'completed',
+              label: toolEntry.label,
+              detail: 'Used cached result from this turn.',
+              toolEntry,
+              startedAt: activityStartedAt,
+              completedAt: new Date().toISOString(),
+            })
           } else {
             const result = await this.executeTool(toolCall.name, toolCall.arguments)
             if (this.abortFlag) {
@@ -460,7 +573,17 @@ export class Agent {
             const isError = isFailedToolResult(result, formattedResult)
             if (isError) {
               hadError = true
+              toolIsError = true
               console.log('[Agent] Tool error:', formattedResult.substring(0, 200))
+              this.emitActivityMessage(activityMessageId, {
+                kind: 'tool',
+                status: 'error',
+                label: `${toolEntry.label} failed`,
+                detail: formattedResult.substring(0, 500),
+                toolEntry,
+                startedAt: activityStartedAt,
+                completedAt: new Date().toISOString(),
+              })
             } else {
               if (toolCall.name === 'report_write') {
                 this.reportWriteSucceededThisTurn = true
@@ -475,34 +598,55 @@ export class Agent {
               if (!isFromCache) {
                 this.emitArtifactMessageFromResult(toolCall.name, toolCall.arguments, result)
               }
+              this.emitActivityMessage(activityMessageId, {
+                kind: 'tool',
+                status: 'completed',
+                label: toolEntry.label,
+                toolEntry,
+                startedAt: activityStartedAt,
+                completedAt: new Date().toISOString(),
+              })
             }
           }
 
-          // Record tool entry for the summary block (UI only — not in history)
-          toolEntries.push(toolEntry)
+          // Record tool entry + result for the summary block (UI only — not in history)
+          toolSummaryEntries.push({
+            ...toolEntry,
+            result: formattedResult,
+            isError: toolIsError,
+          })
+
+          const maxResultPreview = 4000
+          this.latestToolResultsThisTurn.push({
+            tool: toolCall.name,
+            args: toolCall.arguments,
+            result: formattedResult.length > maxResultPreview ? `${formattedResult.slice(0, maxResultPreview)}\n…` : formattedResult,
+            isError: toolIsError,
+          })
 
           // Add result to history so AI has the data next iteration.
-          // Prefix with [tool_result:] (lowercase, colon) so the AI sees it as
-          // structured system data, not an example of its own response format.
-          this.conversationHistory.push({
-            id: uuidv4(),
-            role: 'assistant',
-            content: `[tool_result: ${toolCall.name}]${isFromCache ? ' [cached]' : ''}\n${formattedResult}`,
-            timestamp: new Date().toISOString(),
-          })
+          this.persistToolResultMessage(toolCall.name, formattedResult, isFromCache)
         }
 
         if (abortedDuringTools) break
 
-        // Emit a persistent tool-summary block (UI only — not in history)
-        if (toolEntries.length > 0) {
+        // Emit a persistent tool-summary block (UI only — not in history).
+        // Skip tool signatures already summarized this turn to avoid duplicate rows
+        // when the model re-calls the same read across iterations.
+        const newSummaryEntries = toolSummaryEntries.filter(entry => {
+          const sig = `${entry.tool}:${JSON.stringify(entry.args)}:${entry.result?.slice(0, 120) ?? ''}`
+          if (this.summarizedToolSignatures.has(sig)) return false
+          this.summarizedToolSignatures.add(sig)
+          return true
+        })
+        if (newSummaryEntries.length > 0) {
           this.config.onMessage({
             id: uuidv4(),
             role: 'assistant',
             content: '',
             timestamp: new Date().toISOString(),
             type: 'tool_summary',
-            toolEntries,
+            toolEntries: newSummaryEntries,
           })
         }
 
@@ -526,7 +670,7 @@ export class Agent {
         continue
       }
 
-      // No tool calls — check for a meaningful final response.
+      // No tool calls - check for a meaningful final response.
       // Strip any <think>...</think> blocks that were already shown as
       // collapsible thinking messages; they should not appear as regular text.
       const rawContent = response.content?.trim() || ''
@@ -537,7 +681,7 @@ export class Agent {
         /^\[tool_result:/i.test(strippedContent) &&
         iterations < (hasLimit ? maxIterations : iterations + 1)
       ) {
-        console.log('[Agent] Raw tool result echoed — nudging model to use the result')
+        console.log('[Agent] Raw tool result echoed - nudging model to use the result')
         this.conversationHistory.push({
           id: uuidv4(),
           role: 'user',
@@ -547,35 +691,7 @@ export class Agent {
         continue
       }
 
-      if (
-        !wasStreamed &&
-        strippedContent &&
-        !this.actionFirstNudgedThisTurn &&
-        this.shouldNudgeActionFirst(strippedContent)
-      ) {
-        console.log('[Agent] Action-first guard triggered — nudging model to use tools')
-        this.actionFirstNudgedThisTurn = true
-        this.conversationHistory.push({
-          id: uuidv4(),
-          role: 'user',
-          content: '[SYSTEM] Action-first guard: The user asked for an actionable operation. Do not answer with a long plan or task list. If required information is present, call the appropriate tool now. If exactly one critical detail is missing, ask one focused question only.',
-          timestamp: new Date().toISOString(),
-        })
-        continue
-      }
-
-      if (
-        !this.taskContinuationNudgedThisTurn &&
-        shouldNudgeIncompleteWorkflow(this.turnIntent, this.toolsRunThisTurn, strippedContent || rawContent)
-      ) {
-        console.log('[Agent] Incomplete workflow — nudging model to finish read→write task')
-        this.taskContinuationNudgedThisTurn = true
-        this.conversationHistory.push({
-          id: uuidv4(),
-          role: 'user',
-          content: buildIncompleteWorkflowNudge(this.turnIntent),
-          timestamp: new Date().toISOString(),
-        })
+      if (this.maybeNudgeTaskContinuation(strippedContent || rawContent)) {
         continue
       }
 
@@ -584,15 +700,21 @@ export class Agent {
         this.conversationHistory.push(assistantMsg)
         this.config.onMessage(assistantMsg)
       } else if (wasStreamed) {
-        // Already displayed via streaming — nothing to do
-      } else if (!strippedContent && iterations < (hasLimit ? maxIterations : iterations + 1)) {
-        // The model only produced thinking content and no actual response or
-        // tool calls. Nudge it to continue so the agent doesn't silently stop.
-        console.log('[Agent] Think-only response — nudging model to continue')
+        if (this.maybeNudgeTaskContinuation(strippedContent || rawContent)) {
+          continue
+        }
+        break
+      } else if (
+        !strippedContent
+        && !this.thinkOnlyNudgedThisTurn
+        && iterations < (hasLimit ? maxIterations : iterations + 1)
+      ) {
+        console.log('[Agent] Think-only response - nudging model to continue')
+        this.thinkOnlyNudgedThisTurn = true
         this.conversationHistory.push({
           id: uuidv4(),
           role: 'user',
-          content: '[System: Your thinking was shown to the user. Now proceed with the next step — call the appropriate tool or give your final answer.]',
+          content: '[System: Your thinking was shown to the user. Now proceed with the next step - call the appropriate tool or give your final answer.]',
           timestamp: new Date().toISOString(),
         })
         continue
@@ -603,7 +725,7 @@ export class Agent {
     if (hasLimit && iterations >= maxIterations) {
       const timeoutMsg: Message = {
         id: uuidv4(), role: 'assistant',
-        content: `I've reached the iteration limit (${maxIterations}). You can increase this in Settings → Agent Behavior.`,
+        content: `I've reached the iteration limit (${maxIterations}). You can increase this in Settings -> Agent Behavior.`,
         timestamp: new Date().toISOString(),
       }
       this.conversationHistory.push(timeoutMsg)
@@ -617,8 +739,8 @@ export class Agent {
   /**
    * Call the AI.
    * Handles streaming with a live <think>...</think> parser:
-   *  - content inside <think>...</think> → emitted as a type:'thinking' message with elapsed time
-   *  - content outside → streamed normally to the response bubble
+   *  - content inside <think>...</think> -> emitted as a type:'thinking' message with elapsed time
+   *  - content outside -> streamed normally to the response bubble
    * Returns wasStreamed=true when the response was already pushed to UI and history.
    */
   private finalizeAbortedStream(
@@ -644,6 +766,114 @@ export class Agent {
     return { response: null, wasStreamed: false, aborted: true }
   }
 
+  private emitContextSnapshot(params: {
+    systemPrompt: string
+    relevantHistory: Message[]
+    connectorSections: string[]
+    capabilitiesSection: string
+    contextSection: string
+    scratchpadSection: string
+    planSection: string
+    reasoningLightSection: string
+    deepThinkingSection: string
+  }): void {
+    if (!this.config.onContextSnapshot) return
+
+    const lastUserMessage = this.conversationHistory
+      .filter(m => m.role === 'user')
+      .slice(-1)[0]?.content ?? ''
+
+    const recentHistory = params.relevantHistory.map(m => ({
+      role: m.role,
+      content: m.content.length > 2000 ? `${m.content.slice(0, 2000)}…` : m.content,
+    }))
+
+    const historySummary = recentHistory
+      .map(m => `**${m.role}:** ${m.content}`)
+      .join('\n\n')
+
+    const section = (name: string, content: string | undefined): AgentContextSnapshot['sections'][number] => ({
+      name,
+      present: content !== undefined && content.length > 0,
+      content,
+      tokens: content ? estimateTokens(content) : 0,
+    })
+
+    let memoryContent = ''
+    if (this.config.memory) {
+      const userMarkdown = this.config.memory.userMarkdown?.trim() ?? ''
+      const learned = selectLearnedNotesForPrompt(this.config.memory)
+      const learnedLines = [
+        ...learned.recentLines,
+        ...(learned.rollup ? [`Archived summary:\n${learned.rollup}`] : []),
+      ]
+      const scopeSection = formatActiveScopesForPrompt(this.config.monitoredScopes || [])
+      const parts: string[] = []
+      if (userMarkdown) parts.push(`### User Memory\n${userMarkdown}`)
+      if (learnedLines.length > 0) parts.push(`### Learned Notes\n${learnedLines.join('\n')}`)
+      if (scopeSection) parts.push(scopeSection)
+      memoryContent = parts.join('\n\n')
+    }
+
+    const sections: AgentContextSnapshot['sections'] = [
+      { name: 'System prompt', present: true, tokens: estimateTokens(params.systemPrompt) },
+      { name: 'Memory', present: memoryContent.length > 0, content: memoryContent, tokens: memoryContent ? estimateTokens(memoryContent) : 0 },
+      section('Capabilities', params.capabilitiesSection),
+      section('Active context', params.contextSection),
+      section('Connector context', params.connectorSections.join('\n\n')),
+      section('Plan', params.planSection),
+      section('Scratchpad', params.scratchpadSection),
+      section('Reasoning instructions', params.reasoningLightSection),
+      section('Deep thinking context', params.deepThinkingSection),
+      section('Recent conversation history', historySummary),
+    ]
+
+    const totalTokens =
+      sections.reduce((sum, s) => sum + (s.tokens ?? 0), 0) +
+      estimateTokens(lastUserMessage) +
+      (recentHistory?.reduce((sum, m) => sum + estimateTokens(m.content), 0) ?? 0) +
+      (this.latestToolResultsThisTurn?.reduce((sum, r) => sum + estimateTokens(r.result) + estimateTokens(JSON.stringify(r.args)), 0) ?? 0)
+
+    const snapshot: AgentContextSnapshot = {
+      userMessage: lastUserMessage,
+      systemPrompt: params.systemPrompt,
+      memoryContent,
+      recentHistory,
+      latestToolResults: this.latestToolResultsThisTurn,
+      totalTokens,
+      metadata: {
+        timestamp: new Date().toISOString(),
+        iteration: this.agentLoopIteration,
+      },
+      sections,
+    }
+
+    this.config.onContextSnapshot(snapshot)
+  }
+
+  private async maybeCompressHistoryOnce(): Promise<void> {
+    const tiers = assemblePromptTiers(
+      this.config.userProfile,
+      this.getConnectorPromptSections(),
+      this.config.memory,
+      this.config.monitoredScopes || [],
+      {
+        scratchpadSection: '',
+        contextSection: '',
+        planSection: '',
+        reasoningLightSection: '',
+        deepThinkingSection: '',
+        capabilitiesSection: '',
+      },
+    )
+    await maybeCompressConversationHistory({
+      conversationHistory: this.conversationHistory,
+      systemPrompt: tiers.combined,
+      callAI: this.config.callAI,
+      contextWindowTokens: this.config.contextWindowTokens,
+    })
+  }
+
   private async callAI(): Promise<{
     response: AIResponse | null
     wasStreamed: boolean
@@ -651,35 +881,57 @@ export class Agent {
     preambleMessageId?: string
     aborted?: boolean
   }> {
-    // Append the live session scratchpad to the system prompt so the agent
-    // always knows what it has already done this turn — even if old tool result
-    // messages have been pushed out of the 40-message context window.
-    const intentSection = this.turnIntent.kind !== 'general' && this.turnIntent.summary
-      ? `\n\n## User Goal This Turn\n${this.turnIntent.summary}\n\nDo not stop after read-only steps if a write is still required.`
-      : ''
-    const scratchpadSection = this.sessionScratchpad
-      ? `\n\n## Session Scratchpad — What You've Done This Turn\n${this.sessionScratchpad}\n\nDo NOT re-read files or re-run searches that are already listed above. Use their results from context.`
-      : ''
-    const contextSection = await this.buildActiveContextSection()
-    const systemPrompt = getSystemPrompt(
-      this.config.userProfile,
-      this.getConnectorPromptSections(),
-      this.config.memory,
-      undefined,
-      this.config.monitoredScopes || [],
-    ) + intentSection + scratchpadSection + contextSection
+    const hasReasoningModel = !!(this.config.callAIReasoningStream || this.config.callAIReasoning)
+    const isFirstLoopIteration = this.agentLoopIteration === 1
+    const deepThinkingActive = !!this.pendingDeepThinking
+    const useReasoning = hasReasoningModel && (isFirstLoopIteration || deepThinkingActive)
 
-    // Simple chronological window — last 40 messages in order.
-    // tool_summary messages are UI-only artifacts (grouped icons bar) and carry
-    // no reasoning value, so they are excluded from what the model sees.
+    const contextSection = await this.buildActiveContextSection()
+    const connectorSections = this.getConnectorPromptSections()
+    const capabilitiesSection = this.buildCapabilitiesSection()
+    const scratchpadSection = buildScratchpadSection(this.sessionScratchpad.serialize())
+    const planSection = buildPlanSection(this.turnPlan)
+    const reasoningLightSection = buildReasoningLightSection(isFirstLoopIteration, hasReasoningModel, deepThinkingActive)
+    const deepThinkingSection = deepThinkingActive && this.pendingDeepThinking
+      ? buildDeepThinkingTurnSection(this.pendingDeepThinking)
+      : ''
+
+    const tiers = assemblePromptTiers(
+      this.config.userProfile,
+      connectorSections,
+      this.config.memory,
+      this.config.monitoredScopes || [],
+      {
+        scratchpadSection,
+        contextSection,
+        planSection,
+        reasoningLightSection,
+        deepThinkingSection,
+        capabilitiesSection,
+      },
+    )
+    const systemPrompt = tiers.combined
+
     const relevantHistory = this.conversationHistory
-      .filter(m => m.type !== 'tool_summary' && m.type !== 'artifact')
+      .filter(m => m.type !== 'tool_summary' && m.type !== 'activity' && m.type !== 'artifact')
       .slice(-40)
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
       ...relevantHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     ]
+
+    this.emitContextSnapshot({
+      systemPrompt,
+      relevantHistory,
+      connectorSections,
+      capabilitiesSection,
+      contextSection,
+      scratchpadSection,
+      planSection,
+      reasoningLightSection,
+      deepThinkingSection,
+    })
 
     const tools = this.getAllToolDefinitions().map(tool => ({
       type: 'function' as const,
@@ -690,15 +942,6 @@ export class Agent {
       },
     }))
 
-    // ── Choose model ──────────────────────────────────────────────────────────
-    // Use the reasoning model for the INITIAL analysis phase — before the agent
-    // has committed a plan to the scratchpad. Once planning is done and the
-    // scratchpad has content, switch back to the main model for execution
-    // (tool calls, connector writes, etc.) so we don't add latency to routine steps.
-    // If no reasoning model is configured, the main model handles everything.
-    const useReasoning = !this.scratchpadWrittenThisTurn && (
-      !!this.config.callAIReasoningStream || !!this.config.callAIReasoning
-    )
     const effectiveCallAIStream = (useReasoning && this.config.callAIReasoningStream)
       ? this.config.callAIReasoningStream
       : this.config.callAIStream
@@ -709,10 +952,13 @@ export class Agent {
     this.setActivityPhase({
       kind: 'awaiting_model',
       useReasoning,
+      isFirstReasoningIteration: useReasoning && isFirstLoopIteration && !deepThinkingActive,
+      isDeepThinkingIteration: deepThinkingActive,
       lastEntry: this.lastToolEntryThisTurn,
     })
 
-    // ── Streaming path ────────────────────────────────────────────────────────
+    try {
+    // Streaming path
     if (effectiveCallAIStream && this.config.onUpdateMessage) {
       const THINK_OPEN_TAG = THINK_OPEN
       const THINK_CLOSE_TAG = THINK_CLOSE
@@ -740,17 +986,32 @@ export class Agent {
         })
       }
 
-      const flushToResponse = (text: string) => {
-        if (!text) return
+      const flushToResponse = (chunk: string) => {
+        if (!chunk) return
+        responseContent += chunk
+        const snapshot = responseContent
         if (!responseStarted) {
           this.setActivityPhase({ kind: 'streaming_text' })
-        }
-        responseContent += text
-        if (!responseStarted) {
           responseStarted = true
-          this.config.onMessage({ id: responseMsgId, role: 'assistant', content: text, timestamp: new Date().toISOString(), isStreaming: true })
+          this.config.onMessage({
+            id: responseMsgId,
+            role: 'assistant',
+            content: snapshot,
+            timestamp: new Date().toISOString(),
+            isStreaming: true,
+          })
+        } else if (this.config.onUpdateMessage) {
+          this.config.onUpdateMessage(responseMsgId, snapshot, true)
+        }
+      }
+
+      const finalizeStreamedResponse = (content: string) => {
+        if (!responseStarted || !this.config.onUpdateMessage) return
+        const finalContent = content.trim()
+        if (finalContent) {
+          this.config.onUpdateMessage(responseMsgId, finalContent, false)
         } else {
-          this.config.onUpdateMessage!(responseMsgId, text, true)
+          this.config.onUpdateMessage(responseMsgId, '', false)
         }
       }
 
@@ -770,14 +1031,14 @@ export class Agent {
             return
           }
           // If the trimmed buffer is longer than THINK_OPEN and doesn't start with it
-          // → this is a direct response, switch to streaming mode
+          // -> this is a direct response, switch to streaming mode
           if (trimmed.length > THINK_OPEN_TAG.length && !THINK_OPEN_TAG.startsWith(trimmed.slice(0, THINK_OPEN_TAG.length))) {
             phase = 'response'
-            flushToResponse(buffer)
+            flushToResponse(trimmed)
             buffer = ''
             return
           }
-          // Might still be a prefix of <think> or just whitespace — keep scanning
+          // Might still be a prefix of <think> or just whitespace - keep scanning
           return
         }
 
@@ -795,7 +1056,7 @@ export class Agent {
           return
         }
 
-        // response phase — stream normally
+        // response phase - stream normally
         flushToResponse(token)
         buffer = ''
       }
@@ -824,31 +1085,27 @@ export class Agent {
       const endPhase: string = phase
       if (buffer.trim()) {
         if (endPhase === 'in_think') {
-          // Stream ended mid-think — emit what we have as a thinking block
           emitThinkingBlock(buffer, Date.now() - thinkTimerStart)
         } else {
-          flushToResponse(buffer)
+          flushToResponse(buffer.trim())
         }
       }
 
       if (response) {
         if (response.toolCalls && response.toolCalls.length > 0) {
-          const preambleText =
-            (responseStarted ? responseContent.trim() : '')
-            || response.content?.trim()
-            || ''
-          let assistantPreamble: string | undefined
-          let preambleMessageId: string | undefined
-
-          // Show intro prose in chat before tool status / execution.
-          if (preambleText) {
-            assistantPreamble = preambleText
-            preambleMessageId = this.emitAssistantPreamble(
-              preambleText,
-              responseStarted ? responseMsgId : undefined,
-            )
-          } else if (responseStarted && this.config.onUpdateMessage) {
-            this.config.onUpdateMessage(responseMsgId, '', false)
+          let rawPreamble = (responseStarted ? responseContent.trim() : '') || response.content?.trim() || ''
+          rawPreamble = rawPreamble.replace(THINK_BLOCK_REGEX, '').trim()
+          const preambleText = rawPreamble || this.fallbackPreambleForToolCalls(response.toolCalls)
+          if (responseStarted) {
+            finalizeStreamedResponse(preambleText)
+            if (preambleText) {
+              this.conversationHistory.push({
+                id: responseMsgId,
+                role: 'assistant',
+                content: preambleText,
+                timestamp: new Date().toISOString(),
+              })
+            }
           }
 
           const toolEntries = response.toolCalls.map(toolCall =>
@@ -856,31 +1113,48 @@ export class Agent {
           )
           this.setActivityPhase({ kind: 'preparing_tools', entries: toolEntries })
 
-          return { response, wasStreamed: false, assistantPreamble, preambleMessageId }
-        } else {
-          // Final text response — set the clean final content and push to history
-          if (responseStarted) {
-            const finalContent = responseContent.trim() || response.content?.trim() || ''
-            if (finalContent) {
-              if (/^\[tool_result:/i.test(finalContent)) {
-                this.config.onUpdateMessage!(responseMsgId, '', false)
-                response.content = finalContent
-                return { response, wasStreamed: false }
-              }
-              this.config.onUpdateMessage!(responseMsgId, finalContent, false)
-              this.conversationHistory.push({ id: responseMsgId, role: 'assistant', content: finalContent, timestamp: new Date().toISOString() })
-              return { response, wasStreamed: true }
-            } else {
-              // Empty response — remove the placeholder
-              this.config.onUpdateMessage!(responseMsgId, '', false)
-            }
+          return {
+            response,
+            wasStreamed: false,
+            assistantPreamble: preambleText || undefined,
+            preambleMessageId: preambleText ? responseMsgId : undefined,
           }
+        } else if (responseStarted) {
+          const finalContent = (responseContent.trim() || response.content?.trim() || '').replace(THINK_BLOCK_REGEX, '').trim()
+          if (finalContent) {
+            if (/^\[tool_result:/i.test(finalContent)) {
+              finalizeStreamedResponse('')
+              response.content = finalContent
+              return { response, wasStreamed: false }
+            }
+            finalizeStreamedResponse(finalContent)
+            this.conversationHistory.push({
+              id: responseMsgId,
+              role: 'assistant',
+              content: finalContent,
+              timestamp: new Date().toISOString(),
+            })
+            return { response, wasStreamed: true }
+          }
+          finalizeStreamedResponse('')
+        }
+      } else if (responseStarted) {
+        const finalContent = responseContent.replace(THINK_BLOCK_REGEX, '').trim()
+        finalizeStreamedResponse(finalContent)
+        if (finalContent) {
+          this.conversationHistory.push({
+            id: responseMsgId,
+            role: 'assistant',
+            content: finalContent,
+            timestamp: new Date().toISOString(),
+          })
+          return { response: { content: finalContent }, wasStreamed: true }
         }
       }
       return { response, wasStreamed: false }
     }
 
-    // ── Fallback: non-streaming ───────────────────────────────────────────────
+    // Fallback: non-streaming
     let result = await effectiveCallAI(messages, tools)
     if (this.abortFlag) {
       this.abortFlag = false
@@ -916,18 +1190,23 @@ export class Agent {
       response.content = response.content.replace(THINK_BLOCK_REGEX, '').trim()
     }
 
-    const preambleText = response?.content?.trim() || ''
-    if (response?.toolCalls?.length && preambleText) {
-      const preambleMessageId = this.emitAssistantPreamble(preambleText)
+    let preambleText = response?.content?.trim() || ''
+    preambleText = preambleText.replace(THINK_BLOCK_REGEX, '').trim()
+    if (response?.toolCalls?.length) {
+      preambleText = preambleText || this.fallbackPreambleForToolCalls(response.toolCalls)
       return {
         response,
         wasStreamed: false,
         assistantPreamble: preambleText,
-        preambleMessageId,
       }
     }
 
     return { response, wasStreamed: false, assistantPreamble: preambleText || undefined }
+    } finally {
+      if (deepThinkingActive) {
+        this.pendingDeepThinking = null
+      }
+    }
   }
 
   private emitPendingActionChatMessage(
@@ -980,25 +1259,15 @@ export class Agent {
     const modelText = (assistantPreamble || responseContent || '').trim()
 
     if (!modelText) return structured
+    if (!structured || modelText.trim() === structured.trim()) return modelText
 
-    const title = pendingAction.confirmation?.title
-    const preview = pendingAction.confirmation?.preview || pendingAction.preview
-    const itemCount = pendingAction.confirmation?.items?.length || 0
-    const numberedLines = modelText.match(/^\d+\./gm)
-    if (itemCount > 0 && numberedLines && numberedLines.length >= Math.min(itemCount, 2)) {
-      return modelText
-    }
+    const modelAlreadyHasStructured = structured
+      .split('\n')
+      .map(line => line.replace(/\*\*/g, '').trim())
+      .filter(Boolean)
+      .every(line => modelText.includes(line))
 
-    // Prose preamble is enough — confirmation details live in the write-action bar.
-    if (modelText.length >= 60) return modelText
-
-    const includesStructured =
-      (title && modelText.includes(title))
-      || (preview && modelText.includes(preview))
-      || modelText.includes(structured.split('\n')[0])
-
-    if (includesStructured) return modelText
-
+    if (modelAlreadyHasStructured) return modelText
     return `${modelText}\n\n${structured}`
   }
 
@@ -1099,7 +1368,7 @@ export class Agent {
     for (const key of keysToDelete) {
       this.toolResultCache.delete(key)
     }
-    // file_write → drop cached read for that exact path
+    // file_write -> drop cached read for that exact path
     if (toolName === 'file_write' || toolName === 'report_write') {
       const writtenPath = (args.path as string) || ''
       for (const key of this.toolResultCache.keys()) {
@@ -1119,27 +1388,43 @@ export class Agent {
     let note = getCoreScratchpadNote(toolName, args, formattedResult)
     note = note || this.getConnectorForTool(toolName)?.definition.getScratchpadNote?.(toolName, args, formattedResult) || ''
     if (note) {
-      let line = formatScratchpadNote(note)
-      if (
-        (toolName === 'file_read' || toolName === 'file_read_ocr')
-        && (this.turnIntent.kind === 'update_report' || this.turnIntent.kind === 'update_file')
-      ) {
-        const path = String(args.path || '')
-        line += `\n✓ Pending: ${this.turnIntent.kind === 'update_report' ? 'report_write' : 'file_write'} to ${path || 'same path'} with user's edits (grounded in file content)`
-      }
-      this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + line
+      const path = String(args.path || '')
+      note += buildPendingWriteScratchpadSuffix(toolName, path)
+      this.sessionScratchpad.appendDone(note)
     }
   }
 
-  private shouldNudgeActionFirst(responseText: string): boolean {
-    const latestUser = [...this.conversationHistory]
-      .reverse()
-      .find(m => m.role === 'user' && !m.content.startsWith('[SYSTEM]'))?.content
-      ?.toLowerCase() || ''
-
-    return shouldNudgeActionFirst(latestUser, responseText, {
+  private maybeNudgeTaskContinuation(responseText: string): boolean {
+    if (this.taskContinuationNudgedThisTurn) return false
+    if (!shouldNudgeIncompleteWorkflow(this.toolsRunThisTurn, responseText, {
       reportWriteSucceededThisTurn: this.reportWriteSucceededThisTurn,
+    })) return false
+
+    console.log('[Agent] Incomplete workflow - nudging model to continue')
+    this.taskContinuationNudgedThisTurn = true
+    this.conversationHistory.push({
+      id: uuidv4(),
+      role: 'user',
+      content: buildIncompleteWorkflowNudge(this.toolsRunThisTurn),
+      timestamp: new Date().toISOString(),
     })
+    return true
+  }
+
+  private activateDeepThinking(args: Record<string, unknown>): { success: boolean; data?: string; error?: string } {
+    const callReasoning = this.config.callAIReasoning || this.config.callAIReasoningStream
+    if (!callReasoning) {
+      return { success: false, error: 'Reasoning model not configured. Configure a reasoning model in Settings or proceed without deep_thinking.' }
+    }
+
+    const question = String(args.question || '').trim()
+    if (!question) {
+      return { success: false, error: 'question is required' }
+    }
+
+    const context = args.context ? String(args.context) : undefined
+    this.pendingDeepThinking = { question, context }
+    return { success: true, data: formatDeepThinkingToolAck() }
   }
 
   private async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -1164,17 +1449,22 @@ export class Agent {
     } else if (name.startsWith('context_')) {
       return this.config.executeContextTool(name, args)
     } else if (name === 'scratchpad_write') {
-      // Handled locally — append to session scratchpad
-      if (this.scratchpadToolWrittenThisTurn) {
-        return { success: true, data: 'Scratchpad already written this turn. Proceed with the next tool call or final answer.' }
-      }
       const note = (args.note as string) || ''
+      const updatePlan = args.update_plan === true
       if (note.trim()) {
-        this.sessionScratchpad += (this.sessionScratchpad ? '\n' : '') + note.trim()
-        this.scratchpadWrittenThisTurn = true
-        this.scratchpadToolWrittenThisTurn = true
+        if (updatePlan) {
+          this.turnPlan = note.trim()
+          this.sessionScratchpad.appendNote(`Plan: ${note.trim()}`)
+        } else {
+          this.sessionScratchpad.appendNote(note.trim())
+        }
       }
-      return { success: true, data: 'Note saved to session scratchpad.' }
+      return {
+        success: true,
+        data: updatePlan ? 'Plan updated in working notes.' : 'Note added to working notes.',
+      }
+    } else if (name === 'deep_thinking') {
+      return this.activateDeepThinking(args)
     }
     
     throw new Error(`Unknown tool: ${name}`)
@@ -1213,6 +1503,16 @@ export class Agent {
       throw new Error('Action not found')
     }
     this.pendingActions.delete(actionId)
+    const activityMessageId = this.activityMessageIdForToolCall(actionId)
+    const toolEntry = this.getToolEntry(action.type, action.data)
+    const activityStartedAt = new Date().toISOString()
+    this.emitActivityMessage(activityMessageId, {
+      kind: 'tool',
+      status: 'running',
+      label: toolEntry.runningLabel,
+      toolEntry,
+      startedAt: activityStartedAt,
+    })
 
     await this.syncActiveContextFromSource()
 
@@ -1234,6 +1534,14 @@ export class Agent {
       },
     })
     if (connectorApproval?.handled) {
+      this.emitActivityMessage(activityMessageId, {
+        kind: 'tool',
+        status: 'completed',
+        label: connectorApproval.message || toolEntry.label,
+        toolEntry,
+        startedAt: activityStartedAt,
+        completedAt: new Date().toISOString(),
+      })
       const completionMsg: Message = {
         id: uuidv4(),
         role: 'assistant',
@@ -1255,9 +1563,19 @@ export class Agent {
       return
     }
 
-    // ── Single-tool approval (create, update, comment, transition, etc.) ──
+    // Single-tool approval (create, update, comment, transition, etc.)
     const result = await this.executeTool(action.type, action.data)
     const formattedResult = this.formatToolResultForAI(action.type, result, action.data)
+    const isError = isFailedToolResult(result, formattedResult)
+    this.emitActivityMessage(activityMessageId, {
+      kind: 'tool',
+      status: isError ? 'error' : 'completed',
+      label: isError ? `${toolEntry.label} failed` : toolEntry.label,
+      detail: isError ? formattedResult.substring(0, 500) : undefined,
+      toolEntry,
+      startedAt: activityStartedAt,
+      completedAt: new Date().toISOString(),
+    })
 
     // Persist the result in history so the agent has full context when it resumes
     this.conversationHistory.push({
@@ -1270,7 +1588,7 @@ export class Agent {
     this.invalidateCacheAfterWrite(action.type, action.data)
     void this.persistSourceMemoryAfterWrite(action.type, action.data, formattedResult)
 
-    // Resume the agent loop — it will decide what to do next (more tasks,
+    // Resume the agent loop - it will decide what to do next (more tasks,
     // a follow-up, or simply confirm done if there's nothing left).
     await this.runAgentLoop()
   }
@@ -1284,6 +1602,14 @@ export class Agent {
 
     this.pendingActions.delete(actionId)
     if (options?.silent) return
+    const toolEntry = this.getToolEntry(action.type, action.data)
+    this.emitActivityMessage(this.activityMessageIdForToolCall(actionId), {
+      kind: 'approval',
+      status: 'completed',
+      label: `Cancelled: ${toolEntry.label}`,
+      toolEntry,
+      completedAt: new Date().toISOString(),
+    })
 
     const rejectionMsg: Message = {
       id: uuidv4(),
@@ -1373,6 +1699,10 @@ export class Agent {
    * Load conversation history
    */
   loadHistory(messages: Message[]): void {
-    this.conversationHistory = [...messages]
+    this.conversationHistory = messages.filter(message =>
+      message.type !== 'tool_summary'
+      && message.type !== 'activity'
+      && message.type !== 'artifact',
+    )
   }
 }

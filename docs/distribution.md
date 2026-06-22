@@ -33,8 +33,10 @@ Outputs land in `release/`.
 Generate app icons from `public/icon.svg` (white canvas, `:D` mark) before release:
 
 ```bash
-npm run icons   # writes public/icon.png, icon.ico, icon.icns
+npm run icons   # writes public/icon.png, icon.ico, icon.icns + brands electron.exe on Windows
 ```
+
+On Windows, **dev mode** launches `bin/smile-dev.exe` (a branded copy of Electron), not stock `electron.exe`. Run `npm run brand-electron` after `npm install` or `npm run icons` if the taskbar icon reverts. `npm run dev` runs branding automatically.
 
 1. Bump `version` in `package.json` (semver).
 2. Commit and tag: `git tag v0.2.0 && git push origin v0.2.0`

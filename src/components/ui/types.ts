@@ -5,6 +5,6 @@ export type ActionStatus = 'idle' | 'success' | 'error'
 export type SaveStatus = ActionStatus
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline'
-export type ButtonSize = 'sm' | 'md' | 'lg'
+export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg'
 export type PanelVariant = 'soft' | 'emphasis' | 'danger'
 export type FeedbackSize = 'sm' | 'md'

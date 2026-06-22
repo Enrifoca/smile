@@ -37,7 +37,7 @@ The agent never imports desktop services directly. Only the main-process sandbox
 
 1. The user sends a chat message in the renderer.
 2. `ChatView` creates or reuses an `Agent`.
-3. The agent assembles the system prompt from core Markdown, memory, and connector prompt sections.
+3. The agent assembles the system prompt from core Markdown, prompt tiers (foundation / scope / turn), dynamic enabled capabilities, memory, and connector prompt sections.
 4. The model calls core tools or connector tools.
 5. Core tools execute through generic handlers; connector tools execute via IPC → sandbox → broker.
 6. Write tools create pending actions and wait for user approval.
@@ -50,10 +50,11 @@ All guards are documented in [src/agent/HELPERS.md § Loop guards](../src/agent/
 
 | Guard | Module | One-line |
 | --- | --- | --- |
-| Action-first | `actionGuards.ts` | Plan in chat instead of tools |
+| Action-first | `system.md` + turn nudges | Plan in chat instead of tools |
 | Task continuity | `taskContinuity.ts` | Read without write on edit tasks |
 | Tool errors | `toolErrors.ts` + `shared/aiErrors.ts` | Failed tools and provider overload |
 | Think-only | `index.ts` | Thinking block with no follow-up |
+| Capability boundary | `capabilities.ts` + `system.md` | Tool registry is authoritative; no invented integrations |
 
 ## Core Rule
 

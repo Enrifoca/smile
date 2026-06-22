@@ -197,7 +197,7 @@ export function GenericConnectorSettingsView({
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-white">
+    <div className="ui-page-frame">
       <div className="content-shell page-shell space-y-6">
         <ConnectorPageHeader
           name={manifest.name}
@@ -261,12 +261,12 @@ export function GenericConnectorSettingsView({
           <SectionHeader title="Tools" description="Actions exposed to the agent." />
           <ul className="space-y-2">
             {manifest.tools.map(tool => (
-              <li key={tool.name} className="rounded-lg border border-neutral-200 px-3 py-2">
+              <li key={tool.name} className="connector-tool-item">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="font-medium text-neutral-900">{tool.name}</span>
-                  <span className="text-xs text-neutral-400">{tool.category}</span>
+                  <span className="ui-text-strong">{tool.name}</span>
+                  <span className="ui-text-meta">{tool.category}</span>
                 </div>
-                <p className="mt-1 text-sm text-neutral-500">{tool.description}</p>
+                <p className="mt-1 ui-type-ui">{tool.description}</p>
               </li>
             ))}
           </ul>
@@ -275,16 +275,16 @@ export function GenericConnectorSettingsView({
         {manifest.permissions && (
           <Panel variant="soft">
             <SectionHeader title="Permissions" description="Capabilities declared in the manifest." />
-            <p className="text-sm text-neutral-600">{describePermissions(manifest.permissions)}</p>
+            <p className="ui-type-ui">{describePermissions(manifest.permissions)}</p>
           </Panel>
         )}
 
         <Panel variant="soft">
           <SectionHeader title="Developer docs" description="This connector is a code package in your workspace." />
-          <p className="text-sm text-neutral-600">
-            Source files live in <code>.smile/connectors/{manifest.id}/</code> (manifest.json, prompt.md, handler.js).
-            To author or update connectors, follow <code>docs/creating-a-connector.md</code> in the smile repository
-            and validate with <code>npm run validate:connector</code> / <code>npm run test:connector</code>.
+          <p className="ui-type-ui">
+            Source files live in <code className="ui-inline-code">.smile/connectors/{manifest.id}/</code> (manifest.json, prompt.md, handler.js).
+            To author or update connectors, follow <code className="ui-inline-code">docs/creating-a-connector.md</code> in the smile repository
+            and validate with <code className="ui-inline-code">npm run validate:connector</code> / <code className="ui-inline-code">npm run test:connector</code>.
           </p>
         </Panel>
 

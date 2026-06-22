@@ -39,15 +39,6 @@ export const fileDeleteSchema = z.object({
 
 // ============ MEMORY TOOLS ============
 
-export const memoryReadSchema = z.object({
-  section: z.enum(['all', 'learned', 'style', 'source']).optional().default('all')
-    .describe('Which memory area to read. Use "all" for User Memory + Learned Notes. Use "source" for connector scope evidence.'),
-  connectorId: z.string().optional()
-    .describe('Connector id when section is "source", e.g. your connector id.'),
-  scopeId: z.string().optional()
-    .describe('Scope id when section is "source", e.g. a project key or workspace id.'),
-})
-
 export const memoryUpdateSchema = z.object({
   section: z.enum(['learned', 'style'])
     .describe('"learned" for ordinary notes/preferences/project rules. "style" only for writing style, tone, or recurring phrases.'),
@@ -65,7 +56,13 @@ export const memoryDeleteSchema = z.object({
 // ============ SCRATCHPAD TOOL ============
 
 export const scratchpadWriteSchema = z.object({
-  note: z.string().describe('The note to add to your session scratchpad. Use this to record key findings, decisions, or progress so you can refer back without re-running tools. Examples: "Document has 4 sections: Setup, API, Deployment, FAQ. Records to create: 6 total.", "Using the default connector scope and record type for all items."'),
+  note: z.string().describe('Short note for working notes (this turn). Use update_plan: true to set or revise the current plan — keep it concise and actionable. Required after deep_thinking if the analysis changes your next steps.'),
+  update_plan: z.boolean().optional().describe('When true, replaces the Current plan section with this note. Use after deep_thinking or when the plan changes.'),
+})
+
+export const deepThinkingSchema = z.object({
+  question: z.string().describe('What you need analyzed (mapping, risks, next steps, ambiguities).'),
+  context: z.string().optional().describe('Optional excerpts or facts already known (from reads, scratchpad, user message). Do not paste entire files.'),
 })
 
 export const contextReadSchema = z.object({})
@@ -104,14 +101,14 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'file_write',
-    description: 'Write content to a file in the workspace. Automatically creates parent directories if they do not exist. For chat-visible markdown reports (plans, specs, batch lists), use report_write instead — it shows a report card and composer pill in the UI.',
+    description: 'Write content to a file in the workspace. Automatically creates parent directories if they do not exist. For substantial chat-visible markdown reports (explicit reports, long plans/specs, batch lists), use report_write instead.',
     schema: fileWriteSchema,
     requiresConfirmation: false,
     category: 'file-write',
   },
   {
     name: 'report_write',
-    description: 'Save a markdown report the user opens in chat (plan, spec, batch item list, status summary, or other structured document). The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. Prefer this over long chat prose when details are tabular or lengthy. The report path is returned for later file_read when the user iterates. The user can export the same report as PDF or Word from the Download menu on the report card — mention that if they ask for those formats.',
+    description: 'Save a substantial markdown report the user opens in chat (explicit report, user-requested long plan/spec, substantial batch item list, or other requested lengthy/tabular structured document). Do not use for greetings, short answers, simple status updates, one-step tasks, or ordinary answers after read-only tools. The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. The report path is returned for later file_read when the user iterates. The user can export the same report as PDF or Word from the Download menu on the report card — mention that if they ask for those formats.',
     schema: reportWriteSchema,
     requiresConfirmation: false,
     category: 'file-write',
@@ -133,13 +130,6 @@ export const toolDefinitions: ToolDefinition[] = [
 
   // Memory Tools
   {
-    name: 'memory_read',
-    description: 'Read User Memory, Learned Notes (full learned.md content), or connector source memory for a monitored scope. Use "source" with connectorId and scopeId to read sealed connector evidence.',
-    schema: memoryReadSchema,
-    requiresConfirmation: false,
-    category: 'memory',
-  },
-  {
     name: 'memory_update',
     description: 'Save a new Learned Note. Use proactively when: (1) the user explicitly says to remember something, (2) you notice a clear reusable preference, (3) the user corrects you on something they always want done differently.',
     schema: memoryUpdateSchema,
@@ -157,10 +147,17 @@ export const toolDefinitions: ToolDefinition[] = [
   // Scratchpad
   {
     name: 'scratchpad_write',
-    description: 'Add a note to your session scratchpad — a private, always-visible notepad that persists for the entire conversation turn. Use this to record key facts (e.g. what a document contains, which connector scope or record type to use, how many records to create) so you can refer back to them without re-reading files or re-running searches.',
+    description: 'Add a short note to working notes, or update the current plan (update_plan: true). Use after deep_thinking when the analysis changes your next steps. Do not paste file contents — knowledge stays in history.',
     schema: scratchpadWriteSchema,
     requiresConfirmation: false,
     category: 'scratchpad',
+  },
+  {
+    name: 'deep_thinking',
+    description: 'Activate extended reasoning on your next step when light thinking is not enough — for deep analysis (large data, trade-offs, synthesis) or a sharper scratchpad plan. Requires a configured reasoning model. After the deep step, update the plan if needed and continue with tools.',
+    schema: deepThinkingSchema,
+    requiresConfirmation: false,
+    category: 'analysis',
   },
 
   // Active context tools (require an active project context)

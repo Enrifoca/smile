@@ -1,7 +1,7 @@
-import { ToolEntry } from './types'
+﻿import { ToolEntry } from './types'
 
 export type AgentPhase =
-  | { kind: 'awaiting_model'; useReasoning: boolean; lastEntry?: ToolEntry | null }
+  | { kind: 'awaiting_model'; useReasoning: boolean; isFirstReasoningIteration?: boolean; isDeepThinkingIteration?: boolean; lastEntry?: ToolEntry | null }
   | { kind: 'streaming_thinking' }
   | { kind: 'streaming_text' }
   | { kind: 'streaming_tool_draft'; entry: ToolEntry }
@@ -14,11 +14,11 @@ export type AgentPhase =
 export function resolveActivityLabel(phase: AgentPhase): string {
   switch (phase.kind) {
     case 'awaiting_model':
-      // First model call of the turn: neutral label until tokens or tools arrive.
-      // "Reasoning about next step" only after a tool ran — mid-workflow planning.
-      if (phase.useReasoning && phase.lastEntry) return 'Reasoning about next step…'
+      if (phase.isDeepThinkingIteration) return 'Deep thinking…'
       if (phase.lastEntry?.afterLabel) return phase.lastEntry.afterLabel
-      return 'Working on your request…'
+      if (phase.useReasoning && phase.isFirstReasoningIteration) return 'Planning next step…'
+      if (phase.useReasoning) return 'Reasoning about next step…'
+      return 'Working…'
 
     case 'streaming_thinking':
       return 'Thinking…'
@@ -46,6 +46,6 @@ export function resolveActivityLabel(phase: AgentPhase): string {
       return 'Reasoning model busy — using chat model…'
 
     default:
-      return 'Working on your request…'
+      return 'Working…'
   }
 }

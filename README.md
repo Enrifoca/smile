@@ -95,9 +95,9 @@ The host app ships no connector runtime inside the agent loop. Authors install p
 - **TailwindCSS** - Styling
 - **Vercel AI SDK concepts** - AI agent architecture
 
-## Repository Direction
+## Repository direction
 
-The project is being refactored from a project-management assistant into a reusable framework. The target structure is inspired by agent-first open-source repos: clear docs, explicit agent instructions, connector boundaries, and simple setup for contributors and downstream users.
+smile:D is an open-source desktop framework for vertical AI agents: connector-neutral core, workspace-scoped packages, Markdown prompts, and a white-label shell. Fork it for a domain, add connectors under `.smile/connectors/`, and tune prompts for your use case.
 
 ## Documentation
 
@@ -141,9 +141,8 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 
 | Doc | Purpose |
 | --- | --- |
-| [src/prompts/README.md](src/prompts/README.md) | Editing `core/system.md`, planner, assembly |
+| [src/prompts/README.md](src/prompts/README.md) | Editing `core/system.md`, assembly, prompt tiers |
 | `src/prompts/core/system.md` | Live core system prompt (Markdown) |
-| `src/prompts/core/planner.md` | Live planner prompt (Markdown) |
 
 ### Connectors
 
@@ -158,6 +157,7 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 
 | Doc | Purpose |
 | --- | --- |
+| [src/components/shell/README.md](src/components/shell/README.md) | **Desktop shell** — titlebar, chat history, tabs, inspector |
 | [src/components/README.md](src/components/README.md) | Generic React UI overview, what belongs where |
 | [src/components/ui/README.md](src/components/ui/README.md) | **UI kit** — buttons, forms, panels, tokens |
 | [src/components/chat/README.md](src/components/chat/README.md) | Write bar, activity status, chat modules |
@@ -181,7 +181,7 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | Change connector agent behavior | `<workspace>/.smile/connectors/<id>/prompt.md` |
 | Customize write approval UI | [src/components/chat/README.md](src/components/chat/README.md) + manifest `confirmation` / `preview` |
 | Add markdown report cards | [src/components/chat/artifacts/README.md](src/components/chat/artifacts/README.md) |
-| Rebrand the UI | [docs/ui-guidelines.md](docs/ui-guidelines.md) → [src/theme/README.md](src/theme/README.md) |
+| Rebrand the UI | [docs/ui-guidelines.md](docs/ui-guidelines.md) → [src/components/shell/README.md](src/components/shell/README.md) → [src/theme/README.md](src/theme/README.md) |
 | Understand memory rules | [docs/memory.md](docs/memory.md) → [src/memory/README.md](src/memory/README.md) |
 | Fix agent stopping after file read | [src/agent/taskContinuity.md](src/agent/taskContinuity.md) |
 | Fix model planning in chat instead of tools | [src/agent/HELPERS.md § Loop guards](src/agent/HELPERS.md#loop-guards) |
@@ -190,4 +190,12 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). — see [LICENSE](LICENSE).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).

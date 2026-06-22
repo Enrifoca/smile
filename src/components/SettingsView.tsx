@@ -18,6 +18,7 @@ import { UserProfile } from '../agent/types'
 import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { ModelRecommendationText } from '../settings/ModelRecommendationText'
 import { useAppUpdates } from '../context/UpdateContext'
+import { notifyChatHistoryChanged } from '../shell/chatHistoryEvents'
 import {
   AIConfig,
   AIProvider,
@@ -48,7 +49,11 @@ const RefreshIcon = () => (
 
 type ClearTarget = 'general' | 'reasoning' | 'ocr' | null
 
-export default function SettingsView() {
+interface SettingsViewProps {
+  onContextsChange?: (contexts: import('../context/types').ProjectContext[]) => void
+}
+
+export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   const [aiConfig, setAIConfig] = useState<AIConfig | null>(null)
   const [workspace, setWorkspace] = useState<string | null>(null)
   const aiSave = useActionFeedback()
@@ -93,7 +98,7 @@ export default function SettingsView() {
   const { state: updateState, appVersion, checkForUpdates } = useAppUpdates()
   const updateCheck = useActionFeedback()
 
-  const { storage, models: modelCatalogAPI, file } = useElectron()
+  const { storage, models: modelCatalogAPI, file, contexts: contextsAPI } = useElectron()
   const canUseSameReasoningKey = !!aiConfig && aiConfig.provider === reasoningForm.provider
 
   useEffect(() => {
@@ -151,7 +156,6 @@ export default function SettingsView() {
       setAgentProfile(normalizeUserProfile(savedProfile))
 
       const reasoningConfigStr = await storage.getSecure('reasoningConfig')
-        || await storage.getSecure('plannerConfig')
       if (reasoningConfigStr) {
         const rc = JSON.parse(reasoningConfigStr)
         setReasoningConfigured(true)
@@ -206,7 +210,6 @@ export default function SettingsView() {
         if (chatConfigStr) apiKey = JSON.parse(chatConfigStr).apiKey
       } else if (apiKey === '••••••••') {
         const existing = await storage.getSecure('reasoningConfig')
-          || await storage.getSecure('plannerConfig')
         if (existing) apiKey = JSON.parse(existing).apiKey
       }
       if (!apiKey) {
@@ -254,7 +257,6 @@ export default function SettingsView() {
     }
     if (target === 'reasoning') {
       await storage.setSecure('reasoningConfig', '')
-      await storage.setSecure('plannerConfig', '')
       setReasoningConfigured(false)
       setReasoningForm({ provider: 'anthropic', apiKey: '', model: '', useSameKey: true })
     }
@@ -298,6 +300,11 @@ export default function SettingsView() {
       const result = await file.selectWorkspace()
       if (result.success && result.path) {
         setWorkspace(result.path)
+        window.dispatchEvent(new CustomEvent('workspace:changed', { detail: { path: result.path } }))
+        const contextsResult = await contextsAPI.list()
+        if (contextsResult.success && contextsResult.data) {
+          onContextsChange?.(contextsResult.data)
+        }
       }
     } catch (error) {
       console.error('Failed to select workspace:', error)
@@ -308,6 +315,7 @@ export default function SettingsView() {
     const history = await storage.get('chatHistory') as Array<{ id: string }> | null
     const all = history || []
     await storage.set('chatHistory', all.slice(0, keepRecentChats))
+    notifyChatHistoryChanged()
     setShowTrimHistoryModal(false)
   }
 
@@ -344,11 +352,11 @@ export default function SettingsView() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="ui-page-frame">
       <div className="content-shell page-shell">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-medium text-neutral-950">Settings</h1>
+            <h1 className="ui-page-title">Settings</h1>
             <p className="text-sm text-neutral-500 mt-1">
               Configure framework-level model, workspace, and runtime preferences.
             </p>
@@ -375,7 +383,7 @@ export default function SettingsView() {
 
         <div className="space-y-6">
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Workspace Folder</h2>
+            <h2 className="ui-section-title mb-4">Workspace Folder</h2>
             <p className="text-sm text-gray-600 mb-4">
               This is the folder where the agent can read documents and create outputs.
             </p>
@@ -394,7 +402,7 @@ export default function SettingsView() {
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-4 gap-3">
-              <h2 className="text-lg font-semibold text-gray-800">General Model</h2>
+              <h2 className="ui-section-title">General Model</h2>
               {aiConfig && <Badge tone="success">Active</Badge>}
             </div>
             <Callout className="mb-5">
@@ -454,7 +462,7 @@ export default function SettingsView() {
             <div className="flex items-center justify-between mb-1 gap-3">
               <div className="flex items-center gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-800">Reasoning Model</h2>
+                  <h2 className="ui-section-title">Reasoning Model</h2>
                   <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
                 </div>
               </div>
@@ -542,7 +550,7 @@ export default function SettingsView() {
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-1 gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-gray-800">OCR Model</h2>
+                <h2 className="ui-section-title">OCR Model</h2>
                 <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
               </div>
               <div className="flex items-center gap-3">
@@ -607,7 +615,7 @@ export default function SettingsView() {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-1">Agent Behavior</h2>
+            <h2 className="ui-section-title mb-1">Agent Behavior</h2>
             <p className="text-sm text-gray-500 mb-5">Control how the agent processes your requests.</p>
 
             <div className="space-y-6">
@@ -706,7 +714,7 @@ export default function SettingsView() {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-1">App updates</h2>
+            <h2 className="ui-section-title mb-1">App updates</h2>
             <p className="text-sm text-gray-500 mb-4">
               Installed releases check GitHub automatically on startup. Download installers from your website or GitHub Releases.
             </p>
@@ -756,7 +764,7 @@ export default function SettingsView() {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-red-200 p-6">
-            <h2 className="text-lg font-semibold text-red-700 mb-4">Danger Zone</h2>
+            <h2 className="ui-section-title text-red-700 mb-4">Danger Zone</h2>
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-4">
                 <div>

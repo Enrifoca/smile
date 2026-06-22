@@ -67,6 +67,11 @@ export class FileService {
     this.getOcrService = getOcrService
   }
 
+  async ensureWorkspaceFolders(): Promise<void> {
+    await fs.mkdir(path.join(this.workspacePath, '.smile', 'contexts'), { recursive: true })
+    await fs.mkdir(path.join(this.workspacePath, '.smile', 'reports'), { recursive: true })
+  }
+
   /**
    * Ensure the path is within the workspace (security)
    */

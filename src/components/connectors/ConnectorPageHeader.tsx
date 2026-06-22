@@ -32,18 +32,16 @@ export function ConnectorPageHeader({
       </Button>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-medium text-neutral-950">{name}</h1>
-          {integrationLabel && <Badge className="text-[10px] font-normal">{integrationLabel}</Badge>}
-          {configured && <Badge tone="success">Configured</Badge>}
+          <h1 className="ui-page-title">{name}</h1>
+          {integrationLabel ? <Badge className="ui-text-meta font-normal">{integrationLabel}</Badge> : null}
+          {configured ? <Badge tone="success">Configured</Badge> : null}
         </div>
-        {description && (
-          <p className="mt-1 text-sm text-neutral-500">{description}</p>
-        )}
-        {version && apiVersion && (
-          <p className="mt-1 text-xs text-neutral-400">
+        {description ? <p className="mt-1 ui-type-ui">{description}</p> : null}
+        {version && apiVersion ? (
+          <p className="mt-1 ui-text-meta">
             v{version} · api {apiVersion}
           </p>
-        )}
+        ) : null}
       </div>
     </header>
   )

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 
 import { useElectron } from '../../hooks/useElectron'
-import { MarkdownArtifactModal } from '../chat/artifacts/MarkdownArtifactModal'
+import { ContextKnowledgeModal } from './ContextKnowledgeModal'
 import { joinClasses } from '../ui/classNames'
 
 interface ContextKnowledgeCardProps {
@@ -17,8 +17,6 @@ export function ContextKnowledgeCard({ contextId, contextName, slug, className }
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
-
-  const filePath = `.smile/contexts/${slug}/${slug}.md`
 
   const loadMarkdown = useCallback(async () => {
     setLoading(true)
@@ -55,16 +53,20 @@ export function ContextKnowledgeCard({ contextId, contextName, slug, className }
         </button>
       </div>
 
-      {open ? (
-        <MarkdownArtifactModal
-          artifact={{ title: contextName, path: filePath }}
-          content={content}
-          loading={loading}
-          error={error}
-          showDownload={false}
+      {open && (
+        <ContextKnowledgeModal
+          contextId={contextId}
+          contextName={contextName}
+          slug={slug}
+          initialContent={content}
+          initialLoading={loading}
+          initialError={error}
           onClose={() => setOpen(false)}
+          onSaved={() => void loadMarkdown()}
         />
-      ) : null}
+      )}
     </>
   )
 }
+
+export default ContextKnowledgeCard
