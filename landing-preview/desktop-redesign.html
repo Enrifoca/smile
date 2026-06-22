@@ -1,0 +1,1351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>smile:D — desktop UI concept</title>
+  <meta name="description" content="Concept: smile:D reimagined with native desktop patterns — activity bar, tabs, status bar, inspector panel." />
+  <style>
+    :root {
+      --color-primary: #000000;
+      --color-primary-hover: #404040;
+      --color-on-primary: #ffffff;
+      --color-surface: #ffffff;
+      --color-border-strong: #0a0a0a;
+      --color-muted-surface: #f3f4f6;
+      --color-muted-border: #d1d5db;
+      --color-muted-text: #4b5563;
+      --color-meta-text: #9ca3af;
+      --color-hover-surface: #f5f5f5;
+      --color-success: #16a34a;
+      --font-app: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+      --activity-w: 3.25rem;
+      --sidebar-w: 14rem;
+      --inspector-w: 19.5rem;
+      --titlebar-h: 1.75rem;
+      --tabbar-h: 2.25rem;
+      --toolbar-h: 2rem;
+      --statusbar-h: 1.625rem;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--font-app);
+      font-size: 13px;
+      color: var(--color-border-strong);
+      background: #e8e9eb;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 1rem;
+    }
+    button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+    a { color: inherit; text-decoration: none; }
+    code { font-size: 0.92em; }
+
+    /* ── Floating window shell ─────────────────────────────────────── */
+    .app {
+      width: min(1320px, calc(100vw - 2rem));
+      height: calc(100vh - 2rem);
+      display: flex;
+      flex-direction: column;
+      background: var(--color-surface);
+      border: 2px solid var(--color-border-strong);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      box-shadow: 0 40px 80px -24px rgba(0,0,0,.45);
+    }
+
+    /* ── Titlebar (unified, full width) ────────────────────────────── */
+    .titlebar {
+      height: var(--titlebar-h);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding: 0 0.75rem;
+      border-bottom: 2px solid var(--color-border-strong);
+      background: #fff;
+      gap: 0.75rem;
+      user-select: none;
+    }
+    .traffic { display: flex; gap: 0.4rem; flex-shrink: 0; }
+    .traffic i { width: 0.65rem; height: 0.65rem; border-radius: 999px; border: 1.5px solid var(--color-border-strong); display: block; }
+    .traffic i:nth-child(1) { background: #1a1a1a; }
+    .traffic i:nth-child(2) { background: #9ca3af; }
+    .traffic i:nth-child(3) { background: #fff; }
+    .titlebar__brand {
+      font-size: 0.8125rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-left: 0.25rem;
+    }
+    .titlebar__brand .face { color: #000; }
+    .titlebar__menu {
+      display: flex;
+      gap: 0.1rem;
+      margin-left: 0.5rem;
+    }
+    .titlebar__menu button {
+      padding: 0.15rem 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.75rem;
+      color: var(--color-muted-text);
+    }
+    .titlebar__menu button:hover { background: var(--color-hover-surface); color: #000; }
+    .titlebar__spacer { flex: 1; }
+    .titlebar__workspace {
+      font-size: 0.6875rem;
+      color: var(--color-meta-text);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      max-width: 16rem;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .titlebar__workspace svg { width: 0.875rem; height: 0.875rem; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2; }
+
+    /* ── Body: activity + sidebar + main + inspector ───────────────── */
+    .body { flex: 1; display: flex; min-height: 0; }
+
+    /* Activity bar (VS Code–style icon rail) */
+    .activity {
+      width: var(--activity-w);
+      flex-shrink: 0;
+      background: var(--color-muted-surface);
+      border-right: 1px solid var(--color-muted-border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0.5rem 0;
+      gap: 0.25rem;
+    }
+    .activity__item {
+      width: 2.25rem;
+      height: 2.25rem;
+      border-radius: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-muted-text);
+      position: relative;
+      transition: background 0.12s, color 0.12s;
+    }
+    .activity__item svg { width: 1.125rem; height: 1.125rem; stroke: currentColor; fill: none; stroke-width: 2; }
+    .activity__item:hover { background: var(--color-hover-surface); color: #000; }
+    .activity__item.active {
+      color: #000;
+      background: #fff;
+      box-shadow: inset 0 0 0 1px var(--color-muted-border);
+    }
+    .activity__item.active::before {
+      content: "";
+      position: absolute;
+      left: -0.5rem;
+      top: 0.35rem;
+      bottom: 0.35rem;
+      width: 2px;
+      background: #000;
+      border-radius: 0 1px 1px 0;
+    }
+    .activity__dot {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.35rem;
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      background: var(--color-success);
+      border: 1.5px solid var(--color-muted-surface);
+    }
+    .activity__spacer { flex: 1; }
+
+    /* Secondary sidebar */
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      border-right: 2px solid var(--color-border-strong);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #fff;
+    }
+    .sidebar__head {
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--color-muted-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .sidebar__head h2 {
+      margin: 0;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--color-meta-text);
+    }
+    .sidebar__head button {
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 0.35rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-muted-text);
+    }
+    .sidebar__head button:hover { background: var(--color-hover-surface); color: #000; }
+    .sidebar__head button svg { width: 0.875rem; height: 0.875rem; stroke: currentColor; fill: none; stroke-width: 2; }
+
+    .sidebar__new {
+      margin: 0.5rem 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.75rem;
+      background: var(--color-primary);
+      color: #fff;
+      border-radius: 0.5rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+    }
+    .sidebar__new:hover { background: var(--color-primary-hover); }
+    .sidebar__new svg { width: 0.875rem; height: 0.875rem; stroke: currentColor; fill: none; stroke-width: 2; }
+
+    .sidebar__list { flex: 1; overflow-y: auto; padding: 0.25rem 0.5rem 0.75rem; }
+    .sidebar__group-label {
+      font-size: 0.625rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--color-meta-text);
+      padding: 0.65rem 0.5rem 0.25rem;
+    }
+    .sidebar__item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 0.4rem 0.5rem;
+      border-radius: 0.35rem;
+      font-size: 0.8125rem;
+      color: #262626;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.12s;
+    }
+    .sidebar__item:hover { background: var(--color-hover-surface); }
+    .sidebar__item.active { background: var(--color-hover-surface); }
+
+    /* Main workspace */
+    .workspace {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+
+    /* Tab bar */
+    .tabs {
+      height: var(--tabbar-h);
+      flex-shrink: 0;
+      display: flex;
+      align-items: stretch;
+      border-bottom: 1px solid var(--color-muted-border);
+      background: var(--color-muted-surface);
+      overflow-x: auto;
+    }
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0 0.85rem;
+      font-size: 0.75rem;
+      color: var(--color-muted-text);
+      border-right: 1px solid var(--color-muted-border);
+      white-space: nowrap;
+      min-width: 0;
+      max-width: 11rem;
+      transition: background 0.12s, color 0.12s;
+    }
+    .tab span { overflow: hidden; text-overflow: ellipsis; }
+    .tab:hover { background: var(--color-hover-surface); color: #000; }
+    .tab.active {
+      background: #fff;
+      color: #000;
+      border-bottom: 2px solid #000;
+      margin-bottom: -1px;
+    }
+    .tab__close {
+      width: 1rem;
+      height: 1rem;
+      border-radius: 0.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      line-height: 1;
+      color: var(--color-meta-text);
+      flex-shrink: 0;
+    }
+    .tab__close:hover { background: var(--color-muted-border); color: #000; }
+    .tabs__add {
+      width: 2rem;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-meta-text);
+    }
+    .tabs__add:hover { background: var(--color-hover-surface); color: #000; }
+
+    /* Toolbar */
+    .toolbar {
+      height: var(--toolbar-h);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding: 0 0.75rem;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--color-muted-border);
+      font-size: 0.75rem;
+      color: var(--color-muted-text);
+    }
+    .toolbar__crumb { color: var(--color-meta-text); }
+    .toolbar__crumb strong { color: #000; font-weight: 600; }
+    .toolbar__sep { color: var(--color-muted-border); }
+    .toolbar__spacer { flex: 1; }
+    .toolbar__action {
+      padding: 0.2rem 0.5rem;
+      border-radius: 0.3rem;
+      font-size: 0.6875rem;
+      color: var(--color-muted-text);
+    }
+    .toolbar__action:hover { background: var(--color-hover-surface); color: #000; }
+    .badge {
+      font-size: 0.625rem;
+      font-weight: 600;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid var(--color-success);
+      color: var(--color-success);
+    }
+
+    /* Chat area */
+    .chat-area {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .transcript {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.25rem 1rem;
+    }
+    .transcript__inner { max-width: 42rem; margin: 0 auto; }
+
+    .msg { display: flex; gap: 0.65rem; margin-bottom: 1rem; }
+    .msg--user { flex-direction: row-reverse; }
+    .msg__avatar {
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 999px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+    .msg__avatar--user { background: #000; color: #fff; }
+    .msg__avatar--ai { background: var(--color-muted-surface); color: #000; }
+    .msg__body { max-width: 85%; }
+    .msg__bubble {
+      padding: 0.65rem 0.85rem;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+    }
+    .msg__bubble--user {
+      background: #000;
+      color: #fff;
+      border-radius: 1rem 1rem 0.25rem 1rem;
+    }
+    .msg__bubble--ai {
+      background: #fff;
+      color: #374151;
+      border: 1px solid #f3f4f6;
+      border-radius: 1rem 1rem 1rem 0.25rem;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .msg__meta {
+      font-size: 0.625rem;
+      color: var(--color-meta-text);
+      margin-top: 0.25rem;
+      padding: 0 0.25rem;
+    }
+    .msg--user .msg__meta { text-align: right; }
+
+    .tool-summary {
+      margin: 0 0 0.75rem 2.4rem;
+      font-size: 0.6875rem;
+      color: var(--color-meta-text);
+    }
+
+    .report-card {
+      margin: 0 0 1rem 2.4rem;
+      border: 2px solid var(--color-border-strong);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      max-width: 20rem;
+      transition: background 0.12s;
+    }
+    .report-card:hover { background: var(--color-hover-surface); }
+    .report-card__head {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid var(--color-muted-border);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .report-card__head svg { width: 0.875rem; height: 0.875rem; stroke: currentColor; fill: none; stroke-width: 2; flex-shrink: 0; }
+    .report-card__head .open { margin-left: auto; font-size: 0.625rem; color: var(--color-meta-text); font-weight: 600; }
+    .report-card__body { padding: 0.55rem 0.75rem; font-size: 0.6875rem; color: var(--color-muted-text); }
+
+    /* Pending action */
+    .pending {
+      flex-shrink: 0;
+      border-top: 2px solid var(--color-border-strong);
+      background: var(--color-muted-surface);
+      padding: 0.65rem 1rem;
+    }
+    .pending__inner {
+      max-width: 42rem;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .pending__copy { flex: 1; min-width: 12rem; }
+    .pending__title { font-size: 0.75rem; font-weight: 600; margin: 0 0 0.15rem; }
+    .pending__desc { font-size: 0.6875rem; color: var(--color-muted-text); margin: 0; }
+    .pending__actions { display: flex; gap: 0.4rem; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 0.4rem 0.85rem;
+      border-radius: 0.5rem;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .btn--primary { background: #000; color: #fff; }
+    .btn--primary:hover { background: var(--color-primary-hover); }
+    .btn--secondary {
+      background: #fff;
+      color: #000;
+      border: 1px solid var(--color-muted-border);
+    }
+    .btn--secondary:hover { background: var(--color-hover-surface); }
+
+    /* Composer */
+    .composer {
+      flex-shrink: 0;
+      border-top: 1px solid var(--color-muted-border);
+      padding: 0.65rem 1rem 0.75rem;
+      background: var(--color-muted-surface);
+    }
+    .composer__inner { max-width: 42rem; margin: 0 auto; }
+    .composer__report {
+      margin-bottom: 0.45rem;
+    }
+    .composer__report-label {
+      font-size: 0.625rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-meta-text);
+      margin-bottom: 0.25rem;
+    }
+    .report-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.55rem;
+      background: #fff;
+      border: 1px solid #000;
+      border-radius: 0.5rem;
+      font-size: 0.75rem;
+      max-width: 100%;
+    }
+    .report-pill svg { width: 0.875rem; height: 0.875rem; stroke: currentColor; fill: none; stroke-width: 2; flex-shrink: 0; }
+    .report-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .composer__shell {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.25rem;
+      background: #fff;
+      border: 1px solid var(--color-muted-border);
+      border-radius: 0.75rem;
+      padding: 0.35rem 0.5rem;
+    }
+    .composer__shell:focus-within {
+      border-color: #737373;
+      box-shadow: 0 0 0 2px var(--color-hover-surface);
+    }
+    .composer__scope {
+      display: flex;
+      gap: 0.35rem;
+      margin-bottom: 0.45rem;
+      flex-wrap: wrap;
+    }
+    .scope-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.2rem 0.55rem;
+      border: 1px solid var(--color-muted-border);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 0.6875rem;
+      color: var(--color-muted-text);
+    }
+    .scope-chip:hover { background: var(--color-hover-surface); color: #000; }
+    .scope-chip svg { width: 0.75rem; height: 0.75rem; stroke: currentColor; fill: none; stroke-width: 2; }
+    .composer__input {
+      flex: 1;
+      border: none;
+      outline: none;
+      resize: none;
+      font-family: inherit;
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      padding: 0.45rem 0.25rem;
+      min-height: 2.25rem;
+      max-height: 6rem;
+      background: transparent;
+      color: #374151;
+    }
+    .composer__input::placeholder { color: var(--color-meta-text); }
+    .composer__icon {
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 0.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-muted-text);
+      flex-shrink: 0;
+    }
+    .composer__icon:hover { background: var(--color-hover-surface); color: #000; }
+    .composer__icon svg { width: 1rem; height: 1rem; stroke: currentColor; fill: none; stroke-width: 2; }
+    .composer__send {
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 0.4rem;
+      background: #000;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .composer__send:hover { background: var(--color-primary-hover); }
+    .composer__send svg { width: 0.875rem; height: 0.875rem; stroke: currentColor; fill: none; stroke-width: 2; }
+
+    /* Inspector panel */
+    .inspector {
+      width: var(--inspector-w);
+      flex-shrink: 0;
+      border-left: 2px solid var(--color-border-strong);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #fff;
+    }
+    .inspector__head {
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid var(--color-muted-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .inspector__head h3 {
+      margin: 0;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--color-meta-text);
+    }
+    .inspector__head button {
+      width: 1.35rem;
+      height: 1.35rem;
+      border-radius: 0.3rem;
+      color: var(--color-meta-text);
+      font-size: 0.875rem;
+      line-height: 1;
+    }
+    .inspector__head button:hover { background: var(--color-hover-surface); color: #000; }
+    .inspector__tabs {
+      display: flex;
+      border-bottom: 1px solid var(--color-muted-border);
+    }
+    .inspector__tab {
+      flex: 1;
+      padding: 0.45rem 0.5rem;
+      font-size: 0.6875rem;
+      color: var(--color-meta-text);
+      text-align: center;
+      border-bottom: 2px solid transparent;
+    }
+    .inspector__tab:hover { color: #000; background: var(--color-hover-surface); }
+    .inspector__tab.active { color: #000; border-bottom-color: #000; font-weight: 600; }
+    .inspector__pane { display: none; flex: 1; flex-direction: column; min-height: 0; }
+    .inspector__pane.active { display: flex; }
+    .inspector__hint {
+      flex-shrink: 0;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.625rem;
+      line-height: 1.45;
+      color: var(--color-muted-text);
+      border-bottom: 1px solid var(--color-muted-border);
+      background: var(--color-muted-surface);
+    }
+    .inspector__scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem;
+    }
+    .inspector__group-label {
+      font-size: 0.625rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--color-meta-text);
+      padding: 0.5rem 0.4rem 0.25rem;
+    }
+    .insp-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      width: 100%;
+      padding: 0.5rem 0.45rem;
+      border-radius: 0.45rem;
+      border: 1px solid transparent;
+      text-align: left;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .insp-item:hover { background: var(--color-hover-surface); }
+    .insp-item.active {
+      background: var(--color-hover-surface);
+      border-color: var(--color-border-strong);
+    }
+    .insp-item__icon {
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 0.35rem;
+      border: 1px solid var(--color-muted-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 0.05rem;
+      background: #fff;
+    }
+    .insp-item__icon svg { width: 0.8rem; height: 0.8rem; stroke: currentColor; fill: none; stroke-width: 2; }
+    .insp-item__body { flex: 1; min-width: 0; }
+    .insp-item__title {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #000;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .insp-item__path {
+      display: block;
+      font-size: 0.625rem;
+      color: var(--color-meta-text);
+      margin-top: 0.1rem;
+      word-break: break-all;
+      line-height: 1.35;
+    }
+    .insp-item__meta {
+      display: block;
+      font-size: 0.625rem;
+      color: var(--color-muted-text);
+      margin-top: 0.15rem;
+    }
+    .insp-item__actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      flex-shrink: 0;
+    }
+    .insp-btn {
+      font-size: 0.625rem;
+      font-weight: 600;
+      padding: 0.2rem 0.45rem;
+      border-radius: 0.3rem;
+      border: 1px solid var(--color-muted-border);
+      background: #fff;
+      color: var(--color-muted-text);
+      white-space: nowrap;
+    }
+    .insp-btn:hover { background: var(--color-hover-surface); color: #000; }
+    .insp-btn--active {
+      background: #000;
+      color: #fff;
+      border-color: #000;
+    }
+    .insp-btn--active:hover { background: var(--color-primary-hover); }
+    .insp-toggle {
+      position: relative;
+      width: 1.75rem;
+      height: 1rem;
+      border-radius: 999px;
+      border: 1.5px solid var(--color-muted-border);
+      background: #fff;
+      flex-shrink: 0;
+      margin-top: 0.15rem;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .insp-toggle::after {
+      content: "";
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 999px;
+      background: var(--color-muted-border);
+      transition: transform 0.15s, background 0.15s;
+    }
+    .insp-toggle.on {
+      background: #000;
+      border-color: #000;
+    }
+    .insp-toggle.on::after {
+      transform: translateX(0.7rem);
+      background: #fff;
+    }
+    .insp-preview {
+      flex-shrink: 0;
+      border-top: 1px solid var(--color-muted-border);
+      padding: 0.65rem 0.75rem;
+      font-size: 0.6875rem;
+      line-height: 1.5;
+      color: var(--color-muted-text);
+      max-height: 9rem;
+      overflow-y: auto;
+      background: var(--color-muted-surface);
+    }
+    .insp-preview strong { color: #000; font-weight: 600; }
+    .insp-preview__label {
+      font-size: 0.625rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-meta-text);
+      margin-bottom: 0.35rem;
+    }
+
+    /* Status bar */
+    .statusbar {
+      height: var(--statusbar-h);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding: 0 0.65rem;
+      gap: 0.75rem;
+      border-top: 1px solid var(--color-muted-border);
+      background: var(--color-muted-surface);
+      font-size: 0.625rem;
+      color: var(--color-meta-text);
+    }
+    .statusbar__item {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.1rem 0.35rem;
+      border-radius: 0.2rem;
+    }
+    .statusbar__item:hover { background: var(--color-hover-surface); color: #000; }
+    .statusbar__item--ok { color: var(--color-success); }
+    .statusbar__spacer { flex: 1; }
+    .statusbar__item svg { width: 0.75rem; height: 0.75rem; stroke: currentColor; fill: none; stroke-width: 2; }
+
+    /* Alt views (hidden by default) */
+    .view-panel { display: none; flex: 1; flex-direction: column; min-height: 0; }
+    .view-panel.active { display: flex; }
+    .page-shell {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+    }
+    .page-shell__inner { max-width: 40rem; }
+    .page-title { font-size: 1.125rem; font-weight: 500; margin: 0 0 0.35rem; }
+    .page-desc { font-size: 0.8125rem; color: var(--color-muted-text); margin: 0 0 1.5rem; }
+    .panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .panel h4 { margin: 0 0 0.35rem; font-size: 0.875rem; font-weight: 500; }
+    .panel p { margin: 0; font-size: 0.8125rem; color: var(--color-muted-text); }
+
+    .concept-note {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      max-width: 14rem;
+      padding: 0.65rem 0.85rem;
+      background: #000;
+      color: #fff;
+      font-size: 0.6875rem;
+      line-height: 1.45;
+      border-radius: 0.5rem;
+      box-shadow: 0 8px 24px rgba(0,0,0,.25);
+      z-index: 10;
+    }
+    .concept-note strong { display: block; margin-bottom: 0.2rem; font-size: 0.75rem; }
+
+    @media (max-width: 960px) {
+      .inspector { display: none; }
+    }
+    @media (max-width: 720px) {
+      .sidebar { display: none; }
+      .titlebar__menu { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app">
+
+    <!-- Unified titlebar -->
+    <header class="titlebar">
+      <span class="traffic"><i></i><i></i><i></i></span>
+      <span class="titlebar__brand">smile<span class="face">:D</span></span>
+      <nav class="titlebar__menu" aria-label="Application menu">
+        <button type="button">File</button>
+        <button type="button">Agent</button>
+        <button type="button">View</button>
+        <button type="button">Window</button>
+      </nav>
+      <span class="titlebar__spacer"></span>
+      <span class="titlebar__workspace" title="~/Projects/acme-agent">
+        <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        ~/Projects/acme-agent
+      </span>
+    </header>
+
+    <div class="body">
+
+      <!-- Activity bar -->
+      <nav class="activity" aria-label="Primary navigation">
+        <button type="button" class="activity__item active" data-view="chat" title="Chat">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h8M8 14h5M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.2-3.6A7.8 7.8 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        </button>
+        <button type="button" class="activity__item" data-view="context" title="Context">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+          <span class="activity__dot" aria-hidden="true"></span>
+        </button>
+        <button type="button" class="activity__item" data-view="memories" title="Agent Memory">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+        </button>
+        <button type="button" class="activity__item" data-view="connectors" title="Connectors">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 13.5l3-3m-6 1.5l-1.5 1.5a3 3 0 104.243 4.243l1.5-1.5m4.5-4.5l1.5-1.5A3 3 0 1013.5 6l-1.5 1.5"/></svg>
+        </button>
+        <span class="activity__spacer"></span>
+        <button type="button" class="activity__item" data-view="settings" title="Settings">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        </button>
+      </nav>
+
+      <!-- Sidebar (contextual list) -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar__head">
+          <h2 id="sidebar-title">Chat History</h2>
+          <button type="button" aria-label="Filter chats">
+            <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M7 8h10M10 12h4"/></svg>
+          </button>
+        </div>
+        <button type="button" class="sidebar__new" id="sidebar-action">
+          <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m7-7H5"/></svg>
+          New Chat
+        </button>
+        <div class="sidebar__list" id="sidebar-list">
+          <div class="sidebar__group-label">Today</div>
+          <button type="button" class="sidebar__item active">Sprint planning recap</button>
+          <button type="button" class="sidebar__item">Connector audit</button>
+          <div class="sidebar__group-label">Yesterday</div>
+          <button type="button" class="sidebar__item">Q2 roadmap draft</button>
+          <button type="button" class="sidebar__item">Memory cleanup</button>
+          <div class="sidebar__group-label">This Week</div>
+          <button type="button" class="sidebar__item">Onboarding flow spec</button>
+        </div>
+      </aside>
+
+      <!-- Main workspace -->
+      <main class="workspace">
+
+        <!-- Chat view -->
+        <div class="view-panel active" id="view-chat">
+          <div class="tabs">
+            <button type="button" class="tab active"><span>Sprint planning recap</span><span class="tab__close" aria-hidden="true">×</span></button>
+            <button type="button" class="tab"><span>Connector audit</span><span class="tab__close" aria-hidden="true">×</span></button>
+            <button type="button" class="tabs__add" title="New tab">+</button>
+          </div>
+          <div class="toolbar">
+            <span class="toolbar__crumb">Chat <span class="toolbar__sep">/</span> <strong>Sprint planning recap</strong></span>
+            <span class="toolbar__spacer"></span>
+            <button type="button" class="toolbar__action">Toggle inspector</button>
+          </div>
+
+          <div class="chat-area">
+            <div class="transcript">
+              <div class="transcript__inner">
+                <div class="msg msg--user">
+                  <div class="msg__avatar msg__avatar--user">E</div>
+                  <div class="msg__body">
+                    <div class="msg__bubble msg__bubble--user">Summarize open tickets for the current sprint and draft a planning report.</div>
+                    <div class="msg__meta">You · 10:42</div>
+                  </div>
+                </div>
+                <div class="tool-summary">Explored 2 files · 1 connector read · 12s</div>
+                <div class="msg">
+                  <div class="msg__avatar msg__avatar--ai">:D</div>
+                  <div class="msg__body">
+                    <div class="msg__bubble msg__bubble--ai">I pulled 14 open issues from Jira and grouped them by priority. I wrote a planning report you can revise in place.</div>
+                    <div class="msg__meta">Agent · 10:43</div>
+                  </div>
+                </div>
+                <button type="button" class="report-card">
+                  <div class="report-card__head">
+                    <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M8 4h7l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg>
+                    sprint-planning.md
+                    <span class="open">Open</span>
+                  </div>
+                  <div class="report-card__body">3 sections · 1.2k words · .smile/reports/</div>
+                </button>
+                <div class="msg msg--user">
+                  <div class="msg__avatar msg__avatar--user">E</div>
+                  <div class="msg__body">
+                    <div class="msg__bubble msg__bubble--user">Create a Jira epic for the P0 items.</div>
+                    <div class="msg__meta">You · 10:44</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pending">
+              <div class="pending__inner">
+                <div class="pending__copy">
+                  <p class="pending__title">Create epic · ACME Sprint 24</p>
+                  <p class="pending__desc">jira_create_epic — 4 linked issues · requires your approval</p>
+                </div>
+                <div class="pending__actions">
+                  <button type="button" class="btn btn--secondary">Refuse</button>
+                  <button type="button" class="btn btn--primary">Accept</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer">
+              <div class="composer__inner">
+                <div class="composer__report">
+                  <div class="composer__report-label">Active report</div>
+                  <div class="report-pill">
+                    <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M8 4h7l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg>
+                    <span>sprint-planning.md</span>
+                  </div>
+                </div>
+                <div class="composer__shell">
+                  <button type="button" class="composer__icon" title="Attach file">
+                    <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 4 0 108.486 8.486L20.5 13"/></svg>
+                  </button>
+                  <textarea class="composer__input" rows="1" placeholder="Message the agent…"></textarea>
+                  <button type="button" class="composer__send" title="Send">
+                    <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connectors view (sample) -->
+        <div class="view-panel" id="view-connectors">
+          <div class="toolbar">
+            <span class="toolbar__crumb"><strong>Connectors</strong></span>
+          </div>
+          <div class="page-shell">
+            <div class="page-shell__inner">
+              <h1 class="page-title">Connectors</h1>
+              <p class="page-desc">Domain tools live outside the core loop. Install modules, configure auth, tune prompts.</p>
+              <div class="panel">
+                <h4>Jira <span class="badge" style="margin-left:0.5rem">Connected</span></h4>
+                <p>Issue search, epic creation, sprint boards. Reference example connector.</p>
+              </div>
+              <div class="panel">
+                <h4>Your CRM</h4>
+                <p>Not configured — install from catalog or build a workspace package.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings view (sample) -->
+        <div class="view-panel" id="view-settings">
+          <div class="toolbar">
+            <span class="toolbar__crumb"><strong>Settings</strong> <span class="toolbar__sep">/</span> AI Models</span>
+          </div>
+          <div class="page-shell">
+            <div class="page-shell__inner">
+              <h1 class="page-title">AI Models</h1>
+              <p class="page-desc">Chat, reasoning, and OCR models configured independently.</p>
+              <div class="panel">
+                <h4>Chat model</h4>
+                <p>gpt-4o · used for conversation and tool routing</p>
+              </div>
+              <div class="panel">
+                <h4>Reasoning model <span class="badge" style="margin-left:0.5rem">Active</span></h4>
+                <p>o3-mini · used for multi-step planning</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+
+      <!-- Inspector: Reports · Context · Memories -->
+      <aside class="inspector" id="inspector">
+        <div class="inspector__head">
+          <h3>Inspector</h3>
+          <button type="button" id="inspector-close" aria-label="Close inspector">×</button>
+        </div>
+        <div class="inspector__tabs">
+          <button type="button" class="inspector__tab active" data-insp="reports">Reports</button>
+          <button type="button" class="inspector__tab" data-insp="context">Context</button>
+          <button type="button" class="inspector__tab" data-insp="memories">Memories</button>
+        </div>
+
+        <!-- Reports: all workspace artifacts, activate in chat -->
+        <div class="inspector__pane active" id="insp-reports">
+          <p class="inspector__hint">Select a report to preview. <strong>Activate</strong> pins it in the current chat — or opens a new chat if none is focused.</p>
+          <div class="inspector__scroll">
+            <div class="inspector__group-label">This chat</div>
+            <button type="button" class="insp-item active" data-report="sprint-planning.md">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M8 4h7l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">sprint-planning.md</span>
+                <span class="insp-item__path">.smile/reports/sprint-planning.md</span>
+                <span class="insp-item__meta">3 sections · updated 10:43</span>
+              </span>
+              <span class="insp-item__actions">
+                <span class="insp-btn insp-btn--active">Active</span>
+              </span>
+            </button>
+            <div class="inspector__group-label">Workspace</div>
+            <button type="button" class="insp-item" data-report="q2-roadmap.md">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M8 4h7l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">q2-roadmap.md</span>
+                <span class="insp-item__path">.smile/reports/q2-roadmap.md</span>
+                <span class="insp-item__meta">From chat · Q2 roadmap draft</span>
+              </span>
+              <span class="insp-item__actions">
+                <button type="button" class="insp-btn">Activate</button>
+              </span>
+            </button>
+            <button type="button" class="insp-item" data-report="onboarding-spec.md">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M8 4h7l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">onboarding-spec.md</span>
+                <span class="insp-item__path">.smile/reports/onboarding-spec.md</span>
+                <span class="insp-item__meta">From chat · Onboarding flow spec</span>
+              </span>
+              <span class="insp-item__actions">
+                <button type="button" class="insp-btn">Activate</button>
+              </span>
+            </button>
+            <button type="button" class="insp-item" data-report="exports/summary.pdf">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">summary.pdf</span>
+                <span class="insp-item__path">exports/summary.pdf</span>
+                <span class="insp-item__meta">User file · written by agent</span>
+              </span>
+              <span class="insp-item__actions">
+                <button type="button" class="insp-btn">Activate</button>
+              </span>
+            </button>
+          </div>
+          <div class="insp-preview" id="report-preview">
+            <div class="insp-preview__label">Preview</div>
+            <strong>Sprint 24 — Planning recap</strong><br>
+            P0: ACME-412, ACME-418, ACME-421, ACME-425…
+          </div>
+        </div>
+
+        <!-- Context: toggle on/off per context -->
+        <div class="inspector__pane" id="insp-context">
+          <p class="inspector__hint">Toggle contexts for the active chat. Bold name = toggle on. One active context at a time.</p>
+          <div class="inspector__scroll">
+            <button type="button" class="insp-item active">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title" style="font-weight:700">acme-agent</span>
+                <span class="insp-item__path">.smile/contexts/acme-agent.md</span>
+                <span class="insp-item__meta">Sprint rules, Jira project ACME</span>
+              </span>
+              <button type="button" class="insp-toggle on" aria-label="Toggle acme-agent" aria-pressed="true"></button>
+            </button>
+            <button type="button" class="insp-item">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">design-system</span>
+                <span class="insp-item__path">.smile/contexts/design-system.md</span>
+                <span class="insp-item__meta">UI tokens, component naming</span>
+              </span>
+              <button type="button" class="insp-toggle" aria-label="Toggle design-system" aria-pressed="false"></button>
+            </button>
+            <button type="button" class="insp-item">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">onboarding</span>
+                <span class="insp-item__path">.smile/contexts/onboarding.md</span>
+                <span class="insp-item__meta">Customer onboarding flow</span>
+              </span>
+              <button type="button" class="insp-toggle" aria-label="Toggle onboarding" aria-pressed="false"></button>
+            </button>
+          </div>
+          <div class="insp-preview">
+            <div class="insp-preview__label">acme-agent</div>
+            Always use project key ACME. Prefer epic-level grouping for P0 items. Writes require user approval.
+          </div>
+        </div>
+
+        <!-- Memories: core (no path) + context memories (with path) -->
+        <div class="inspector__pane" id="insp-memories">
+          <p class="inspector__hint">All memories in the workspace. Core memories have no path — they are authoritative system files.</p>
+          <div class="inspector__scroll">
+            <div class="inspector__group-label">Core</div>
+            <button type="button" class="insp-item active">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">User Memory</span>
+                <span class="insp-item__meta">Authoritative rules · always in prompt</span>
+              </span>
+            </button>
+            <button type="button" class="insp-item">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">Learned Notes</span>
+                <span class="insp-item__meta">4 recent entries · budgeted in prompt</span>
+              </span>
+            </button>
+            <div class="inspector__group-label">Context memories</div>
+            <button type="button" class="insp-item">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">acme-agent memory</span>
+                <span class="insp-item__path">.smile/memories/contexts/acme-agent.md</span>
+                <span class="insp-item__meta">Linked to active context</span>
+              </span>
+            </button>
+            <button type="button" class="insp-item">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">design-system memory</span>
+                <span class="insp-item__path">.smile/memories/contexts/design-system.md</span>
+                <span class="insp-item__meta">Inactive context</span>
+              </span>
+            </button>
+            <div class="inspector__group-label">Connector source</div>
+            <button type="button" class="insp-item">
+              <span class="insp-item__icon"><svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 13.5l3-3m-6 1.5l-1.5 1.5a3 3 0 104.243 4.243l1.5-1.5"/></svg></span>
+              <span class="insp-item__body">
+                <span class="insp-item__title">Jira · ACME</span>
+                <span class="insp-item__path">.smile/memories/sources/jira/ACME/</span>
+                <span class="insp-item__meta">12 write leaves · monitored scope</span>
+              </span>
+            </button>
+          </div>
+          <div class="insp-preview">
+            <div class="insp-preview__label">User Memory</div>
+            Reply in Italian when the user writes in Italian. Never auto-approve connector writes.
+          </div>
+        </div>
+      </aside>
+
+    </div>
+
+    <!-- Status bar: models + workspace only -->
+    <footer class="statusbar">
+      <span class="statusbar__item" title="Chat model">gpt-4o</span>
+      <span class="statusbar__item" title="Reasoning model">o3-mini</span>
+      <span class="statusbar__item" style="opacity:.55" title="Reasoning off this turn">o3-mini (off)</span>
+      <span class="statusbar__item" title="OCR model">mistral-ocr</span>
+      <span class="statusbar__spacer"></span>
+      <span class="statusbar__item">
+        <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        ~/Projects/acme-agent
+      </span>
+    </footer>
+
+  </div>
+
+  <div class="concept-note">
+    <strong>Inspector concept</strong>
+    Reports · Context · Memories. Activate a report in-chat or open a new chat. Core memories show no path.
+  </div>
+
+  <script>
+    (function () {
+      const views = {
+        chat: { panel: 'view-chat', sidebarTitle: 'Chat History', sidebarAction: 'New Chat' },
+        context: { panel: 'view-chat', sidebarTitle: 'Context', sidebarAction: 'New context' },
+        memories: { panel: 'view-settings', sidebarTitle: 'Memories', sidebarAction: 'New memory' },
+        connectors: { panel: 'view-connectors', sidebarTitle: 'Installed', sidebarAction: 'Browse catalog' },
+        settings: { panel: 'view-settings', sidebarTitle: 'Settings', sidebarAction: null },
+      };
+
+      const activityItems = document.querySelectorAll('.activity__item[data-view]');
+      const panels = document.querySelectorAll('.view-panel');
+      const sidebarTitle = document.getElementById('sidebar-title');
+      const sidebarAction = document.getElementById('sidebar-action');
+      const inspector = document.getElementById('inspector');
+      const inspectorClose = document.getElementById('inspector-close');
+      const toggleInspector = document.querySelector('.toolbar__action');
+
+      activityItems.forEach((item) => {
+        item.addEventListener('click', () => {
+          const view = item.dataset.view;
+          const cfg = views[view];
+          if (!cfg) return;
+
+          activityItems.forEach((el) => el.classList.toggle('active', el === item));
+          panels.forEach((p) => p.classList.toggle('active', p.id === cfg.panel));
+          sidebarTitle.textContent = cfg.sidebarTitle;
+          if (cfg.sidebarAction) {
+            sidebarAction.style.display = '';
+            sidebarAction.lastChild.textContent = ' ' + cfg.sidebarAction;
+          } else {
+            sidebarAction.style.display = 'none';
+          }
+        });
+      });
+
+      document.querySelectorAll('.sidebar__item').forEach((item) => {
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.sidebar__item').forEach((el) => el.classList.remove('active'));
+          item.classList.add('active');
+        });
+      });
+
+      document.querySelectorAll('.tab').forEach((tab) => {
+        tab.addEventListener('click', (e) => {
+          if (e.target.classList.contains('tab__close')) return;
+          document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+          tab.classList.add('active');
+        });
+      });
+
+      function setInspector(open) {
+        inspector.style.display = open ? '' : 'none';
+      }
+      toggleInspector?.addEventListener('click', () => {
+        setInspector(inspector.style.display === 'none');
+      });
+      inspectorClose?.addEventListener('click', () => setInspector(false));
+
+      /* Inspector tab switching */
+      const inspTabs = document.querySelectorAll('.inspector__tab[data-insp]');
+      const inspPanes = document.querySelectorAll('.inspector__pane');
+      inspTabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          const id = tab.dataset.insp;
+          inspTabs.forEach((t) => t.classList.toggle('active', t === tab));
+          inspPanes.forEach((p) => p.classList.toggle('active', p.id === 'insp-' + id));
+        });
+      });
+
+      /* Report list: select + activate */
+      const reportPreview = document.getElementById('report-preview');
+      const reportPill = document.querySelector('.report-pill span');
+      const previews = {
+        'sprint-planning.md': '<div class="insp-preview__label">Preview</div><strong>Sprint 24 — Planning recap</strong><br>P0: ACME-412, ACME-418, ACME-421, ACME-425…',
+        'q2-roadmap.md': '<div class="insp-preview__label">Preview</div><strong>Q2 Roadmap</strong><br>Theme: connector extraction, memory budget, desktop shell…',
+        'onboarding-spec.md': '<div class="insp-preview__label">Preview</div><strong>Onboarding spec</strong><br>Step 1: workspace pick. Step 2: model keys…',
+        'exports/summary.pdf': '<div class="insp-preview__label">Preview</div><strong>summary.pdf</strong><br>Binary file — open in system viewer.',
+      };
+
+      document.querySelectorAll('#insp-reports .insp-item').forEach((item) => {
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.insp-btn')) return;
+          const key = item.dataset.report;
+          document.querySelectorAll('#insp-reports .insp-item').forEach((el) => el.classList.remove('active'));
+          item.classList.add('active');
+          if (key && reportPreview && previews[key]) reportPreview.innerHTML = previews[key];
+        });
+        const activateBtn = item.querySelector('.insp-btn');
+        activateBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const key = item.dataset.report;
+          const title = item.querySelector('.insp-item__title')?.textContent || key;
+          document.querySelectorAll('#insp-reports .insp-btn').forEach((b) => {
+            b.textContent = 'Activate';
+            b.classList.remove('insp-btn--active');
+          });
+          activateBtn.textContent = 'Active';
+          activateBtn.classList.add('insp-btn--active');
+          document.querySelectorAll('#insp-reports .insp-item').forEach((el) => el.classList.remove('active'));
+          item.classList.add('active');
+          if (reportPill && title) reportPill.textContent = title;
+          if (key && reportPreview && previews[key]) reportPreview.innerHTML = previews[key];
+        });
+      });
+
+      /* Context toggles */
+      document.querySelectorAll('#insp-context .insp-toggle').forEach((toggle) => {
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const on = toggle.classList.toggle('on');
+          toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+          const title = toggle.closest('.insp-item')?.querySelector('.insp-item__title');
+          if (title) title.style.fontWeight = on ? '700' : '600';
+        });
+      });
+
+      /* Memory / context item selection for preview */
+      document.querySelectorAll('#insp-context .insp-item, #insp-memories .insp-item').forEach((item) => {
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.insp-toggle')) return;
+          const pane = item.closest('.inspector__pane');
+          pane?.querySelectorAll('.insp-item').forEach((el) => el.classList.remove('active'));
+          item.classList.add('active');
+        });
+      });
+    })();
+  </script>
+
+</body>
+</html>

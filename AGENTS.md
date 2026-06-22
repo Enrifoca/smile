@@ -25,6 +25,7 @@ smile:D is a framework for building vertical AI agents in a desktop app.
 - Desktop services: `electron/services` — [electron/services/README.md](../electron/services/README.md) (connector transport, OAuth, MCP)
 - Connectors UI: `src/components/ConnectorsView.tsx`
 - Connector settings UI: `src/components/connectors/GenericConnectorSettingsView.tsx` + `ConnectorSettingsModules.tsx`
+- App shell (titlebar, tabs, sidebars): `src/components/shell/` — tab state: `src/shell/useWorkspaceTabs.ts`
 - Memory: `.smile/memories` in the selected workspace
 
 ## Coding Guidelines

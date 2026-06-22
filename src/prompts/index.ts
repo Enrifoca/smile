@@ -1,68 +1,40 @@
 import systemPrompt from './core/system.md?raw'
-import plannerPrompt from './core/planner.md?raw'
+
 import { UserProfile } from '../agent/types'
+
 import { buildCommunicationPreferencesPrompt } from '../agent/communicationPreferences'
-import { ConnectorScope } from '../connectors/registry'
-import { MemoryStore, formatMemoryForPrompt } from '../types/memory'
+
 import { renderPrompt, section } from './loader'
 
 function buildUserContext(profile: UserProfile | null): string {
   return buildCommunicationPreferencesPrompt(profile)
 }
 
-function buildWriteConfirmationMode(mode?: 'chat' | 'headless'): string {
-  if (mode === 'headless') {
-    return 'Automated mode: execute pre-approved work directly without asking for permission. Do not output approval requests. Call the tools and complete the task.'
-  }
+const WRITE_CONFIRMATION_MODE = [
+  'For write operations:',
+  '- In the same turn, write a short chat message listing exactly what you will create or change (titles, targets, counts), then call the write tool.',
+  '- Do not call a write tool in the same tool-call batch as read/search/list tools that could change whether the write is needed. Run the reads first, inspect their tool results, then decide.',
+  '- Keep that proposal concise; tool progress appears in the activity stream, not as repeated chat narration.',
+  '- Accept/Refuse buttons appear above the composer. Do not ask "Shall I proceed?" or similar questions — the user approves with those buttons or by typing changes in chat.',
+].join('\n')
 
-  return [
-    'For write operations:',
-    '- In the same turn, write a short chat message listing exactly what you will create or change (titles, targets, counts), then call the write tool.',
-    '- Accept/Refuse buttons appear above the composer. Do not ask "Shall I proceed?" — the user approves with those buttons or by typing changes in chat.',
-  ].join('\n')
+/** Foundation tier — core agent rules (stable, cache-friendly). */
+export function getSystemPromptFoundation(): string {
+  return renderPrompt(systemPrompt, {
+    writeConfirmationMode: WRITE_CONFIRMATION_MODE,
+  })
 }
 
-export function getSystemPrompt(
+/** Scope tier blocks — user profile and connector domain (semi-stable). */
+export function getSystemPromptScopeBlocks(
   profile: UserProfile | null,
   connectorSections: string[] = [],
-  memory?: MemoryStore | null,
-  mode?: 'chat' | 'headless',
-  monitoredScopes: ConnectorScope[] = [],
-): string {
+): string[] {
   const connectorContext = connectorSections.filter(Boolean).join('\n\n')
-  const memoryText = memory ? formatMemoryForPrompt(memory, monitoredScopes) : ''
-
-  return renderPrompt(systemPrompt, {
-    writeConfirmationMode: buildWriteConfirmationMode(mode),
-    userContext: section('User Context', buildUserContext(profile)),
-    connectorContext: section('Connector Context', connectorContext),
-    memoryContext: memoryText,
-  })
-}
-
-export function getPlannerSystemPrompt(connectorSections: string[] = []): string {
-  const connectorContext = connectorSections.filter(Boolean).join('\n\n')
-  return renderPrompt(plannerPrompt, {
-    connectorContext: section('Connector Environment', connectorContext),
-  })
-}
-
-export function buildPlannerMessages(
-  userMessage: string,
-  recentHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  connectorSections: string[] = []
-): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
-  const cleanHistory = (recentHistory || [])
-    .filter(message => !message.content.startsWith('[Tool:'))
-    .slice(-10)
-
-  return [
-    { role: 'system', content: getPlannerSystemPrompt(connectorSections) },
-    ...cleanHistory,
-    { role: 'user', content: userMessage },
-  ]
-}
-
-export function getActionConfirmationPrompt(actionType: string): string {
-  return `Action: ${actionType}`
+  const blocks: string[] = []
+  const userBlock = section('User Context', buildUserContext(profile))
+  if (userBlock.trim()) blocks.push(userBlock)
+  const connectorBlock = section('Connector Context', connectorContext)
+  if (connectorBlock.trim()) blocks.push(connectorBlock)
+  return blocks
 }

@@ -124,17 +124,10 @@ export default function MemoriesView() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="content-shell page-shell space-y-8">
-        <div>
-          <h1 className="text-xl font-medium text-neutral-950">Memory</h1>
-          <p className="text-sm text-neutral-500 mt-1">
-            User Memory is loaded before every response. Learned Notes are lower-priority hints.
-          </p>
-        </div>
-
         <section className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
           <div>
-            <h2 className="text-lg font-medium text-neutral-950">User Memory</h2>
-            <p className="text-sm text-neutral-500 mt-1">
+            <h2 className="ui-section-title">User Memory</h2>
+            <p className="ui-type-ui mt-1">
               Edit this Markdown to control what the agent should always remember and follow.
             </p>
           </div>
@@ -147,12 +140,12 @@ export default function MemoriesView() {
               setUserMemoryDraft(nextValue)
               scheduleSave(nextValue)
             }}
-            className="w-full min-h-[420px] px-4 py-3 border border-gray-300 rounded-xl text-sm leading-relaxed resize-y focus:ring-2 focus:ring-neutral-500 focus:border-transparent"
+            className="ui-field ui-field--textarea w-full min-h-[560px] leading-relaxed resize-y"
             spellCheck={false}
           />
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-neutral-500">
+            <p className="ui-text-meta">
               Saved to <code className="bg-gray-100 px-1 py-0.5 rounded">.smile/memories/user.md</code>
             </p>
             <StatusText
@@ -168,14 +161,14 @@ export default function MemoriesView() {
 
         <section className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
           <div>
-            <h2 className="text-lg font-medium text-neutral-950">Learned Notes</h2>
-            <p className="text-sm text-neutral-500 mt-1">
+            <h2 className="ui-section-title">Learned Notes</h2>
+            <p className="ui-type-ui mt-1">
               Notes the agent saved automatically. They never override User Memory.
             </p>
           </div>
 
           {learnedNotes.length === 0 ? (
-            <p className="text-gray-500 text-sm py-4 text-center">
+            <p className="ui-type-ui py-4 text-center">
               No learned notes yet.
             </p>
           ) : (
@@ -183,8 +176,8 @@ export default function MemoriesView() {
               {learnedNotes.map(entry => (
                 <div key={entry.id} className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 p-3">
                   <div className="flex-1">
-                    <p className="text-gray-700">{entry.content}</p>
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="ui-text-base text-gray-700">{entry.content}</p>
+                    <p className="ui-text-meta mt-1">
                       Learned {entry.updatedAt ? new Date(entry.updatedAt).toLocaleDateString() : ''}
                     </p>
                   </div>

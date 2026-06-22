@@ -345,7 +345,7 @@ export default function Sidebar({
 
           onClick={onToggleCollapsed}
 
-          className="sidebar-brand sidebar-brand--collapsed h-7 border-b-2 border-neutral-950 text-sm font-medium no-drag"
+          className="sidebar-brand sidebar-brand--collapsed h-7 border-b-2 border-neutral-950 ui-text-base no-drag"
 
           title="Expand sidebar"
 
@@ -367,7 +367,7 @@ export default function Sidebar({
 
         <div
 
-          className={`sidebar-brand h-7 border-b-2 border-neutral-950 px-2 text-sm font-medium flex items-center ${
+          className={`sidebar-brand h-7 border-b-2 border-neutral-950 px-2 ui-text-base flex items-center ${
 
             isMac ? '' : 'drag-region'
 
@@ -556,7 +556,7 @@ export default function Sidebar({
               })}
 
               {contexts.length === 0 && (
-                <p className="text-xs text-gray-400 px-3 py-2">No contexts yet</p>
+                <p className="ui-text-meta px-3 py-2">No contexts yet</p>
               )}
             </div>
           )}
@@ -616,7 +616,7 @@ export default function Sidebar({
 
               {chats.length === 0 && (
 
-                <p className="text-xs text-gray-400 px-3 py-2">No chat history yet</p>
+                <p className="ui-text-meta px-3 py-2">No chat history yet</p>
 
               )}
 

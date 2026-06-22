@@ -2,7 +2,7 @@ import { ToolEntry } from './types'
 
 const FILE_READ_TOOLS = new Set(['file_read', 'file_read_ocr', 'file_list', 'file_search'])
 const FILE_WRITE_TOOLS = new Set(['file_write', 'report_write', 'file_mkdir'])
-const MEMORY_TOOLS = new Set(['memory_read', 'memory_update', 'memory_delete', 'scratchpad_write', 'context_read', 'context_append', 'context_replace_section'])
+const MEMORY_TOOLS = new Set(['memory_read', 'memory_update', 'memory_delete', 'scratchpad_write', 'deep_thinking', 'context_read', 'context_append', 'context_replace_section'])
 
 function countConnectorOps(entries: ToolEntry[], kind: 'read' | 'write'): { count: number; name?: string } {
   const filtered = entries.filter(entry => {

@@ -4,7 +4,7 @@ The Electron layer owns desktop capabilities and IPC.
 
 ## Responsibilities
 
-- Window lifecycle.
+- Window lifecycle (custom icon via `appIcon.ts`). On Windows dev, Vite launches `bin/smile-dev.exe` (see `scripts/brand-electron.mjs` + `scripts/smile-electron.mjs`), not stock `node_modules/electron/dist/electron.exe`.
 - Secure preload bridge.
 - Local storage and encryption.
 - Workspace file access.

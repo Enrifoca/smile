@@ -101,9 +101,9 @@ export function ContextConnectorsPanel({ context, onSaved }: ContextConnectorsPa
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-neutral-500">
-        Folder: <code className="text-xs">{getContextFolderPath(draft)}</code>
-        {saving ? <span className="ml-2 text-xs text-neutral-400">Saving…</span> : null}
+      <p className="ui-type-ui">
+        Folder: <code className="ui-text-meta">{getContextFolderPath(draft)}</code>
+        {saving ? <span className="ml-2 ui-text-meta">Saving…</span> : null}
       </p>
 
       {loadingConnectors ? (
@@ -118,9 +118,9 @@ export function ContextConnectorsPanel({ context, onSaved }: ContextConnectorsPa
               <div key={connector.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium text-neutral-900">{connector.name}</p>
+                    <p className="ui-text-strong text-neutral-900">{connector.name}</p>
                     {!connector.contextSchema && entry.enabled ? (
-                      <p className="mt-0.5 text-xs text-neutral-400">No per-context settings for this connector.</p>
+                      <p className="mt-0.5 ui-text-meta">No per-context settings for this connector.</p>
                     ) : null}
                   </div>
                   <Toggle

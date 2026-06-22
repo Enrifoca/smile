@@ -5,12 +5,7 @@ export interface ChatEmptyStateProps {
   onSuggestionClick?: (suggestion: string) => void
 }
 
-const DEFAULT_SUGGESTIONS = [
-  'Show me open records',
-  'Summarize this workspace',
-  'Generate a status report',
-  'List connected scopes',
-]
+const DEFAULT_SUGGESTIONS: string[] = []
 
 export function ChatEmptyState({
   title = 'How can I help you today?',

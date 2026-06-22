@@ -1,5 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'path'
+import { applyAppIcon, loadAppIcon } from './appIcon'
+import { applyAppIcon, loadAppIcon } from './appIcon'
 import { EncryptionService } from './services/encryption'
 import { StorageService } from './services/storage'
 import { FileService } from './services/files'
@@ -196,12 +198,15 @@ app.on('second-instance', () => {
 })
 
 function createWindow() {
+  const appIcon = loadAppIcon()
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     show: false,
+    ...(appIcon ? { icon: appIcon } : {}),
     // Frameless on macOS so button Y aligns with our .mac-titlebar (hiddenInset uses a taller system inset).
     ...(process.platform === 'darwin'
       ? {
@@ -246,6 +251,7 @@ function createWindow() {
   })
 
   getUpdateService().setMainWindow(mainWindow)
+  applyAppIcon(mainWindow)
 }
 
 // Initialize services
@@ -258,6 +264,7 @@ async function initializeServices() {
   const workspace = await storageService.getWorkspacePath()
   if (workspace) {
     fileService = new FileService(workspace, getConfiguredOcrService)
+    await fileService.ensureWorkspaceFolders()
     // Initialize memory service with workspace
     memoryService = getMemoryService()
     memoryService.setWorkspace(workspace)
@@ -484,6 +491,7 @@ ipcMain.handle('file:selectWorkspace', async () => {
     const workspacePath = result.filePaths[0]
     await storageService.setWorkspacePath(workspacePath)
     fileService = new FileService(workspacePath, getConfiguredOcrService)
+    await fileService.ensureWorkspaceFolders()
     memoryService = getMemoryService()
     memoryService.setWorkspace(workspacePath)
     getSourceMemoryService().setWorkspace(workspacePath)
@@ -577,22 +585,15 @@ ipcMain.handle('ai:configure', async (_, config: AIConfig) => {
   return { success: true }
 })
 
-// Reasoning model configuration (replaces the old "planner" concept)
+// Reasoning model configuration
 ipcMain.handle('ai:configureReasoning', async (_, config: AIConfig) => {
-  reasoningAiService = new AIService(withReasoningDefault(config))
-  return { success: true }
-})
-
-// Legacy alias — kept so old plannerConfig stored values still work on first load
-ipcMain.handle('ai:configurePlanner', async (_, config: AIConfig) => {
   reasoningAiService = new AIService(withReasoningDefault(config))
   return { success: true }
 })
 
 ipcMain.handle('ai:chatReasoning', async (_, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => {
   if (!reasoningAiService) {
-    // Auto-load from storage on first use
-    const cfgStr = storageService.getSecure('reasoningConfig') || storageService.getSecure('plannerConfig')
+    const cfgStr = storageService.getSecure('reasoningConfig')
     if (cfgStr) {
       try { reasoningAiService = new AIService(withReasoningDefault(JSON.parse(cfgStr) as AIConfig)) }
       catch { return { success: false, error: 'Reasoning model not configured' } }
@@ -609,20 +610,6 @@ ipcMain.handle('ai:chatReasoning', async (_, messages: Array<{ role: 'system' | 
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Reasoning model request failed'
     console.error('[AI:chatReasoning] Error:', msg)
-    return { success: false, error: msg }
-  }
-})
-
-// Legacy — kept for backward compatibility
-ipcMain.handle('ai:plan', async (_, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => {
-  if (!reasoningAiService) {
-    return { success: false, error: 'Reasoning model not configured' }
-  }
-  try {
-    const response = await reasoningAiService.chat(messages)
-    return { success: true, plan: response.content }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Request failed'
     return { success: false, error: msg }
   }
 })
@@ -688,7 +675,7 @@ ipcMain.on('ai:abortStream', () => {
 // Streaming version for the reasoning model
 ipcMain.on('ai:reasoning:stream', async (event, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => {
   if (!reasoningAiService) {
-    const cfgStr = storageService.getSecure('reasoningConfig') || storageService.getSecure('plannerConfig')
+    const cfgStr = storageService.getSecure('reasoningConfig')
     if (cfgStr) {
       try { reasoningAiService = new AIService(withReasoningDefault(JSON.parse(cfgStr) as AIConfig)) }
       catch { event.sender.send('ai:reasoning:stream:error', 'Reasoning model not configured'); return }
@@ -1194,6 +1181,8 @@ ipcMain.handle('updates:install', () => {
 
 // App lifecycle
 app.whenReady().then(async () => {
+  app.setName('smile:D')
+  applyAppIcon()
   await initializeServices()
   void autoConnectAtlassianMcpOnStartup()
   createWindow()

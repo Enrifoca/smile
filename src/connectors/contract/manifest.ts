@@ -123,6 +123,11 @@ export interface ConnectorManifest {
    * `host.context.get()` and the connector's prompt section.
    */
   contextSchema?: JSONSchema
+  /**
+   * High-level capability tokens for agent prompt injection when this connector is enabled
+   * (e.g. `["email"]`, `["web-search"]`). See `AGENT_CAPABILITY_LABELS` in `src/agent/capabilities.ts`.
+   */
+  agentCapabilities?: string[]
   tools: ToolManifest[]
 }
 

@@ -48,7 +48,7 @@ Dismiss is per artifact message id, not per file path — revising the same path
 | UI | Report card + composer pill + tool result copy for the model | No report UI (unless path is under `.smile/reports/` — then card/pill still appear as a fallback) |
 | When revising | Same path + `title` for the card | Same path only |
 
-Prefer **`report_write`** whenever the user should see a report in chat. If the model uses `file_write` under `.smile/reports/`, the UI still activates so features are not lost.
+Prefer **`report_write`** only for explicit reports, substantial plans/specs, batch lists, or lengthy/tabular structured documents. If the model uses `file_write` under `.smile/reports/`, the UI still activates so features are not lost.
 
 ## Customization
 
