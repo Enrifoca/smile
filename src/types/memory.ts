@@ -97,7 +97,7 @@ export function formatMemoryForPrompt(memory: MemoryStore, monitoredScopes: Conn
   const lines: string[] = [
     '## smile:D Memory (Always Loaded)',
     '',
-    'Memory is already loaded for this response. Do not call memory_read just to check it.',
+    'Memory is already loaded for this response.',
     'Priority: current user message > User Memory > connector context > Learned Notes > defaults.',
     'If User Memory conflicts with Learned Notes, follow User Memory.',
     '',
@@ -126,7 +126,7 @@ export function formatMemoryForPrompt(memory: MemoryStore, monitoredScopes: Conn
     }
     if (learned.omittedCount > 0 || learned.truncatedRecent) {
       lines.push('')
-      lines.push(`_${learned.omittedCount > 0 ? `${learned.omittedCount} older note(s)` : 'Additional notes'} available via memory_read._`)
+      lines.push(`_${learned.omittedCount > 0 ? `${learned.omittedCount} older note(s)` : 'Additional notes'} available on disk._`)
     }
     lines.push('')
   }

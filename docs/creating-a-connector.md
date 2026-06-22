@@ -91,6 +91,7 @@ There are no built-in connector packages inside the agent loop. Workspace connec
 | `ui` | object | no | Labels for catalog / connected states |
 | `catalog` | object | no | `icon` path (relative), optional `tagline` |
 | `contextSchema` | JSON Schema | no | Per-project scope config; exposed via `host.context.get()` |
+| `agentCapabilities` | string[] | no | High-level capability tokens for agent prompt injection (e.g. `["email"]`, `["web-search"]`). Labels in `src/agent/capabilities.ts` |
 | `tools` | array | yes | At least one tool |
 
 ### Tool entry (`tools[]`)
@@ -107,6 +108,16 @@ There are no built-in connector packages inside the agent loop. Workspace connec
 | `preview` | string | no | One-line action preview in chat |
 
 **Read vs write:** `connector-read` tools run without confirmation. `connector-write` and `connector-attachment` tools with `requiresConfirmation: true` show an approval card before execution.
+
+### agentCapabilities
+
+Optional tokens that describe what the connector enables in plain language for the agent prompt (in addition to listing individual tools). Example:
+
+```json
+"agentCapabilities": ["email"]
+```
+
+Known tokens are mapped to readable labels in `AGENT_CAPABILITY_LABELS` (`src/agent/capabilities.ts`). Use a custom string for novel domains; it is shown as-is. Declare tokens that match what your tools actually do — the runtime still lists every tool name in **Enabled capabilities**.
 
 ### permissions
 
@@ -218,6 +229,7 @@ Full TypeScript definitions: [`src/connectors/contract/host.ts`](../src/connecto
 Markdown section merged into the agent system prompt when the connector is enabled. Focus on:
 
 - When to use each tool (read before write).
+- Which read/search/list checks are required before create/update tools when external state can make the write unnecessary.
 - Required arguments and sane defaults.
 - Domain heuristics the model cannot infer from JSON Schema alone.
 - Error recovery (e.g. "if 401, ask user to reconnect in Connectors").
@@ -376,7 +388,7 @@ See [electron/services/README.md](../electron/services/README.md).
 - [ ] Every `permissions.*` entry is used; nothing extra declared
 - [ ] Read tools are `connector-read` with `requiresConfirmation: false`
 - [ ] Write tools have `confirmation` / `preview` templates
-- [ ] `prompt.md` explains when/how to call each tool
+- [ ] `prompt.md` explains when/how to call each tool, including required read-before-write checks
 - [ ] `npm run validate:connector` passes
 - [ ] `npm run test:connector` passes for at least one read tool
 - [ ] Secrets never appear in logs, prompts, or error messages returned to the model

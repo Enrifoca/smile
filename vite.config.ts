@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+const rootDir = fileURLToPath(new URL('.', import.meta.url))
+const brandedElectron =
+  process.platform === 'win32' ? path.join(rootDir, 'scripts', 'smile-electron.mjs') : undefined
 
 export default defineConfig({
   plugins: [
@@ -28,7 +33,7 @@ export default defineConfig({
           if (process.electronApp) {
             reload()
           } else {
-            startup(['.', '--no-sandbox'], spawnOptions)
+            startup(['.', '--no-sandbox'], spawnOptions, brandedElectron)
           }
         },
         vite: {
@@ -50,8 +55,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@electron': path.resolve(__dirname, './electron')
+      '@': path.resolve(rootDir, './src'),
+      '@electron': path.resolve(rootDir, './electron')
     }
   }
 })

@@ -4,6 +4,8 @@ Design rules for smile:D. **Authoritative for product and connector UI.** When i
 
 Implementation lives in `src/theme/tokens.css`, `src/styles/globals.css` (`.ui-*`), and `src/components/ui/`. Those files should reflect these rules; where they diverge, treat this doc as the target and fix the code in a follow-up.
 
+Shell layout code: `src/components/shell/` — see [shell README](../src/components/shell/README.md).
+
 ---
 
 ## Principles
@@ -11,9 +13,67 @@ Implementation lives in `src/theme/tokens.css`, `src/styles/globals.css` (`.ui-*
 - **Black and white first.** The app is white-label; avoid brand colors beyond the palette below.
 - **Grey for structure and secondary emphasis** — borders, muted text, informational surfaces.
 - **Red only for danger** — errors, destructive actions, danger zones. Not for decoration.
-- **Green only for “active” chips** — see [Chips](#chips). Not for general labels or categories.
+- **Green only for “active” chips and catalog dots** — see [Chips](#chips) and [Active indicators](#active-indicators). Inspector list dots use **black**.
 - **No emoji.** Use SVG icons only (inline or small components).
 - **Icons:** simple stroke icons, neutral grey or inherit text color; no filled emoji-style glyphs.
+
+---
+
+## Desktop shell layout
+
+```
+┌ titlebar: smile:D · Context Memories Connectors Settings · window controls ─┐
+│ chat history │ workspace tab bar (+) │ inspector (collapsible)                │
+│   sidebar    │ toolbar breadcrumb    │                                      │
+│              │ page content          │                                      │
+├──────────────┴───────────────────────┴──────────────────────────────────────┤
+│ status bar (models · workspace path)                                          │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Area | Component | Notes |
+| --- | --- | --- |
+| Titlebar | `AppTitleBar` | Section nav only — **no Chat** (history is always in the left sidebar) |
+| Chat history | `ChatHistorySidebar` | Fixed left column; collapses to a narrow rail |
+| Tabs | `WorkspaceTabBar` | One tab per open chat / context / settings view |
+| Breadcrumb | `WorkspaceToolbar` | Page title row under tabs (e.g. `Chat / …`, `Settings`) |
+| Content | `WorkspaceContent` | Routes to `ChatView`, `ContextHomeView`, `SettingsView`, etc. |
+| Inspector | `InspectorPanel` | Right column: **Reports** + **Context** tabs |
+| Footer | `StatusBar` | Model names + **workspace folder path** (path is not in the titlebar) |
+
+Panel toggles use **`PanelCollapseIcon`** (layout sidebar icons, not chevrons):
+
+- **Chat History:** toggle on the **right** of the panel header, flush with the tab row.
+- **Inspector:** toggle on the **right** of the Inspector header.
+- When the chat sidebar is **collapsed**, the header has **no bottom border** (icon must not look “boxed in”).
+
+Tab state: `src/shell/useWorkspaceTabs.ts`.
+
+### Workspace tabs
+
+- Every tab is **fixed width**: `--workspace-tab-width` (`8.4rem`, 20% narrower than the initial shell) — short and long titles share the same tab size; overflow ellipsizes.
+- Tab label + **×** are separate hit targets (`ui-workspace-tab__select` / `ui-workspace-tab__close`).
+- Closing the last tab opens a new chat automatically.
+
+---
+
+## Border radius
+
+Corners stay **sharp** — no pill cards or heavy rounding.
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--radius-control` | `0.25rem` (4px) | `Panel`, Settings sections (`section.rounded-xl` in page shell), buttons, inputs |
+
+Legacy Tailwind `rounded-xl` on Settings sections is normalized to `--radius-control` via `.content-shell.page-shell section.rounded-xl` in `globals.css`. Prefer `Panel` / `ui-panel--*` for new UI.
+
+---
+
+## App icon
+
+- Source: `public/icon.svg` — **subtle rounded corners** (`rx="48"` on 512px canvas, ~9%).
+- Regenerate platform assets after SVG changes: `npm run icons` (also re-runs `brand-electron` on Windows).
+- Dev taskbar on Windows uses `bin/smile-dev.exe` with embedded `public/icon.ico`.
 
 ---
 
@@ -23,78 +83,125 @@ Defined in `src/theme/tokens.css`.
 
 | Role | Token / value | Use |
 | --- | --- | --- |
-| Primary (CTA) | `--color-primary` (`#000000`) | Primary buttons, toggles on, user chat bubble |
+| Primary (CTA) | `--color-primary` (`#000000`) | Primary buttons, toggles on, send actions |
 | Primary hover | `--color-primary-hover` | Hover on **primary** buttons only |
-| On primary | `--color-on-primary` (`#ffffff`) | Text on black buttons |
+| On primary | `--color-on-primary` (`#ffffff`) | Text on primary buttons |
+| Ink / strong text | `--color-ink` (`#0a0a0a`) | Headings, emphasis borders, brand wordmark |
+| User bubble | `--color-user-bubble` (`#f3f4f6`) | User chat bubble background |
 | Surface | `--color-surface` (`#ffffff`) | Page background, cards |
-| Strong text / borders | `--color-border-strong` (`#0a0a0a`) | Headings, emphasis panel borders, outline buttons |
-| Muted surface | `--color-muted-surface` (`#f3f4f6`) | Snippets, secondary button fill |
-| Muted border | `--color-muted-border` (`#d1d5db`) | Snippet borders, soft dividers |
-| Muted text | `--color-muted-text` (`#4b5563`) | Helper copy, descriptions |
-| Meta text | `--color-meta-text` (`#9ca3af`) | Tool summaries, chat date groups, thinking headers |
-| Hover surface | `--color-hover-surface` (`#f5f5f5`) | **Single** light grey hover fill app-wide |
+| Surface alt | `--color-surface-alt` (`#f6f6f6`) | Tab bar strip, subtle chrome |
+| Border | `--color-border` (`#e5e5e5`) | Standard borders |
+| Muted text | `--color-muted-text` (`#4b5563`) | Helper copy, panel headers, descriptions |
+| Meta text | `--color-meta-text` (`#9ca3af`) | Date groups, paths, inspector hints |
+| Hover surface | `--color-hover-surface` (`#ececec`) | **Single** light grey hover fill app-wide |
+| Chrome control hover | `--color-chrome-control-hover` (`#d1d5db`) | Tab **×** and **+** button hover |
 | Success (active chip) | `--color-success` (`#16a34a`) | Chip border/text when **active** |
 | Error / danger | `--color-error` (`#dc2626`) | Alerts, destructive actions, danger panels |
+| Structural emphasis | `--color-accent` (= `--color-primary`) | Tab underline, focus ring |
+| Selected row fill | `--color-accent-soft` (= hover surface) | Chat history / inspector row selection |
 
-**Do not** introduce extra accent colors (blue links as buttons, purple badges, etc.) without updating this doc.
+The app is **black and white** with grey structure. Do not introduce a second brand hue.
+
+---
+
+## Typography
+
+**One font family app-wide:** `--font-app` (system UI stack).
+
+**Three sizes:**
+
+| Token | px | Use |
+| --- | --- | --- |
+| `--font-size-meta` | 11 | Uppercase group labels, status bar meta, paths |
+| `--font-size-base` | 13 | Body, lists, hints, inputs, chat, toolbar breadcrumb, panel headers |
+| `--font-size-heading` | 15 | Empty chat title (“How can I help you today?”) |
+
+**Hierarchy = weight + color, not extra font families.**
+
+| Class / element | Use |
+| --- | --- |
+| `ui-workspace-toolbar__strong` | Current segment of breadcrumb (base size, semibold) |
+| `ui-chat-empty-title` | New-chat heading (heading size) |
+| `ui-chat-history-sidebar__title`, `ui-inspector__title` | Panel headers (base size, muted text) |
+| `ui-page-subtitle` | Page description under toolbar (replaces removed page `h1`) |
+| `ui-type-hint` | Inspector / sidebar helper lines (base size) |
+| `ui-text-meta` | Secondary labels (meta color) |
+
+Do not use ad-hoc Tailwind `text-xs` / `text-sm` / `text-xl` in shell components — use tokens and `.ui-*` classes.
+
+**Chrome row heights** (aligned across columns):
+
+- `--shell-chrome-row-height` (36px): chat history head · tab bar · inspector head
+- `--shell-chrome-subrow-height` (32px): workspace toolbar · inspector sub-tabs
 
 ---
 
 ## Hover
 
-One light grey for **all** interactive hover backgrounds — `--color-hover-surface` (`#f5f5f5`, Tailwind `neutral-100`).
+One light grey for interactive hover backgrounds — `--color-hover-surface` (`#ececec`).
 
 | Applies to | Examples |
 | --- | --- |
-| Sidebar | `sidebar-item`, `ui-sidebar-subitem`, context rows |
-| Buttons | `Button variant="ghost"`, legacy `.btn-ghost` |
-| Lists & cards | Chat suggestions, artifact headers, download menu items, connector tiles |
-| Composer | Active report pill, scope chips |
-| Chrome | Window controls (`.ui-hover-surface`), sidebar collapse |
+| Titlebar | `ui-shell-titlebar__nav-item` |
+| Chat history | `ui-sidebar-subitem`, New chat row |
+| Tabs | Tab row background (not × / + controls) |
+| Tab **×** and **+** | `ui-chrome-icon-btn` → `--color-chrome-control-hover` |
+| Inspector | `ui-inspector-item`, tab buttons |
+| Buttons | `Button variant="ghost"`, secondary hover |
+| Composer | Active report pill |
 
 Rules:
 
 - Use `background-color: var(--color-hover-surface)` on `:hover` for interactive rows and controls.
-- **Persistent open row:** sidebar chat/context sub-items use `ui-sidebar-subitem--current` when that page is open (same fill as hover). This is the only allowed non-hover use of the hover surface token.
+- **Current chat row:** `ui-sidebar-subitem--current` (same fill as hover, **no bold**).
 - Utility class: `.ui-hover-surface` for one-off targets.
-
-**Do not use** `neutral-100`, `gray-100`, `gray-200`, or `gray-50` directly for hover — use the token.
-
----
-
-## Meta text
-
-Secondary labels that annotate content, not body copy.
-
-| Token | Value | Use |
-| --- | --- | --- |
-| `--color-meta-text` | `#9ca3af` (`gray-400`) | Same color everywhere for this role |
-
-Examples:
-
-- Chat History groups: **Today**, **Yesterday**, **This Week**, **Older** → `ui-sidebar-subitem-group-label`
-- Tool summary rows: “Explored 2 files · 1 connector read” → `ui-chat-tool-summary`, `ui-text-meta`
-- Thinking block headers and collapsed tool detail lines
-
-Class: **`ui-text-meta`** or component-specific wrappers that set `color: var(--color-meta-text)`.
+- **Do not** use raw `gray-100` / `neutral-100` for hover — use the token.
 
 ---
 
-## Sidebar lists
+## Chat history sidebar
 
-### Chat History
+- **New chat:** text row with `+` at top of scroll area (not a bordered button).
+- **History rows:** `ui-sidebar-subitem` — ellipsis on long titles; date groups via `ui-sidebar-subitem-group-label`.
+- **Collapse:** narrow rail; toggle aligned right; **no** header bottom border when collapsed.
 
-- Sub-items: `ui-sidebar-subitem` — hover uses `--color-hover-surface`.
-- **Open chat:** the chat you are viewing gets `ui-sidebar-subitem--current` (persistent hover background). **No bold.**
-- Accordion chevron on the **Context** / **Chat History** header: same icon as sidebar (`ChevronIcon`), aligned **right** (`flex-1` on label).
-- Date groups: `ui-sidebar-subitem-group-label` (meta text color).
+Main section navigation (Context, Memories, Connectors, Settings) lives in the **titlebar**, not in this sidebar.
+
+---
+
+## Inspector
+
+Two tabs: **Reports** and **Context**.
+
+### Reports
+
+- Lists `.md` files under `.smile/reports/` (recursive). Refreshes when the tab is shown or the window regains focus.
+- **Click row** → opens `MarkdownArtifactModal` (full report reader).
+- **Toggle** → pins report in chat composer (`ActiveReportPill`); black dot + bold title when pinned.
+- Tab label shows black dot when any report is pinned.
 
 ### Context
 
-- Same padding as chat history: `ui-sidebar-subitem-group`, `px-3 py-1.5`.
-- Row hover covers label **and** toggle (full row).
-- **Open page:** **New context** or the context detail you are viewing gets `ui-sidebar-subitem--current` (persistent hover background), same as chat history. Context rows must not use `bg-transparent` on the row wrapper or it hides this state.
-- **Bold (`font-semibold`) only when the context toggle is ON** — `ui-sidebar-context-name--active`. Toggle off → normal weight even if that page is open.
+- Read-only list of workspace contexts; activation toggles live on **Context** page (`ContextHomeView`).
+- Black dot + bold name when that context is the active one.
+- Tab label shows black dot when a valid active context exists.
+
+### Active indicators
+
+| Location | Class | Color |
+| --- | --- | --- |
+| Inspector row / tab (report or context) | `ui-active-dot` | Black (`neutral-950`) |
+| Connectors catalog tile (configured) | `connector-card-active-dot` | Green |
+| Legacy sidebar Context menu (if used) | `ui-context-active-dot` | Green |
+
+---
+
+## Page content
+
+- **No duplicate page `h1`** — the toolbar breadcrumb is the page title.
+- **Subtitle** at top of page body where needed (`ui-page-subtitle`): Settings, Memory, Context home, etc.
+- Page shell: `ui-page-frame` + `content-shell page-shell`.
+- Settings sections: white cards with `border border-gray-200`; radius normalized to `--radius-control` (see [Border radius](#border-radius)).
 
 ---
 
@@ -102,17 +209,13 @@ Class: **`ui-text-meta`** or component-specific wrappers that set `color: var(--
 
 | Variant | When | Implementation |
 | --- | --- | --- |
-| **Primary** | Main action on a section (Save, Connect, Send, Accept) | `Button variant="primary"` — black background, white text |
-| **Secondary** | Cancel, Back, low-commit actions | `Button variant="secondary"` — white fill, grey border; hover → `--color-hover-surface` |
-| **Outline** | Alternative emphasis without filling (e.g. Remove credentials) | `Button variant="outline"` — black border; hover fills black |
-| **Ghost** | Tertiary / icon-adjacent actions | `Button variant="ghost"` — transparent; hover → `--color-hover-surface` |
-| **Danger** | Irreversible or destructive confirm (Delete connector, danger zone) | `Button variant="danger"` — red; **only** in alert/danger contexts |
+| **Primary** | Main action (Save, Connect, Send, Accept) | `Button variant="primary"` |
+| **Secondary** | Cancel, Back | `Button variant="secondary"` |
+| **Outline** | Alternative emphasis | `Button variant="outline"` |
+| **Ghost** | Tertiary actions | `Button variant="ghost"` |
+| **Danger** | Destructive confirm | `Button variant="danger"` |
 
-Rules:
-
-- One primary CTA per logical block (`ActionRow` or module footer).
-- Never use red for a primary CTA unless the action is explicitly destructive.
-- Never use green on buttons.
+One primary CTA per logical block. Never use red for a non-destructive primary CTA. Never use green on buttons.
 
 ---
 
@@ -120,163 +223,54 @@ Rules:
 
 **Purpose:** show that something is **on / active / connected** — nothing else.
 
-Examples:
-
-- Reasoning model **Active**
-- Connector **Connected** / configured and working
-
 | State | Appearance |
 | --- | --- |
-| **Active** | Green text + green border (`Badge tone="success"`, e.g. label “Active”, “Connected”) |
-| **Inactive** | **No chip.** Do not show a grey “Inactive” chip. Absence = off. |
+| **Active** | Green text + green border (`Badge tone="success"`) |
+| **Inactive** | **No chip.** Absence = off. |
 
-**Do not use chips for:**
-
-- Integration type labels (REST, MCP, …)
-- Version numbers, tags, or categories
-- “Configured” vs “Not configured” when inactive (use section copy or empty state instead)
-
-Component: `Badge` with `tone="success"` only for active states. Do not use `tone="warning"` or `tone="danger"` for chips — those are for alerts, not status chips.
+Do not use chips for integration type labels, versions, or categories.
 
 ---
 
 ## Snippet informativo (developer tips)
 
-Grey box for **optional guidance from the product or connector author** — not errors, not primary content.
+Grey box for optional guidance — `Callout` / `.ui-callout`.
 
-Examples:
-
-- “Best picks” under Reasoning model
-- “Provider notes” under OCR model
-- Connector setup hints in settings
-
-| Property | Value |
-| --- | --- |
-| Background | `--color-muted-surface` |
-| Border | 1px `--color-muted-border` |
-| Text | `--color-muted-text`, typically `text-xs` or `text-sm` |
-| Radius | `0.5rem` |
-
-Component: **`Callout`** (alias CSS `.ui-callout` / legacy `.snippet-info`).
-
-Rules:
-
-- Place **below** the section title/description, **above** the form fields.
-- Keep copy short; **only** the lead-in label is bold — e.g. `<strong>Best pick:</strong>` or `<strong>Best picks:</strong>` via `ModelRecommendationText`. No other bold in callouts.
-- Do not use callouts for validation errors — use **`Alert`**.
-
----
-
-## Content boxes
-
-Grouped settings and forms (AI provider blocks, model sections, connector credential panels) use a **content box**: white surface, **grey border**.
-
-Reference pattern (Settings → AI / Reasoning / OCR):
-
-```text
-section: white bg, rounded-xl, shadow-sm, border border-gray-200, padding p-6
-inner emphasis (optional): Panel variant="emphasis" — 2px strong border, rounded-2xl
-```
-
-Preferred components:
-
-- **`Panel`** `variant="soft"` — light grey border (`#e5e7eb`), subtle shadow (catalog cards, outer sections)
-- **`PanelBody`** `variant="emphasis"` — **2px black border** for nested forms inside a module (connector API connection)
-- **`ModuleSection`** — title + description + content stack (Connectors settings)
-
-Rules:
-
-- All new settings modules must use bordered boxes; no borderless floating forms on white pages.
-- Page shell: `content-shell page-shell` for max-width and horizontal padding.
-- Danger zone: `Panel variant="danger"` — red-tinted border/background, only for destructive blocks.
+- Background: `--color-muted-surface`; border: `--color-border`
+- Below section title, above form fields
+- Errors use **`Alert`**, not callouts
 
 ---
 
 ## Chat composer
 
-### Input shell
+- Default input: white shell, grey border.
+- **Active report pinned:** grey composer background (`ui-chat-composer--with-report`); pill above input — white, black border, hover surface.
+- **Write approval:** `WriteActionConfirmModule` — Accept (primary) / Refuse (secondary).
+- **Empty chat:** `ChatEmptyState` — heading only; **no suggestion chips** by default.
 
-Default: white background, grey border (`ui-chat-input-shell`).
-
-When an **active report** is pinned (user is continuing work on a report):
-
-- The **composer area** (input shell or its wrapper) uses **grey background** (`--color-muted-surface` or `bg-gray-100`) to signal report context.
-- The active report pill sits **above** the input (see `ActiveReportPill`).
-
-### Active report pill
-
-- White background, **black border** (`border-neutral-950`), compact width (`w-fit`).
-- Document icon + title + path on one line; dismiss with ×.
-- Hover: `--color-hover-surface` (not green).
-
-When a report is active, the composer input shell also uses a grey background (`ui-chat-composer--with-report`).
-
-### Attachments
-
-- Grey pill (`ui-chat-attachment`, `bg-gray-100`) for files attached to the message.
-
-### Write approval
-
-- `WriteActionConfirmModule` above composer: Accept (primary black) / Refuse (secondary grey). No emoji.
+Range sliders (`RangeSlider` in Communication preferences): **mouse wheel scrolls the page**, not the slider. Change value via click, drag, or keyboard.
 
 ---
 
-## Alerts and errors
+## Alerts and confirm dialogs
 
-| Type | Component | Color |
-| --- | --- | --- |
-| Inline error | `Alert` | Red border/background (`ui-alert--error`) |
-| Blocking banner | `ChatBanner` error variant | Red tint |
-| Success feedback after save | `StatusText` / `ActionRow` | Green text (`--color-success`) — **feedback text, not a chip** |
-
-Red is **only** for errors, warnings, and danger zones — not for navigation or highlights.
+- Errors: `Alert`, `ChatBanner` error variant — red only for danger.
+- Success after save: `StatusText` green text (not a chip).
+- Destructive actions: `ConfirmModal` with Cancel + danger confirm.
 
 ---
 
-## Confirm dialogs
+## Connector and catalog UI
 
-Destructive or irreversible actions use **`ConfirmModal`** — not `window.confirm`.
-
-| Element | Rule |
-| --- | --- |
-| Backdrop | Dimmed overlay; click outside cancels |
-| Title | Short, specific (`Remove connector`) |
-| Body | Plain sentence explaining impact |
-| Actions | Cancel (`secondary`) left, confirm (`danger` for destructive) right |
-| Button size | `md` in modal footer |
-
-Examples: remove connector, trim chat history, clear data.
-
----
-
-## Typography and layout
-
-- **Page title:** `ui-page-title` — `text-xl`, medium weight, near-black.
-- **Section title:** `ui-section-title` — `text-lg`, medium.
-- **Description:** `ui-section-description` — `text-sm`, muted grey.
-- **Body:** system font stack (`--font-app`).
-- **Max content width:** `--content-max-width` (64rem) via `content-shell`.
-
----
-
-## Icons
-
-- SVG only, `stroke="currentColor"`, consistent 1.5–2 stroke width.
-- Size: `w-4 h-4` inline with text, `w-5 h-5` in buttons/sidebar.
-- No emoji, no icon fonts, no colored decorative icons except red for error/dismiss when appropriate.
-
----
-
-## Connector and catalog UI (preview)
-
-When building Connectors catalog/settings (Install flow, Hermes-style):
-
-- **Available / Installed / Configured** — use typography and layout, not rainbow badges.
-- **Active connector** — green dot (`connector-card-active-dot`) on catalog tiles when configured; green chip in settings when connected per [Chips](#chips).
-- **Active context** — green dot (`ui-context-active-dot`) beside the sidebar **Context** label when any context is toggled on. Bold name in submenu **only** when that context’s toggle is on.
-- **Install** — primary black button; **Remove** — danger in a danger zone panel (`Panel variant="danger"`), left-aligned `Button size="sm" w-fit`.
-- **Catalog tile** — `connector-card`: icon, name, type badge with balanced padding (`connector-card-type-badge` pinned to bottom); green active dot top-right when configured.
-- **Connector detail** — shared `ConnectorPageHeader` (ghost back + title); each block in `Panel variant="soft"` like Settings sections.
+- Catalog tiles: `connector-card` — `1px` border, `--radius-control`, base typography; hover `--color-hover-surface`.
+- Green dot top-right when configured (`connector-card-active-dot`).
+- Detail/settings: `ui-page-frame` + `Panel variant="soft"` (sharp corners via `--radius-control`).
+- Tool rows in settings: `connector-tool-item`.
+- Inline paths/commands: `ui-inline-code`.
+- Catalog search: `Input` with `ui-field--emphasis` (same `1px` border and `--radius-control` as panels).
+- Connector detail: `ConnectorPageHeader` + connection modules in `Panel`.
+- Install: primary black; Remove: danger in danger zone panel.
 
 ---
 
@@ -284,27 +278,28 @@ When building Connectors catalog/settings (Install flow, Hermes-style):
 
 | Guideline | Component / class |
 | --- | --- |
+| Shell layout | `src/components/shell/AppShell.tsx` |
+| Titlebar nav | `AppTitleBar` |
+| Chat history | `ChatHistorySidebar`, `ui-sidebar-subitem` |
+| Workspace tabs | `WorkspaceTabBar`, `WorkspaceToolbar` |
+| Inspector | `InspectorPanel`, `ui-inspector-item` |
+| Panel toggle icons | `PanelCollapseIcon` |
 | Primary CTA | `Button variant="primary"` |
-| Secondary CTA | `Button variant="secondary"` |
-| Danger | `Button variant="danger"`, `Panel variant="danger"` |
 | Active chip | `Badge tone="success"` |
-| Active connector (catalog tile) | `connector-card-active-dot` |
-| Active context indicator | `ui-context-active-dot` on sidebar Context label |
-| Context name active (toggle on) | `ui-sidebar-context-name--active` |
+| Inspector / pinned dot | `ui-active-dot` |
+| Catalog configured dot | `connector-card-active-dot` |
 | Snippet | `Callout` |
-| Content box | `Panel`, `PanelBody`, `ModuleSection`, Settings `section` with `border border-gray-200` |
-| Form fields | `Field`, `Input`, `Select`, `Textarea` |
-| Save + feedback | `ActionRow` + `useActionFeedback` |
-| Page layout | `content-shell`, `page-shell` |
-| Hover (global) | `--color-hover-surface`, `.ui-hover-surface` |
-| Meta labels | `--color-meta-text`, `ui-text-meta`, `ui-sidebar-subitem-group-label` |
-| Sidebar sub-item | `ui-sidebar-subitem` |
-| Sidebar open row (chat/context page) | `ui-sidebar-subitem--current` |
-| Sidebar sub-menu indent | `ui-sidebar-subitem-group` |
-| Settings `<select>` chevron | `Select` + `ChevronIcon` (`ui-field-select-chevron`, smaller, right-padded) |
-| Field / button height | `--control-height` on `ui-field`, `ui-btn--sm` |
+| Content box | `Panel`, Settings `section` with border |
+| Tab width | `--workspace-tab-width`, `.ui-workspace-tab` |
+| Corner radius | `--radius-control`, `.ui-panel--*` |
+| App icon | `public/icon.svg`, `npm run icons` |
+| Page layout | `content-shell`, `page-shell`, `ui-page-subtitle` |
+| Hover | `--color-hover-surface`, `.ui-hover-surface` |
+| Meta labels | `ui-text-meta`, `ui-sidebar-subitem-group-label` |
+| Report modal | `MarkdownArtifactModal` |
+| Tokens | `src/theme/tokens.css` |
 
-Edit look-and-feel globally via `src/theme/tokens.css` and `.ui-*` in `src/styles/globals.css`.
+Edit look-and-feel globally via tokens and `.ui-*` in `src/styles/globals.css`.
 
 Further component API detail: [`src/components/ui/README.md`](../src/components/ui/README.md).
 
@@ -312,6 +307,9 @@ Further component API detail: [`src/components/ui/README.md`](../src/components/
 
 ## Related docs
 
+- [Shell components](../src/components/shell/README.md)
 - [Theme tokens](../src/theme/README.md)
 - [Components overview](../src/components/README.md)
+- [Chat UI](../src/components/chat/README.md)
+- [Report artifacts](../src/components/chat/artifacts/README.md)
 - [Connector settings modules](../src/components/connectors/README.md)

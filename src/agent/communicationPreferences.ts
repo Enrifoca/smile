@@ -1,9 +1,5 @@
 import type { UserProfile } from './types'
 
-const enumToStyle = { technical: 0, balanced: 50, conversational: 100 } as const
-const enumToDetail = { concise: 0, balanced: 50, detailed: 100 } as const
-const enumToTone = { formal: 0, balanced: 50, casual: 100 } as const
-
 export const SPECTRUM_STEPS = [0, 25, 50, 75, 100] as const
 
 export function snapSpectrum(value: number): number {
@@ -20,13 +16,7 @@ export const DEFAULT_COMMUNICATION_PREFERENCES = {
   toneSpectrum: 50,
 } as const
 
-type LegacyProfile = Partial<UserProfile> & {
-  style?: keyof typeof enumToStyle
-  verbosity?: keyof typeof enumToDetail
-  tone?: keyof typeof enumToTone
-}
-
-export function normalizeUserProfile(raw: LegacyProfile | null | undefined): UserProfile {
+export function normalizeUserProfile(raw: Partial<UserProfile> | null | undefined): UserProfile {
   const base: UserProfile = {
     ...DEFAULT_COMMUNICATION_PREFERENCES,
     focusProjects: [],
@@ -35,31 +25,10 @@ export function normalizeUserProfile(raw: LegacyProfile | null | undefined): Use
 
   if (!raw) return base
 
-  const styleSpectrum =
-    typeof raw.styleSpectrum === 'number'
-      ? snapSpectrum(raw.styleSpectrum)
-      : raw.style
-        ? enumToStyle[raw.style] ?? 50
-        : 50
-
-  const detailSpectrum =
-    typeof raw.detailSpectrum === 'number'
-      ? snapSpectrum(raw.detailSpectrum)
-      : raw.verbosity
-        ? enumToDetail[raw.verbosity] ?? 50
-        : 50
-
-  const toneSpectrum =
-    typeof raw.toneSpectrum === 'number'
-      ? snapSpectrum(raw.toneSpectrum)
-      : raw.tone
-        ? enumToTone[raw.tone] ?? 50
-        : 50
-
   return {
-    styleSpectrum: snapSpectrum(styleSpectrum),
-    detailSpectrum: snapSpectrum(detailSpectrum),
-    toneSpectrum: snapSpectrum(toneSpectrum),
+    styleSpectrum: typeof raw.styleSpectrum === 'number' ? snapSpectrum(raw.styleSpectrum) : 50,
+    detailSpectrum: typeof raw.detailSpectrum === 'number' ? snapSpectrum(raw.detailSpectrum) : 50,
+    toneSpectrum: typeof raw.toneSpectrum === 'number' ? snapSpectrum(raw.toneSpectrum) : 50,
     focusProjects: raw.focusProjects ?? [],
     confirmAllConnectorActions: raw.confirmAllConnectorActions ?? true,
   }

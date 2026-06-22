@@ -6,7 +6,7 @@ export function GenericConnectorIcon({ label }: { label: string }) {
   const letter = label.trim().charAt(0).toUpperCase() || '?'
   return (
     <div
-      className="connector-card-icon flex items-center justify-center rounded-md bg-neutral-100 text-sm font-medium text-neutral-700"
+      className="connector-card-icon flex items-center justify-center rounded-md bg-neutral-100 ui-text-base text-neutral-700"
       aria-hidden="true"
     >
       {letter}

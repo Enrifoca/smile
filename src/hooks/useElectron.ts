@@ -86,8 +86,6 @@ export function useElectron() {
 
   const aiConfigure = useCallback(async (config: AIConfig) => api.ai.configure(config), [])
   const aiConfigureReasoning = useCallback(async (config: AIConfig) => api.ai.configureReasoning(config), [])
-  const aiConfigurePlanner = useCallback(async (config: AIConfig) => api.ai.configurePlanner(config), [])
-  const aiPlan = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => api.ai.plan(messages), [])
   const aiChat = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chat(messages, tools), [])
   const aiChatReasoning = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chatReasoning(messages, tools), [])
   const aiChatStream = useCallback((
@@ -107,15 +105,13 @@ export function useElectron() {
     () => ({
       configure: aiConfigure,
       configureReasoning: aiConfigureReasoning,
-      configurePlanner: aiConfigurePlanner,
-      plan: aiPlan,
       chat: aiChat,
       chatReasoning: aiChatReasoning,
       chatStream: aiChatStream,
       chatReasoningStream: aiChatReasoningStream,
       abortStream: aiAbortStream,
     }),
-    [aiConfigure, aiConfigureReasoning, aiConfigurePlanner, aiPlan, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream, aiAbortStream],
+    [aiConfigure, aiConfigureReasoning, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream, aiAbortStream],
   )
 
   const shellOpenExternal = useCallback(async (url: string) => api.shell.openExternal(url), [])
@@ -176,6 +172,7 @@ export function useElectron() {
   const contextsSave = useCallback(async (context: import('../context/types').ProjectContext) => api.contexts.save(context), [])
   const contextsDelete = useCallback(async (contextId: string) => api.contexts.delete(contextId), [])
   const contextsReadMarkdown = useCallback(async (contextId: string) => api.contexts.readMarkdown(contextId), [])
+  const contextsWriteMarkdown = useCallback(async (contextId: string, content: string) => api.contexts.writeMarkdown(contextId, content), [])
   const contextsGetPromptBody = useCallback(async (contextId: string) => api.contexts.getPromptBody(contextId), [])
   const contextsAppendSection = useCallback(async (contextId: string, section: string, content: string) => api.contexts.appendSection(contextId, section, content), [])
   const contextsReplaceSection = useCallback(async (contextId: string, heading: string, content: string) => api.contexts.replaceSection(contextId, heading, content), [])
@@ -186,6 +183,7 @@ export function useElectron() {
       save: contextsSave,
       delete: contextsDelete,
       readMarkdown: contextsReadMarkdown,
+      writeMarkdown: contextsWriteMarkdown,
       getPromptBody: contextsGetPromptBody,
       appendSection: contextsAppendSection,
       replaceSection: contextsReplaceSection,
@@ -196,6 +194,7 @@ export function useElectron() {
       contextsSave,
       contextsDelete,
       contextsReadMarkdown,
+      contextsWriteMarkdown,
       contextsGetPromptBody,
       contextsAppendSection,
       contextsReplaceSection,

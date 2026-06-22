@@ -113,16 +113,6 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
         afterLabel: 'Analyzing workspace results…',
       }
     }
-    case 'memory_read':
-      return {
-        tool: name,
-        label: 'Checked memory',
-        group: 'memory',
-        category: 'memory',
-        preparingLabel: 'Checking memory…',
-        runningLabel: 'Checking memory…',
-        afterLabel: 'Analyzing memory…',
-      }
     case 'memory_update':
       return {
         tool: name,
@@ -146,12 +136,22 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
     case 'scratchpad_write':
       return {
         tool: name,
-        label: 'Updated scratchpad',
+        label: 'Updated working notes',
         group: 'memory',
         category: 'scratchpad',
-        preparingLabel: 'Updating scratchpad…',
-        runningLabel: 'Updating scratchpad…',
-        afterLabel: 'Reasoning about next step…',
+        preparingLabel: 'Updating working notes…',
+        runningLabel: 'Updating working notes…',
+        afterLabel: 'Continuing…',
+      }
+    case 'deep_thinking':
+      return {
+        tool: name,
+        label: 'Deep thinking',
+        group: 'memory',
+        category: 'analysis',
+        preparingLabel: 'Deep thinking…',
+        runningLabel: 'Deep thinking…',
+        afterLabel: 'Continuing…',
       }
     case 'context_read':
       return {

@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import { joinClasses } from './classNames'
 import { SPECTRUM_STEPS, snapSpectrum } from '../../agent/communicationPreferences'
 
@@ -19,29 +18,7 @@ export function RangeSlider({
   disabled = false,
   className,
 }: RangeSliderProps) {
-  const zoneRef = useRef<HTMLDivElement>(null)
   const snappedValue = snapSpectrum(value)
-
-  useEffect(() => {
-    const zone = zoneRef.current
-    if (!zone || disabled) return
-
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
-      const currentIndex = SPECTRUM_STEPS.findIndex(step => step === snappedValue)
-      if (currentIndex === -1) return
-
-      const direction = event.deltaY > 0 ? 1 : event.deltaY < 0 ? -1 : 0
-      if (direction === 0) return
-
-      const nextIndex = Math.max(0, Math.min(SPECTRUM_STEPS.length - 1, currentIndex + direction))
-      const nextValue = SPECTRUM_STEPS[nextIndex]
-      if (nextValue !== snappedValue) onChange(nextValue)
-    }
-
-    zone.addEventListener('wheel', onWheel, { passive: false })
-    return () => zone.removeEventListener('wheel', onWheel)
-  }, [disabled, onChange, snappedValue])
 
   const setFromClientX = (clientX: number, track: HTMLElement) => {
     const rect = track.getBoundingClientRect()
@@ -69,7 +46,7 @@ export function RangeSlider({
         <span>{minLabel}</span>
         <span>{maxLabel}</span>
       </div>
-      <div ref={zoneRef} className="ui-range-slider-zone">
+      <div className="ui-range-slider-zone">
         <div
           className="ui-range-slider-track"
           role="slider"
