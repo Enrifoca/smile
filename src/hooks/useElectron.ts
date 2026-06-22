@@ -172,6 +172,7 @@ export function useElectron() {
   const contextsSave = useCallback(async (context: import('../context/types').ProjectContext) => api.contexts.save(context), [])
   const contextsDelete = useCallback(async (contextId: string) => api.contexts.delete(contextId), [])
   const contextsReadMarkdown = useCallback(async (contextId: string) => api.contexts.readMarkdown(contextId), [])
+  const contextsWriteMarkdown = useCallback(async (contextId: string, content: string) => api.contexts.writeMarkdown(contextId, content), [])
   const contextsGetPromptBody = useCallback(async (contextId: string) => api.contexts.getPromptBody(contextId), [])
   const contextsAppendSection = useCallback(async (contextId: string, section: string, content: string) => api.contexts.appendSection(contextId, section, content), [])
   const contextsReplaceSection = useCallback(async (contextId: string, heading: string, content: string) => api.contexts.replaceSection(contextId, heading, content), [])
@@ -182,6 +183,7 @@ export function useElectron() {
       save: contextsSave,
       delete: contextsDelete,
       readMarkdown: contextsReadMarkdown,
+      writeMarkdown: contextsWriteMarkdown,
       getPromptBody: contextsGetPromptBody,
       appendSection: contextsAppendSection,
       replaceSection: contextsReplaceSection,
@@ -192,6 +194,7 @@ export function useElectron() {
       contextsSave,
       contextsDelete,
       contextsReadMarkdown,
+      contextsWriteMarkdown,
       contextsGetPromptBody,
       contextsAppendSection,
       contextsReplaceSection,

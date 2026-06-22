@@ -10,6 +10,7 @@ import StatusBar from './StatusBar'
 import type { WorkspaceTabsApi } from '../../shell/useWorkspaceTabs'
 import type { ActivityId } from '../../shell/types'
 import type { ProjectContext } from '../../context/types'
+import type { AgentContextSnapshot } from '../../agent'
 
 interface AppShellProps {
   workspace: WorkspaceTabsApi
@@ -41,6 +42,7 @@ export default function AppShell({
   const [chatSidebarOpen, setChatSidebarOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [pinnedReportPath, setPinnedReportPath] = useState<string | null>(null)
+  const [contextSnapshots, setContextSnapshots] = useState<Map<string, AgentContextSnapshot>>(new Map())
 
   const {
     tabs,
@@ -57,6 +59,8 @@ export default function AppShell({
     updateTab,
   } = workspace
 
+  const activeContext = contexts.find(c => c.id === activeContextId) ?? null
+
   const handleNavigate = (next: ActivityId) => {
     setActivity(next)
   }
@@ -72,6 +76,12 @@ export default function AppShell({
   const handleChatCreated = (tabId: string, chatId: string, title: string) => {
     updateTab(tabId, { chatId, title })
   }
+
+  const handleContextSnapshot = (tabId: string, snapshot: AgentContextSnapshot) => {
+    setContextSnapshots(prev => new Map(prev).set(tabId, snapshot))
+  }
+
+  const activeContextSnapshot = activeTabId ? contextSnapshots.get(activeTabId) ?? null : null
 
   const handleSetActiveReport = (path: string | null) => {
     if (path && activeTab.kind !== 'chat') {
@@ -111,7 +121,7 @@ export default function AppShell({
               onNewChatTab={handleNewChat}
             />
           </div>
-          <WorkspaceToolbar activeTab={activeTab} />
+          <WorkspaceToolbar activeTab={activeTab} activeContext={activeContext} contextSnapshot={activeContextSnapshot} />
           <WorkspaceContent
             tabs={tabs}
             activeTab={activeTab}
@@ -126,6 +136,7 @@ export default function AppShell({
             onNewContext={openContextNew}
             onCancelContextNew={() => focusTab(tabs.find(t => t.kind === 'context-home')?.id ?? activeTabId)}
             onBackFromContextDetail={() => setActivity('context')}
+            onContextSnapshot={handleContextSnapshot}
           />
         </main>
         <InspectorPanel

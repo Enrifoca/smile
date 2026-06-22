@@ -40,6 +40,20 @@ function compactOneLine(text: string, maxLength = 180): string {
   return `${normalized.slice(0, maxLength - 1).trim()}…`
 }
 
+/** Build a short, human-readable summary of the most meaningful tool arguments. */
+function compactArgs(args: Record<string, unknown>): string {
+  const priorityKeys = ['jql', 'query', 'issueKey', 'projectKey', 'key', 'id', 'summary', 'name', 'path', 'title', 'content']
+  const parts: string[] = []
+  for (const key of priorityKeys) {
+    const value = args[key]
+    if (value === undefined || value === null || value === '') continue
+    let text = String(value).replace(/\s+/g, ' ').trim()
+    if (text.length > 80) text = `${text.slice(0, 80).trim()}…`
+    parts.push(`${key}=${text}`)
+  }
+  return parts.join(', ')
+}
+
 export function createPluginConnectorRuntime(
   electron: ElectronAPI,
   manifest: ConnectorManifest,
@@ -93,17 +107,19 @@ export function createPluginConnectorRuntime(
       const tool = toolByName.get(name)
       return tool?.confirmation?.summary ? renderTemplate(tool.confirmation.summary, args) : null
     },
-    getScratchpadNote: (name, _args, formattedResult) => {
+    getScratchpadNote: (name, args, formattedResult) => {
       const tool = toolByName.get(name)
       if (!tool) return null
       const action = name.replace(new RegExp(`^${manifest.id}_`), '').replace(/_/g, ' ')
+      const argSummary = compactArgs(args)
       const firstLine = formattedResult.split('\n').find(line => line.trim()) || ''
-      const detail = firstLine ? ` -> ${compactOneLine(firstLine)}` : ''
+      const resultDetail = firstLine ? ` -> ${compactOneLine(firstLine)}` : ''
+      const argDetail = argSummary ? ` (${argSummary})` : ''
       if (tool.category === 'connector-read') {
-        return `${manifest.name} read: ${action}${detail}`
+        return `${manifest.name} read: ${action}${argDetail}${resultDetail}`
       }
       if (tool.category === 'connector-write' || tool.category === 'connector-attachment') {
-        return `${manifest.name} write: ${action}${detail}`
+        return `${manifest.name} write: ${action}${argDetail}${resultDetail}`
       }
       return null
     },

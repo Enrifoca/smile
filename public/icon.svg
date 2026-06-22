@@ -1,18 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="smile:D">
-  <rect width="512" height="512" rx="48" ry="48" fill="#ffffff"/>
-  <rect x="1" y="1" width="510" height="510" rx="47" ry="47" fill="none" stroke="#d1d5db" stroke-width="2"/>
-  <g id="mark" transform="translate(263.00 248.00)">
+  <defs>
+    <filter id="boxShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#000000" flood-opacity="0.10"/>
+    </filter>
+    <filter id="markShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect x="46" y="46" width="420" height="420" rx="92" ry="92" fill="#ffffff" filter="url(#boxShadow)"/>
+  <g id="mark" transform="translate(268.00 268.00)">
     <text
       x="0"
       y="0"
       text-anchor="middle"
       dominant-baseline="central"
       font-family="Segoe UI, Arial, Helvetica, sans-serif"
-      font-weight="800"
-      font-size="240"
+      font-weight="700"
+      font-size="170"
       fill="#0a0a0a"
-    ><tspan fill="transparent">:</tspan><tspan>D</tspan></text>
-    <circle cx="-89.58" cy="-3.30" r="19.5" fill="#0a0a0a"/>
-    <circle cx="-89.58" cy="82.42" r="19.5" fill="#0a0a0a"/>
+      filter="url(#markShadow)"
+    >:D</text>
   </g>
 </svg>

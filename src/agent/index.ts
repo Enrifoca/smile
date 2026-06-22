@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import { AgentActivity, Message, PendingAction, ToolEntry, UserProfile } from './types'
+import { AgentActivity, Message, PendingAction, ToolEntry, UserProfile, type AgentContextSnapshot } from './types'
 import { AIResponse, AgentConfig } from './config'
 import { shouldAdmitSourceLeaf } from '../memory/sourceAdmission'
 import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
@@ -16,7 +16,9 @@ import {
   type DeepThinkingRequest,
 } from './deepThinking'
 import { buildEnabledCapabilitiesSection, type ConnectorCapabilitySummary } from './capabilities'
-import { maybeCompressConversationHistory } from './historyCompression'
+import { maybeCompressConversationHistory, estimateTokens } from './historyCompression'
+import { selectLearnedNotesForPrompt } from '../memory/learnedBudget'
+import { formatActiveScopesForPrompt } from '../memory/promptSections'
 import { toolDefinitions } from './tools'
 import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
 import type { ContextEnvelope } from '../connectors/contract'
@@ -65,6 +67,11 @@ export class Agent {
   // Cleared at the start of each processMessage call. Write operations trigger
   // targeted invalidation so read-after-write always returns fresh data.
   private toolResultCache = new Map<string, string>()
+  // Tracks tool signatures already shown in a tool_summary this turn, so the UI
+  // does not repeat identical operations across iterations.
+  private summarizedToolSignatures = new Set<string>()
+  // Results from tool calls in the current turn, surfaced in the context inspector.
+  private latestToolResultsThisTurn: NonNullable<AgentContextSnapshot['latestToolResults']> = []
   private sessionScratchpad = new SessionScratchpad()
   private turnPlan = ''
   private pendingDeepThinking: DeepThinkingRequest | null = null
@@ -167,6 +174,29 @@ export class Agent {
     }
 
     return messageId
+  }
+
+  /**
+   * Generate a brief fallback preamble when the model returns tool calls without
+   * any visible prose. This keeps the UI from silently launching into tools.
+   */
+  private fallbackPreambleForToolCalls(toolCalls: NonNullable<AIResponse['toolCalls']>): string {
+    const entries = toolCalls.map(tc => this.getToolEntry(tc.name, tc.arguments))
+    const hasWrite = entries.some(e =>
+      e.category === 'connector-write'
+      || e.category === 'connector-attachment'
+      || e.category === 'file-write'
+    )
+    const hasRead = entries.some(e =>
+      e.category === 'connector-read'
+      || e.category === 'file-read'
+      || e.category === 'file-manage'
+      || e.category === 'context'
+      || e.category === 'memory'
+    )
+    if (hasWrite) return "I'll make the requested change."
+    if (hasRead) return "I'll look into that for you."
+    return "I'll handle that."
   }
 
   constructor(config: AgentConfig) {
@@ -316,20 +346,22 @@ export class Agent {
   private getToolEntry(name: string, args: Record<string, unknown>): ToolEntry {
     const connector = this.getConnectorForTool(name)
     const custom = connector?.definition.getToolEntry?.(name, args)
+    let entry: ToolEntry
     if (custom) {
-      return ensureToolEntryActivity(custom, this.getToolDefinition(name)?.category)
-    }
-    if (connector) {
+      entry = ensureToolEntryActivity(custom, this.getToolDefinition(name)?.category)
+    } else if (connector) {
       const tool = this.getToolDefinition(name)
-      return getConnectorToolEntry(
+      entry = getConnectorToolEntry(
         connector.definition.id,
         connector.definition.name,
         name,
         tool?.category ?? 'connector-read',
         args,
       )
+    } else {
+      entry = getCoreToolEntry(name, args)
     }
-    return getCoreToolEntry(name, args)
+    return { ...entry, args }
   }
 
   private getConnectorPromptSections(): string[] {
@@ -365,6 +397,8 @@ export class Agent {
     await this.syncActiveContextFromSource()
     this.abortFlag = false
     this.toolResultCache.clear()
+    this.summarizedToolSignatures.clear()
+    this.latestToolResultsThisTurn = []
     this.sessionScratchpad = new SessionScratchpad()
     this.turnPlan = ''
     this.pendingDeepThinking = null
@@ -427,22 +461,31 @@ export class Agent {
       this.agentLoopIteration = iterations
 
       const { response, wasStreamed, assistantPreamble, preambleMessageId, aborted } = await this.callAI()
+
       if (aborted) {
         console.log('[Agent] Aborted by user.')
         break
       }
       if (!response) throw new Error('No response from AI')
 
+      if (response.toolCalls?.length && assistantPreamble?.trim()) {
+        this.sessionScratchpad.appendGoal(assistantPreamble.trim())
+      }
+
       if (response.toolCalls && response.toolCalls.length > 0) {
         let hadError = false
         let abortedDuringTools = false
-        const toolEntries: ToolEntry[] = []
+        const toolEntries = response.toolCalls.map(toolCall =>
+          this.getToolEntry(toolCall.name, toolCall.arguments),
+        )
+        const toolSummaryEntries: ToolEntry[] = []
 
         if (assistantPreamble?.trim() && !preambleMessageId) {
           this.emitAssistantPreamble(assistantPreamble.trim())
         }
 
-        for (const toolCall of response.toolCalls) {
+        for (let i = 0; i < response.toolCalls.length; i++) {
+          const toolCall = response.toolCalls[i]
           if (this.abortFlag) {
             this.abortFlag = false
             abortedDuringTools = true
@@ -452,7 +495,7 @@ export class Agent {
 
           console.log('[Agent] Tool call:', toolCall.name, toolCall.arguments)
           this.toolsRunThisTurn.push(this.toolRunRecordForCall(toolCall))
-          const toolEntry = this.getToolEntry(toolCall.name, toolCall.arguments)
+          const toolEntry = toolEntries[i]
           this.lastToolEntryThisTurn = toolEntry
           const activityMessageId = this.activityMessageIdForToolCall(toolCall.id)
           const activityStartedAt = new Date().toISOString()
@@ -502,6 +545,7 @@ export class Agent {
           const cached = this.toolResultCache.get(cacheKey)
           let formattedResult: string
           let isFromCache = false
+          let toolIsError = false
 
           if (cached !== undefined) {
             formattedResult = cached
@@ -529,6 +573,7 @@ export class Agent {
             const isError = isFailedToolResult(result, formattedResult)
             if (isError) {
               hadError = true
+              toolIsError = true
               console.log('[Agent] Tool error:', formattedResult.substring(0, 200))
               this.emitActivityMessage(activityMessageId, {
                 kind: 'tool',
@@ -564,8 +609,20 @@ export class Agent {
             }
           }
 
-          // Record tool entry for the summary block (UI only — not in history)
-          toolEntries.push(toolEntry)
+          // Record tool entry + result for the summary block (UI only — not in history)
+          toolSummaryEntries.push({
+            ...toolEntry,
+            result: formattedResult,
+            isError: toolIsError,
+          })
+
+          const maxResultPreview = 4000
+          this.latestToolResultsThisTurn.push({
+            tool: toolCall.name,
+            args: toolCall.arguments,
+            result: formattedResult.length > maxResultPreview ? `${formattedResult.slice(0, maxResultPreview)}\n…` : formattedResult,
+            isError: toolIsError,
+          })
 
           // Add result to history so AI has the data next iteration.
           this.persistToolResultMessage(toolCall.name, formattedResult, isFromCache)
@@ -573,15 +630,23 @@ export class Agent {
 
         if (abortedDuringTools) break
 
-        // Emit a persistent tool-summary block (UI only — not in history)
-        if (toolEntries.length > 0) {
+        // Emit a persistent tool-summary block (UI only — not in history).
+        // Skip tool signatures already summarized this turn to avoid duplicate rows
+        // when the model re-calls the same read across iterations.
+        const newSummaryEntries = toolSummaryEntries.filter(entry => {
+          const sig = `${entry.tool}:${JSON.stringify(entry.args)}:${entry.result?.slice(0, 120) ?? ''}`
+          if (this.summarizedToolSignatures.has(sig)) return false
+          this.summarizedToolSignatures.add(sig)
+          return true
+        })
+        if (newSummaryEntries.length > 0) {
           this.config.onMessage({
             id: uuidv4(),
             role: 'assistant',
             content: '',
             timestamp: new Date().toISOString(),
             type: 'tool_summary',
-            toolEntries,
+            toolEntries: newSummaryEntries,
           })
         }
 
@@ -701,6 +766,91 @@ export class Agent {
     return { response: null, wasStreamed: false, aborted: true }
   }
 
+  private emitContextSnapshot(params: {
+    systemPrompt: string
+    relevantHistory: Message[]
+    connectorSections: string[]
+    capabilitiesSection: string
+    contextSection: string
+    scratchpadSection: string
+    planSection: string
+    reasoningLightSection: string
+    deepThinkingSection: string
+  }): void {
+    if (!this.config.onContextSnapshot) return
+
+    const lastUserMessage = this.conversationHistory
+      .filter(m => m.role === 'user')
+      .slice(-1)[0]?.content ?? ''
+
+    const recentHistory = params.relevantHistory.map(m => ({
+      role: m.role,
+      content: m.content.length > 2000 ? `${m.content.slice(0, 2000)}…` : m.content,
+    }))
+
+    const historySummary = recentHistory
+      .map(m => `**${m.role}:** ${m.content}`)
+      .join('\n\n')
+
+    const section = (name: string, content: string | undefined): AgentContextSnapshot['sections'][number] => ({
+      name,
+      present: content !== undefined && content.length > 0,
+      content,
+      tokens: content ? estimateTokens(content) : 0,
+    })
+
+    let memoryContent = ''
+    if (this.config.memory) {
+      const userMarkdown = this.config.memory.userMarkdown?.trim() ?? ''
+      const learned = selectLearnedNotesForPrompt(this.config.memory)
+      const learnedLines = [
+        ...learned.recentLines,
+        ...(learned.rollup ? [`Archived summary:\n${learned.rollup}`] : []),
+      ]
+      const scopeSection = formatActiveScopesForPrompt(this.config.monitoredScopes || [])
+      const parts: string[] = []
+      if (userMarkdown) parts.push(`### User Memory\n${userMarkdown}`)
+      if (learnedLines.length > 0) parts.push(`### Learned Notes\n${learnedLines.join('\n')}`)
+      if (scopeSection) parts.push(scopeSection)
+      memoryContent = parts.join('\n\n')
+    }
+
+    const sections: AgentContextSnapshot['sections'] = [
+      { name: 'System prompt', present: true, tokens: estimateTokens(params.systemPrompt) },
+      { name: 'Memory', present: memoryContent.length > 0, content: memoryContent, tokens: memoryContent ? estimateTokens(memoryContent) : 0 },
+      section('Capabilities', params.capabilitiesSection),
+      section('Active context', params.contextSection),
+      section('Connector context', params.connectorSections.join('\n\n')),
+      section('Plan', params.planSection),
+      section('Scratchpad', params.scratchpadSection),
+      section('Reasoning instructions', params.reasoningLightSection),
+      section('Deep thinking context', params.deepThinkingSection),
+      section('Recent conversation history', historySummary),
+    ]
+
+    const totalTokens =
+      sections.reduce((sum, s) => sum + (s.tokens ?? 0), 0) +
+      estimateTokens(lastUserMessage) +
+      (recentHistory?.reduce((sum, m) => sum + estimateTokens(m.content), 0) ?? 0) +
+      (this.latestToolResultsThisTurn?.reduce((sum, r) => sum + estimateTokens(r.result) + estimateTokens(JSON.stringify(r.args)), 0) ?? 0)
+
+    const snapshot: AgentContextSnapshot = {
+      userMessage: lastUserMessage,
+      systemPrompt: params.systemPrompt,
+      memoryContent,
+      recentHistory,
+      latestToolResults: this.latestToolResultsThisTurn,
+      totalTokens,
+      metadata: {
+        timestamp: new Date().toISOString(),
+        iteration: this.agentLoopIteration,
+      },
+      sections,
+    }
+
+    this.config.onContextSnapshot(snapshot)
+  }
+
   private async maybeCompressHistoryOnce(): Promise<void> {
     const tiers = assemblePromptTiers(
       this.config.userProfile,
@@ -731,26 +881,33 @@ export class Agent {
     preambleMessageId?: string
     aborted?: boolean
   }> {
-    const contextSection = await this.buildActiveContextSection()
     const hasReasoningModel = !!(this.config.callAIReasoningStream || this.config.callAIReasoning)
     const isFirstLoopIteration = this.agentLoopIteration === 1
     const deepThinkingActive = !!this.pendingDeepThinking
     const useReasoning = hasReasoningModel && (isFirstLoopIteration || deepThinkingActive)
 
+    const contextSection = await this.buildActiveContextSection()
+    const connectorSections = this.getConnectorPromptSections()
+    const capabilitiesSection = this.buildCapabilitiesSection()
+    const scratchpadSection = buildScratchpadSection(this.sessionScratchpad.serialize())
+    const planSection = buildPlanSection(this.turnPlan)
+    const reasoningLightSection = buildReasoningLightSection(isFirstLoopIteration, hasReasoningModel, deepThinkingActive)
+    const deepThinkingSection = deepThinkingActive && this.pendingDeepThinking
+      ? buildDeepThinkingTurnSection(this.pendingDeepThinking)
+      : ''
+
     const tiers = assemblePromptTiers(
       this.config.userProfile,
-      this.getConnectorPromptSections(),
+      connectorSections,
       this.config.memory,
       this.config.monitoredScopes || [],
       {
-        scratchpadSection: buildScratchpadSection(this.sessionScratchpad.serialize()),
+        scratchpadSection,
         contextSection,
-        planSection: buildPlanSection(this.turnPlan),
-        reasoningLightSection: buildReasoningLightSection(isFirstLoopIteration, hasReasoningModel, deepThinkingActive),
-        deepThinkingSection: deepThinkingActive && this.pendingDeepThinking
-          ? buildDeepThinkingTurnSection(this.pendingDeepThinking)
-          : '',
-        capabilitiesSection: this.buildCapabilitiesSection(),
+        planSection,
+        reasoningLightSection,
+        deepThinkingSection,
+        capabilitiesSection,
       },
     )
     const systemPrompt = tiers.combined
@@ -763,6 +920,18 @@ export class Agent {
       { role: 'system', content: systemPrompt },
       ...relevantHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     ]
+
+    this.emitContextSnapshot({
+      systemPrompt,
+      relevantHistory,
+      connectorSections,
+      capabilitiesSection,
+      contextSection,
+      scratchpadSection,
+      planSection,
+      reasoningLightSection,
+      deepThinkingSection,
+    })
 
     const tools = this.getAllToolDefinitions().map(tool => ({
       type: 'function' as const,
@@ -924,8 +1093,9 @@ export class Agent {
 
       if (response) {
         if (response.toolCalls && response.toolCalls.length > 0) {
-          const rawPreamble = (responseStarted ? responseContent.trim() : '') || response.content?.trim() || ''
-          const preambleText = rawPreamble.replace(THINK_BLOCK_REGEX, '').trim()
+          let rawPreamble = (responseStarted ? responseContent.trim() : '') || response.content?.trim() || ''
+          rawPreamble = rawPreamble.replace(THINK_BLOCK_REGEX, '').trim()
+          const preambleText = rawPreamble || this.fallbackPreambleForToolCalls(response.toolCalls)
           if (responseStarted) {
             finalizeStreamedResponse(preambleText)
             if (preambleText) {
@@ -1020,8 +1190,10 @@ export class Agent {
       response.content = response.content.replace(THINK_BLOCK_REGEX, '').trim()
     }
 
-    const preambleText = response?.content?.trim() || ''
-    if (response?.toolCalls?.length && preambleText) {
+    let preambleText = response?.content?.trim() || ''
+    preambleText = preambleText.replace(THINK_BLOCK_REGEX, '').trim()
+    if (response?.toolCalls?.length) {
+      preambleText = preambleText || this.fallbackPreambleForToolCalls(response.toolCalls)
       return {
         response,
         wasStreamed: false,

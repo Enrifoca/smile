@@ -113,16 +113,6 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
         afterLabel: 'Analyzing workspace results…',
       }
     }
-    case 'memory_read':
-      return {
-        tool: name,
-        label: 'Checked memory',
-        group: 'memory',
-        category: 'memory',
-        preparingLabel: 'Checking memory…',
-        runningLabel: 'Checking memory…',
-        afterLabel: 'Analyzing memory…',
-      }
     case 'memory_update':
       return {
         tool: name,

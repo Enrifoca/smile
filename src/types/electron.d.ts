@@ -129,6 +129,10 @@ export interface ElectronAPI {
       contextId: string,
     ) => Promise<{ success: boolean; data?: import('../context/types').ProjectContext[]; error?: string }>
     readMarkdown: (contextId: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    writeMarkdown: (
+      contextId: string,
+      content: string,
+    ) => Promise<{ success: boolean; error?: string }>
     getPromptBody: (contextId: string) => Promise<{
       success: boolean
       data?: import('../context/promptInjection').ContextPromptBody

@@ -2,12 +2,11 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
-import { Agent, Message, PendingAction, UserProfile } from '../agent'
+import { Agent, Message, PendingAction, UserProfile, type AgentContextSnapshot } from '../agent'
 import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
-import { formatSourceMemoryListing, formatSourceMemoryRead } from '../memory/promptSections'
-import { SourceMemoryReadResult, SourceMemoryScopeListing } from '../memory/sourceTypes'
+
 import { buildReportPath, buildReportToolResult, getActiveReportFromMessages, titleFromReportPath } from '../agent/artifacts'
 import { loadEnabledConnectors, ConnectorScope } from '../connectors/registry'
 import type { ProjectContext } from '../context/types'
@@ -25,9 +24,12 @@ interface ChatViewProps {
   onOpenSettings: () => void
   activeContext: ProjectContext | null
   pinnedReportPath?: string | null
+  onContextSnapshot?: (snapshot: AgentContextSnapshot) => void
 }
 
 type McpConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
+
+const MAX_QUEUED_MESSAGES = 3
 
 /** Returns a specific, human-readable label for a tool call based on its arguments */
 
@@ -61,6 +63,7 @@ export default function ChatView({
   onOpenSettings,
   activeContext,
   pinnedReportPath,
+  onContextSnapshot,
 }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -100,6 +103,9 @@ export default function ChatView({
   const sendInFlightRef = useRef(false)
   /** Bumped when a stream is finalised - stale rAF callbacks must not re-open isStreaming. */
   const streamEpochRef = useRef<Map<string, number>>(new Map())
+  /** Messages typed while the agent is running, queued per chat. */
+  const queuedByChatRef = useRef<Map<string, string[]>>(new Map())
+  const [queuedVersion, setQueuedVersion] = useState(0)
   isVisibleRef.current = isVisible
   chatIdRef.current = chatId
   messagesRef.current = messages
@@ -118,7 +124,13 @@ export default function ChatView({
   const visibleChatId = chatId ?? sessionChatIdRef.current
   const visibleActivity = visibleChatId ? chatActivity.getActivity(visibleChatId) : null
   const isLoading = visibleActivity?.kind === 'running'
+  /** Tracks the previous running chat id so we can auto-send queued messages when any run finishes. */
+  const prevRunningChatIdRef = useRef<string | null>(chatActivity.runningChatId)
   const agentStatus = visibleActivity?.agentStatus ?? null
+  const queuedMessages = visibleChatId ? queuedByChatRef.current.get(visibleChatId) ?? [] : []
+  const queuedCount = queuedMessages.length
+  // queuedVersion is only used to force a re-render when the queue mutates.
+  void queuedVersion
   const otherChatRunning = Boolean(
     chatActivity.runningChatId && chatActivity.runningChatId !== visibleChatId,
   )
@@ -403,6 +415,7 @@ export default function ChatView({
           const id = runningChatIdRef.current
           if (id) chatActivity.setAgentStatus(id, status)
         },
+        onContextSnapshot: (snapshot) => onContextSnapshot?.(snapshot),
         executeFileTool,
         executeMemoryTool,
         executeContextTool,
@@ -873,59 +886,6 @@ export default function ChatView({
 
   const executeMemoryTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
-      if (name === 'memory_read') {
-        const result = await memoryAPI.getAll()
-        if (!result.success || !result.data) return { success: false, error: 'Could not load memory' }
-        const mem = result.data as MemoryStore
-        const section = (args.section as string) || 'all'
-        const parts: string[] = []
-        if (section === 'all' || section === 'learned' || section === 'general') {
-          parts.push('## User Memory')
-          parts.push(mem.userMarkdown?.trim() || '(empty)')
-          const entries = mem.general?.entries?.filter(entry => entry.source === 'learned') || []
-          parts.push('\n## Learned Notes')
-          if (mem.learnedRollup?.trim()) {
-            parts.push('\n### Archived Rollup')
-            parts.push(mem.learnedRollup.trim())
-          }
-          parts.push('\n### Full entries')
-          parts.push(entries.length ? entries.map(e => `- ${e.content}`).join('\n') : '(empty)')
-        }
-        if (section === 'all' || section === 'style' || section === 'lexicon') {
-          const entries = mem.lexicon?.entries?.filter(entry => entry.source === 'learned') || []
-          const phrases = mem.lexicon?.commonPhrases || []
-          parts.push('\n## Learned Style Notes')
-          parts.push(entries.length ? entries.map(e => `- ${e.content}`).join('\n') : '(empty)')
-          if (phrases.length) parts.push('\n### Common Phrases\n' + phrases.map(p => `- "${p}"`).join('\n'))
-        }
-        if (section === 'source') {
-          const connectorId = String(args.connectorId || '').trim()
-          const scopeId = String(args.scopeId || '').trim()
-          if (connectorId && scopeId) {
-            const sourceResult = await memoryAPI.readSource(connectorId, scopeId)
-            if (!sourceResult.success) {
-              return { success: false, error: sourceResult.error || 'Could not read source memory' }
-            }
-            if (!sourceResult.data) {
-              return { success: true, data: `(no source memory for ${connectorId}/${scopeId} yet)` }
-            }
-            return {
-              success: true,
-              data: formatSourceMemoryRead(sourceResult.data as SourceMemoryReadResult),
-            }
-          }
-          const listResult = await memoryAPI.listSources()
-          if (!listResult.success) {
-            return { success: false, error: listResult.error || 'Could not list source memory' }
-          }
-          return {
-            success: true,
-            data: formatSourceMemoryListing((listResult.data || []) as SourceMemoryScopeListing[]),
-          }
-        }
-        return { success: true, data: parts.join('\n').trim() || 'Memory is empty.' }
-      }
-
       if (name === 'memory_update') {
         if (memoryUpdateCountRef.current >= 1) {
           return { success: true, data: 'Already saved this turn. Do not call memory_update again. Provide your final response now.' }
@@ -1048,18 +1008,50 @@ export default function ChatView({
     finishAgentRun(targetChatId)
   }, [agent, finishAgentRun, visibleChatId])
 
-  const handleSend = async () => {
-    if (!input.trim() || !agent || isLoading || otherChatRunning || sendInFlightRef.current) return
+  // Queue helpers for mid-turn user input.
+  const queueMessage = (targetChatId: string, message: string) => {
+    const list = queuedByChatRef.current.get(targetChatId) ?? []
+    queuedByChatRef.current.set(targetChatId, [...list, message])
+    setQueuedVersion(v => v + 1)
+  }
+
+  const dequeueMessage = (targetChatId: string): string | undefined => {
+    const list = queuedByChatRef.current.get(targetChatId)
+    if (!list || list.length === 0) return undefined
+    const [first, ...rest] = list
+    if (rest.length === 0) queuedByChatRef.current.delete(targetChatId)
+    else queuedByChatRef.current.set(targetChatId, rest)
+    setQueuedVersion(v => v + 1)
+    return first
+  }
+
+  const removeQueuedMessage = (targetChatId: string, index: number) => {
+    const list = queuedByChatRef.current.get(targetChatId)
+    if (!list) return
+    const next = [...list.slice(0, index), ...list.slice(index + 1)]
+    if (next.length === 0) queuedByChatRef.current.delete(targetChatId)
+    else queuedByChatRef.current.set(targetChatId, next)
+    setQueuedVersion(v => v + 1)
+  }
+
+  // Ref so the auto-send effect always uses the latest send function.
+  const sendUserMessageRef = useRef<(message: string, options?: { clearInput?: boolean }) => Promise<void>>(async () => {})
+
+  const sendUserMessage = async (message: string, options?: { clearInput?: boolean }) => {
+    const clearInput = options?.clearInput !== false
+    if (!message || !agent || otherChatRunning || sendInFlightRef.current) return
     sendInFlightRef.current = true
 
-    let userMessage = input.trim()
-    if (attachedFiles.length > 0) {
+    let userMessage = message
+    if (clearInput && attachedFiles.length > 0) {
       const fileInfo = attachedFiles.map(f => `- ${f.name} (${f.path})`).join('\n')
       userMessage = `${userMessage}\n\n[Attached files in workspace]\n${fileInfo}`
     }
-    
-    setInput('')
-    setAttachedFiles([])
+
+    if (clearInput) {
+      setInput('')
+      setAttachedFiles([])
+    }
     memoryUpdateCountRef.current = 0
 
     const targetChatId = chatId ?? sessionChatIdRef.current ?? uuidv4()
@@ -1100,6 +1092,35 @@ export default function ChatView({
     }
   }
 
+  sendUserMessageRef.current = sendUserMessage
+
+  const handleSend = async () => {
+    const message = input.trim()
+    if (!message || !agent || otherChatRunning || mcpConnectionState === 'connecting' || sendInFlightRef.current) return
+
+    if (isLoading) {
+      if (queuedCount >= MAX_QUEUED_MESSAGES) return
+      queueMessage(visibleChatId ?? '', message)
+      setInput('')
+      setAttachedFiles([])
+      return
+    }
+
+    await sendUserMessage(message)
+  }
+
+  // Auto-send queued messages when any run finishes, even for a chat that is not currently visible.
+  useEffect(() => {
+    const prev = prevRunningChatIdRef.current
+    const current = chatActivity.runningChatId
+    if (prev && !current) {
+      const next = dequeueMessage(prev)
+      if (next) {
+        sendUserMessageRef.current(next, { clearInput: true })
+      }
+    }
+    prevRunningChatIdRef.current = current
+  }, [chatActivity.runningChatId])
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -1285,6 +1306,34 @@ export default function ChatView({
             </div>
           )}
 
+          {queuedMessages.length > 0 && (
+            <div className="mb-2 flex flex-col items-end gap-1.5">
+              {queuedMessages.map((msg, i) => (
+                <div
+                  key={`queued-${i}`}
+                  className="group max-w-[80%] rounded-2xl rounded-br-sm bg-neutral-100 px-4 py-2 text-sm text-neutral-700 shadow-sm"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="break-words">{msg}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeQueuedMessage(visibleChatId ?? '', i)}
+                      className="text-neutral-400 hover:text-neutral-600 leading-none"
+                      aria-label="Remove queued message"
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <span className="mt-1 block text-xs text-neutral-400">Queued</span>
+                </div>
+              ))}
+              {queuedCount >= MAX_QUEUED_MESSAGES && (
+                <span className="text-xs text-neutral-400">Max {MAX_QUEUED_MESSAGES} queued messages</span>
+              )}
+            </div>
+          )}
+
           <div className="ui-chat-input-shell">
             <input
               ref={fileInputRef}
@@ -1313,37 +1362,50 @@ export default function ChatView({
               placeholder={
                 mcpConnectionState === 'connecting'
                   ? 'Checking the connectors...'
-                  : showActiveReport
-                    ? 'Ask about this report, or dismiss it to chat about something else...'
-                    : 'Ask me anything...'
+                  : isLoading
+                    ? 'Type a follow-up. It will be queued until the agent finishes...'
+                    : showActiveReport
+                      ? 'Ask about this report, or dismiss it to chat about something else...'
+                      : 'Ask me anything...'
               }
               rows={1}
               className="ui-chat-input"
-              disabled={isLoading || mcpConnectionState === 'connecting'}
+              disabled={otherChatRunning || mcpConnectionState === 'connecting'}
             />
 
-            {isLoading ? (
+            {isLoading && (
               <button
                 type="button"
                 onClick={handleStop}
                 title="Stop"
                 aria-label="Stop"
-                className="ui-chat-input-action ui-chat-input-action--end text-red-500 hover:text-red-600"
+                className="ui-chat-input-action text-red-500 hover:text-red-600"
               >
                 <StopIcon />
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading || otherChatRunning || mcpConnectionState === 'connecting'}
-                className="ui-chat-input-action ui-chat-input-action--end text-neutral-700 hover:text-neutral-950 disabled:text-gray-300"
-                title="Send message"
-                aria-label="Send message"
-              >
-                <SendIcon />
-              </button>
             )}
+
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={
+                !input.trim() ||
+                otherChatRunning ||
+                mcpConnectionState === 'connecting' ||
+                (isLoading && queuedCount >= MAX_QUEUED_MESSAGES)
+              }
+              className="ui-chat-input-action ui-chat-input-action--end text-neutral-700 hover:text-neutral-950 disabled:text-gray-300"
+              title={
+                isLoading
+                  ? queuedCount >= MAX_QUEUED_MESSAGES
+                    ? `Queue full (max ${MAX_QUEUED_MESSAGES})`
+                    : 'Queue message'
+                  : 'Send message'
+              }
+              aria-label={isLoading ? 'Queue message' : 'Send message'}
+            >
+              <SendIcon />
+            </button>
           </div>
           <p className="text-xs text-gray-400 mt-2 text-center">
             {mcpConnectionState === 'connecting' ? (

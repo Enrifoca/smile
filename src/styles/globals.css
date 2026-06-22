@@ -1151,6 +1151,10 @@ input:focus, textarea:focus, select:focus {
   @apply overflow-y-auto px-5 py-4;
 }
 
+.ui-artifact-modal-footer {
+  @apply flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-3;
+}
+
 .ui-download-popover {
   @apply absolute right-0 top-full z-10 mt-1 min-w-[7rem] rounded-lg border border-gray-200 bg-white py-1 shadow-lg;
 }
@@ -1478,33 +1482,16 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-write-action-bar {
-  @apply flex flex-col gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2;
+  @apply flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-left;
 }
 
 .ui-write-action-bar-summary {
-  @apply text-sm text-gray-800;
-}
-
-.ui-write-action-bar-items {
-  margin: 0;
-  padding-left: 1.1rem;
-  font-size: var(--font-size-base);
-  color: var(--color-ink);
-}
-
-.ui-write-action-bar-item-title {
-  display: block;
-}
-
-.ui-write-action-bar-item-subtitle {
-  display: block;
-  margin-top: 0.1rem;
-  font-size: var(--font-size-meta);
-  color: var(--color-muted-text);
+  @apply text-sm text-gray-800 truncate;
+  min-width: 0;
 }
 
 .ui-write-action-bar-actions {
-  @apply flex flex-wrap items-center gap-2;
+  @apply flex flex-wrap items-center gap-2 shrink-0;
 }
 
 .connector-card {
@@ -2319,8 +2306,12 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-inspector-item--active {
-  background: var(--color-hover-surface);
+  background: var(--color-surface-alt);
   border-color: var(--color-border);
+}
+
+.ui-inspector-item--active:hover {
+  background: var(--color-surface-alt);
 }
 
 .ui-inspector-item__title {
@@ -2470,9 +2461,17 @@ input:focus, textarea:focus, select:focus {
   background: var(--color-surface);
 }
 
-.ui-context-home-row--active {
+.ui-context-home-row:hover {
   background: var(--color-hover-surface);
+}
+
+.ui-context-home-row--active {
+  background: var(--color-surface-alt);
   border-color: var(--color-border);
+}
+
+.ui-context-home-row--active:hover {
+  background: var(--color-surface-alt);
 }
 
 .ui-context-home-row__main {

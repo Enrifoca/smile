@@ -15,7 +15,6 @@ const CORE_READ_TOOLS = new Set([
   'file_read_ocr',
   'file_list',
   'file_search',
-  'memory_read',
 ])
 
 export function isReadOnlyTool(tool: ToolRunRecord): boolean {

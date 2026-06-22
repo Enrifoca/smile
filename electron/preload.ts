@@ -177,6 +177,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     save: (context: ProjectContext) => ipcRenderer.invoke('contexts:save', context),
     delete: (contextId: string) => ipcRenderer.invoke('contexts:delete', contextId),
     readMarkdown: (contextId: string) => ipcRenderer.invoke('contexts:readMarkdown', contextId),
+    writeMarkdown: (contextId: string, content: string) => ipcRenderer.invoke('contexts:writeMarkdown', contextId, content),
     getPromptBody: (contextId: string) => ipcRenderer.invoke('contexts:getPromptBody', contextId),
     appendSection: (contextId: string, section: string, content: string) =>
       ipcRenderer.invoke('contexts:appendSection', contextId, section, content),

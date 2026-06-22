@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Message, type AgentActivityStatus, type ToolEntry } from '../agent/types'
+import { Message, type ToolEntry } from '../agent/types'
 import { summariseToolEntries } from '../agent/toolSummary'
 import { MarkdownArtifactCard } from './chat/artifacts'
 
@@ -112,6 +112,19 @@ function ThinkingBlock({ message }: { message: Message }) {
 
 // ─── ToolSummaryBlock ─────────────────────────────────────────────────────────
 
+function formatArgs(args: Record<string, unknown> | undefined): string {
+  if (!args || Object.keys(args).length === 0) return 'No arguments'
+  const raw = JSON.stringify(args, null, 2)
+  if (raw.length <= 400) return raw
+  return raw.slice(0, 400) + '\n…'
+}
+
+function formatResult(result: string | undefined, isError: boolean | undefined): string {
+  if (!result) return isError ? 'Error (no details)' : 'No result'
+  if (result.length <= 1200) return result
+  return result.slice(0, 1200) + '\n…'
+}
+
 function ToolSummaryBlock({ entries }: { entries: ToolEntry[] }) {
   const [open, setOpen] = useState(false)
   const toggle = useCallback(() => setOpen(v => !v), [])
@@ -128,55 +141,24 @@ function ToolSummaryBlock({ entries }: { entries: ToolEntry[] }) {
       </button>
 
       {open && (
-        <div className="mt-1.5 pl-2 border-l border-gray-100 space-y-0.5">
+        <div className="mt-1.5 pl-2 border-l border-gray-100 space-y-2">
           {entries.map((entry, i) => (
             <div key={i} className="ui-text-meta leading-relaxed">
-              {entry.label}
+              {entries.length > 1 && <div className="font-medium">{entry.label}</div>}
+              <pre className="mt-0.5 text-xs bg-gray-50 p-1.5 rounded overflow-x-auto">
+                <code>{formatArgs(entry.args)}</code>
+              </pre>
+              {entry.result !== undefined && (
+                <pre
+                  className={`mt-1 text-xs p-1.5 rounded overflow-x-auto ${
+                    entry.isError ? 'bg-red-50 text-red-800' : 'bg-green-50 text-green-900'
+                  }`}
+                >
+                  <code>{formatResult(entry.result, entry.isError)}</code>
+                </pre>
+              )}
             </div>
           ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function activityStatusLabel(status: AgentActivityStatus): string {
-  switch (status) {
-    case 'running':
-      return 'Running'
-    case 'completed':
-      return ''
-    case 'waiting':
-      return 'Waiting'
-    case 'error':
-      return 'Error'
-    default:
-      return 'Activity'
-  }
-}
-
-function ActivityBlock({ message }: { message: Message }) {
-  const [open, setOpen] = useState(false)
-  const activity = message.activity
-  if (!activity) return null
-
-  const hasDetails = Boolean(activity.detail)
-  const statusLabel = activityStatusLabel(activity.status)
-
-  return (
-    <div className={`ui-chat-activity-row ui-chat-activity-row--${activity.status}`}>
-      <button
-        onClick={() => hasDetails && setOpen(v => !v)}
-        className={`ui-chat-activity-row__header ${hasDetails ? 'cursor-pointer' : 'cursor-default'}`}
-      >
-        {statusLabel ? <span className="ui-chat-activity-row__status">{statusLabel}</span> : null}
-        <span className="ui-chat-activity-row__label">{activity.label}</span>
-        {hasDetails && <ChevronIcon open={open} />}
-      </button>
-
-      {open && hasDetails && (
-        <div className="ui-chat-activity-row__details">
-          {activity.detail ? <div>{activity.detail}</div> : null}
         </div>
       )}
     </div>
@@ -211,9 +193,11 @@ export default function ChatMessage({ message }: ChatMessageProps) {
     return <ToolSummaryBlock entries={message.toolEntries} />
   }
 
-  // Structured activity stream row
+  // Structured activity stream row. Hidden from the transcript to avoid
+  // duplicating the batched tool_summary block; activity state still drives
+  // the composer indicator via ChatActivityContext.
   if (message.type === 'activity') {
-    return <ActivityBlock message={message} />
+    return null
   }
 
   // Render rich content
