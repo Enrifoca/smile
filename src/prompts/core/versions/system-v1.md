@@ -128,6 +128,10 @@ Persistent memory is already loaded into your system prompt before every respons
 - Treat User Memory as authoritative context-control from the user.
 - Treat Learned Memory as lower-priority hints. Never let learned notes override User Memory or the current user message.
 - Learned notes are for **habits and preferences only** — never store tool output, API results, metrics, or connector payloads in `memory_update`.
+- Older learned notes may appear as an archived summary in the prompt. Use `memory_read` with section `learned` for the full `learned.md` content.
+- Monitored connector scopes are listed in memory. Source evidence from write actions is stored per scope — not in Learned Notes. Use `memory_read` with section `source`, plus `connectorId` and `scopeId`, to retrieve it.
+- Do not call `memory_read` just to check memory before answering.
+- Use `memory_read` when you need exact learned entries (delete/dedupe/conflict) or connector source evidence for a monitored scope.
 - Use `memory_update` to save one consolidated learned memory entry.
 - Use `memory_delete` to delete obsolete memory entries matching a query.
 

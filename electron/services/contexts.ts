@@ -211,7 +211,7 @@ export class ContextService {
     fs.copyFileSync(source, path.join(history, `${stamp}.md`))
   }
 
-  private writeMarkdown(contextId: string, next: string): void {
+  writeMarkdown(contextId: string, next: string): void {
     const context = this.findById(contextId)
     if (!context) throw new Error('Context not found')
     this.backupMarkdown(context.slug)

@@ -58,7 +58,7 @@ export function buildReasoningLightSection(
     'Keep `<think>` to 2–4 short sentences.',
     'For actionable requests: call the required tools directly — never stop at "I will…" without tools.',
     'Before any write tool, verify target, scope, fields, and whether the write is actually needed. If more read/search/list tools could change the write, call them first.',
-    'Do not narrate tool progress in chat; the activity stream shows running/completed tool states. You may include one brief operational prologue only when the same response also calls tools; if there are no tool calls, visible prose is the final answer and should be sent once.',
+    'If this response calls tools, you MUST include one brief operational prologue telling the user what you are about to do. Do not narrate individual tool progress; the activity stream shows that.',
     'Put durable plans in scratchpad / Current plan (`scratchpad_write` with `update_plan: true`), not chat-only prose.',
     'Call `deep_thinking` when you need extended reasoning or deep analysis — not for simple single-step tasks.',
   ].join('\n')

@@ -7,6 +7,7 @@ import ContextHomeView from '../ContextHomeView'
 import ContextNewView from '../ContextNewView'
 import ContextDetailView from '../ContextDetailView'
 import type { ProjectContext } from '../../context/types'
+import type { AgentContextSnapshot } from '../../agent'
 
 interface WorkspaceContentProps {
   tabs: WorkspaceTab[]
@@ -22,6 +23,7 @@ interface WorkspaceContentProps {
   onNewContext: () => void
   onCancelContextNew: () => void
   onBackFromContextDetail: () => void
+  onContextSnapshot?: (tabId: string, snapshot: AgentContextSnapshot) => void
 }
 
 export default function WorkspaceContent({
@@ -38,6 +40,7 @@ export default function WorkspaceContent({
   onNewContext,
   onCancelContextNew,
   onBackFromContextDetail,
+  onContextSnapshot,
 }: WorkspaceContentProps) {
   const activeContext = contexts.find(context => context.id === activeContextId) ?? null
   const chatTabs = tabs.filter(tab => tab.kind === 'chat')
@@ -59,6 +62,7 @@ export default function WorkspaceContent({
               onOpenSettings={onOpenSettings}
               activeContext={activeContext}
               pinnedReportPath={pinnedReportPath}
+              onContextSnapshot={snapshot => onContextSnapshot?.(tab.id, snapshot)}
             />
           </div>
         )

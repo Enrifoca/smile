@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'path'
 import { applyAppIcon, loadAppIcon } from './appIcon'
-import { applyAppIcon, loadAppIcon } from './appIcon'
+
 import { EncryptionService } from './services/encryption'
 import { StorageService } from './services/storage'
 import { FileService } from './services/files'
@@ -20,6 +20,9 @@ import { getContextService, ContextService } from './services/contexts'
 import { getSourceMemoryService } from './services/sourceMemory'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
 import { getUpdateService } from './services/updates'
+
+// Ensure the app name is smile:D in the Dock/Finder, both in dev and packaged builds.
+app.setName('smile:D')
 
 // Services
 let encryptionService: EncryptionService
@@ -874,6 +877,16 @@ ipcMain.handle('contexts:readMarkdown', async (_, contextId: string) => {
   try {
     const service = ensureContextService()
     return { success: true, data: service.readMarkdown(contextId) }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('contexts:writeMarkdown', async (_, contextId: string, content: string) => {
+  try {
+    const service = ensureContextService()
+    service.writeMarkdown(contextId, content)
+    return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }

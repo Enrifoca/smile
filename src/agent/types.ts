@@ -22,6 +22,40 @@ export interface ToolEntry {
   runningLabel: string
   /** Status before the next model call after this tool */
   afterLabel: string
+  /** Arguments used for this tool call (shown in expanded details for debugging) */
+  args?: Record<string, unknown>
+  /** Formatted result returned by the tool (shown for read tools) */
+  result?: string
+  /** Whether the tool returned an error */
+  isError?: boolean
+}
+
+export interface AgentContextSnapshotSection {
+  name: string
+  present: boolean
+  /** Undefined when the section is referenced but its content is intentionally hidden (e.g. system prompt, memory). */
+  content?: string
+  /** Estimated token count for this section (0 if content is hidden or empty). */
+  tokens?: number
+}
+
+export interface AgentContextSnapshot {
+  /** The last user message that started this turn. */
+  userMessage: string
+  /** Sections included in the latest call to the model, in prompt order. */
+  sections: AgentContextSnapshotSection[]
+  /** The assembled system prompt content sent to the model (may be large). */
+  systemPrompt?: string
+  /** Recent conversation history included in the latest call. */
+  recentHistory?: Array<{ role: string; content: string }>
+  /** Latest tool results included in context after the most recent tool loop. */
+  latestToolResults?: Array<{ tool: string; args: Record<string, unknown>; result: string; isError: boolean }>
+  /** Full formatted memory content included in the system prompt. */
+  memoryContent?: string
+  /** Estimated total tokens for the latest call (system prompt + history + tool results). */
+  totalTokens?: number
+  /** Debug metadata about the call. */
+  metadata?: { model?: string; reasoningModel?: string; timestamp: string; iteration: number }
 }
 
 export type AgentActivityKind = 'model' | 'thinking' | 'tool' | 'approval' | 'task'

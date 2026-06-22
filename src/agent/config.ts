@@ -1,4 +1,4 @@
-import { Message, PendingAction, UserProfile } from './types'
+import { Message, PendingAction, UserProfile, type AgentContextSnapshot } from './types'
 import { MemoryStore } from '../types/memory'
 import { ConnectorRuntime } from '../connectors/types'
 import { ConnectorScope } from '../connectors/registry'
@@ -29,6 +29,8 @@ export interface AgentConfig {
   onPendingAction: (action: PendingAction) => void
   /** Live status line while the agent is working (null clears it) */
   onAgentStatus?: (status: string | null) => void
+  /** Snapshot of the full context given to the model on its latest call, for the UI context inspector. */
+  onContextSnapshot?: (snapshot: AgentContextSnapshot) => void
   executeFileTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeMemoryTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeContextTool: (name: string, args: Record<string, unknown>) => Promise<unknown>

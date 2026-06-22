@@ -6,7 +6,6 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import rcedit from 'rcedit'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(__dirname, '..')
@@ -20,6 +19,8 @@ async function main() {
     console.log('brand-electron: skipped (Windows only)')
     return
   }
+
+  const { default: rcedit } = await import('rcedit')
 
   if (!fs.existsSync(sourceExe)) {
     console.warn('brand-electron: electron.exe not found — run npm install first')

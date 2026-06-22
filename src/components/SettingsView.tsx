@@ -18,6 +18,7 @@ import { UserProfile } from '../agent/types'
 import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { ModelRecommendationText } from '../settings/ModelRecommendationText'
 import { useAppUpdates } from '../context/UpdateContext'
+import { notifyChatHistoryChanged } from '../shell/chatHistoryEvents'
 import {
   AIConfig,
   AIProvider,
@@ -314,6 +315,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
     const history = await storage.get('chatHistory') as Array<{ id: string }> | null
     const all = history || []
     await storage.set('chatHistory', all.slice(0, keepRecentChats))
+    notifyChatHistoryChanged()
     setShowTrimHistoryModal(false)
   }
 

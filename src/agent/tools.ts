@@ -39,15 +39,6 @@ export const fileDeleteSchema = z.object({
 
 // ============ MEMORY TOOLS ============
 
-export const memoryReadSchema = z.object({
-  section: z.enum(['all', 'learned', 'style', 'source']).optional().default('all')
-    .describe('Which memory area to read. Use "all" for User Memory + Learned Notes. Use "source" for connector scope evidence.'),
-  connectorId: z.string().optional()
-    .describe('Connector id when section is "source", e.g. your connector id.'),
-  scopeId: z.string().optional()
-    .describe('Scope id when section is "source", e.g. a project key or workspace id.'),
-})
-
 export const memoryUpdateSchema = z.object({
   section: z.enum(['learned', 'style'])
     .describe('"learned" for ordinary notes/preferences/project rules. "style" only for writing style, tone, or recurring phrases.'),
@@ -138,13 +129,6 @@ export const toolDefinitions: ToolDefinition[] = [
   },
 
   // Memory Tools
-  {
-    name: 'memory_read',
-    description: 'Read User Memory, Learned Notes (full learned.md content), or connector source memory for a monitored scope. Use "source" with connectorId and scopeId to read sealed connector evidence.',
-    schema: memoryReadSchema,
-    requiresConfirmation: false,
-    category: 'memory',
-  },
   {
     name: 'memory_update',
     description: 'Save a new Learned Note. Use proactively when: (1) the user explicitly says to remember something, (2) you notice a clear reusable preference, (3) the user corrects you on something they always want done differently.',
