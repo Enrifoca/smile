@@ -89,8 +89,9 @@ export interface Message {
    *  - 'activity'      → structured lifecycle row for model/tool/task progress
    *  - 'artifact'      → markdown report card (see artifact)
    *  - 'tool_result'   → private model-visible tool output; persisted but hidden from chat UI
+   *  - 'summary'       → compressed history tier (system role, hidden from chat UI)
    */
-  type?: 'thinking' | 'tool_summary' | 'activity' | 'artifact' | 'tool_result'
+  type?: 'thinking' | 'tool_summary' | 'activity' | 'artifact' | 'tool_result' | 'summary'
   /** Structured activity row (set on type:'activity' messages) */
   activity?: AgentActivity
   /** Markdown report shown as an in-chat card + modal */

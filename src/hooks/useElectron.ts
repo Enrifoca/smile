@@ -46,6 +46,8 @@ export function useElectron() {
   const fileGetFileInfo = useCallback(async (relativePath: string) => api.file.getFileInfo(relativePath), [])
   const fileEnsureAttachmentsDir = useCallback(async () => api.file.ensureAttachmentsDir(), [])
   const fileSaveAttachment = useCallback(async (fileName: string, data: ArrayBuffer) => api.file.saveAttachment(fileName, data), [])
+  const fileSearchContent = useCallback(async (query: string, directory?: string, maxResults?: number) => api.file.searchContent(query, directory, maxResults), [])
+  const filePatch = useCallback(async (relativePath: string, search: string, replace: string, count?: number) => api.file.patch(relativePath, search, replace, count), [])
   const file = useMemo(
     () => ({
       selectWorkspace: fileSelectWorkspace,
@@ -58,14 +60,41 @@ export function useElectron() {
       mkdir: fileMkdir,
       exists: fileExists,
       search: fileSearch,
+      searchContent: fileSearchContent,
+      patch: filePatch,
       getFileInfo: fileGetFileInfo,
       ensureAttachmentsDir: fileEnsureAttachmentsDir,
       saveAttachment: fileSaveAttachment,
     }),
     [
       fileSelectWorkspace, fileGetWorkspace, fileSelectFolderInWorkspace, fileList, fileRead, fileReadOcr,
-      fileWrite, fileMkdir, fileExists, fileSearch, fileGetFileInfo, fileEnsureAttachmentsDir, fileSaveAttachment,
+      fileWrite, fileMkdir, fileExists, fileSearch, fileSearchContent, filePatch, fileGetFileInfo,
+      fileEnsureAttachmentsDir, fileSaveAttachment,
     ],
+  )
+
+  const webSearch = useCallback(async (query: string, count?: number) => api.web.search(query, count), [])
+  const webFetch = useCallback(async (url: string, mode?: 'article' | 'raw') => api.web.fetch(url, mode), [])
+  const web = useMemo(() => ({ search: webSearch, fetch: webFetch }), [webSearch, webFetch])
+
+  const chatLoadRecent = useCallback(async (limit?: number) => api.chat.loadRecent(limit), [])
+  const chatLoadMessages = useCallback(async (chatId: string) => api.chat.loadMessages(chatId), [])
+  const chatSaveMessage = useCallback(async (chatId: string, message: unknown) => api.chat.saveMessage(chatId, message), [])
+  const chatUpsertMessage = useCallback(async (chatId: string, message: unknown) => api.chat.upsertMessage(chatId, message), [])
+  const chatUpdateMessage = useCallback(async (chatId: string, messageId: string, content: string, isStreaming: boolean) => api.chat.updateMessage(chatId, messageId, content, isStreaming), [])
+  const chatSearchMessages = useCallback(async (query: string, limit?: number) => api.chat.searchMessages(query, limit), [])
+  const chatDeleteChat = useCallback(async (chatId: string) => api.chat.deleteChat(chatId), [])
+  const chat = useMemo(
+    () => ({
+      loadRecent: chatLoadRecent,
+      loadMessages: chatLoadMessages,
+      saveMessage: chatSaveMessage,
+      upsertMessage: chatUpsertMessage,
+      updateMessage: chatUpdateMessage,
+      searchMessages: chatSearchMessages,
+      deleteChat: chatDeleteChat,
+    }),
+    [chatLoadRecent, chatLoadMessages, chatSaveMessage, chatUpsertMessage, chatUpdateMessage, chatSearchMessages, chatDeleteChat],
   )
 
   const mcpConnect = useCallback(async (options?: { forceReauth?: boolean }) => api.mcp.connect(options), [])
@@ -86,8 +115,10 @@ export function useElectron() {
 
   const aiConfigure = useCallback(async (config: AIConfig) => api.ai.configure(config), [])
   const aiConfigureReasoning = useCallback(async (config: AIConfig) => api.ai.configureReasoning(config), [])
+  const aiConfigureReview = useCallback(async (config: AIConfig) => api.ai.configureReview(config), [])
   const aiChat = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chat(messages, tools), [])
   const aiChatReasoning = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => api.ai.chatReasoning(messages, tools), [])
+  const aiChatReview = useCallback(async (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => api.ai.chatReview(messages), [])
   const aiChatStream = useCallback((
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     tools: unknown[] | undefined,
@@ -105,13 +136,15 @@ export function useElectron() {
     () => ({
       configure: aiConfigure,
       configureReasoning: aiConfigureReasoning,
+      configureReview: aiConfigureReview,
       chat: aiChat,
       chatReasoning: aiChatReasoning,
+      chatReview: aiChatReview,
       chatStream: aiChatStream,
       chatReasoningStream: aiChatReasoningStream,
       abortStream: aiAbortStream,
     }),
-    [aiConfigure, aiConfigureReasoning, aiChat, aiChatReasoning, aiChatStream, aiChatReasoningStream, aiAbortStream],
+    [aiConfigure, aiConfigureReasoning, aiConfigureReview, aiChat, aiChatReasoning, aiChatReview, aiChatStream, aiChatReasoningStream, aiAbortStream],
   )
 
   const shellOpenExternal = useCallback(async (url: string) => api.shell.openExternal(url), [])
@@ -225,6 +258,8 @@ export function useElectron() {
   const memoryDeleteGeneral = useCallback(async (id: string) => api.memory.deleteGeneral(id), [])
   const memoryDeleteLexicon = useCallback(async (id: string) => api.memory.deleteLexicon(id), [])
   const memoryUpdateEntry = useCallback(async (category: 'general' | 'lexicon', id: string, content: string) => api.memory.updateEntry(category, id, content), [])
+  const memorySearchIndex = useCallback(async (query: string, kind?: 'user' | 'learned' | 'source', limit?: number) => api.memory.searchIndex(query, kind, limit), [])
+  const memoryReindex = useCallback(async () => api.memory.reindex(), [])
   const memoryAppendSourceLeaf = useCallback(async (leaf: {
     connectorId: string
     scopeId: string
@@ -248,6 +283,8 @@ export function useElectron() {
       deleteGeneral: memoryDeleteGeneral,
       deleteLexicon: memoryDeleteLexicon,
       updateEntry: memoryUpdateEntry,
+      searchIndex: memorySearchIndex,
+      reindex: memoryReindex,
       appendSourceLeaf: memoryAppendSourceLeaf,
       readSource: memoryReadSource,
       listSources: memoryListSources,
@@ -255,8 +292,8 @@ export function useElectron() {
     [
       memoryGetAll, memorySave, memorySaveUserMarkdown, memoryAddGeneral, memoryAddLexicon,
       memoryAddCommonPhrase, memoryAddIssueExample, memorySyncIssueExamples, memoryUpdateLastSynced,
-      memoryDeleteGeneral, memoryDeleteLexicon, memoryUpdateEntry, memoryAppendSourceLeaf,
-      memoryReadSource, memoryListSources,
+      memoryDeleteGeneral, memoryDeleteLexicon, memoryUpdateEntry, memorySearchIndex, memoryReindex,
+      memoryAppendSourceLeaf, memoryReadSource, memoryListSources,
     ],
   )
 
@@ -266,6 +303,8 @@ export function useElectron() {
     windowControls,
     models,
     file,
+    web,
+    chat,
     ai,
     mcp,
     shell,

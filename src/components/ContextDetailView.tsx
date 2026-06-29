@@ -91,7 +91,7 @@ export default function ContextDetailView({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="ui-page-title">{context.name}</h1>
-            <p className="mt-1 ui-type-ui">
+            <p className="ui-page-subtitle">
               Enable connectors and configure scope for this project context.
             </p>
           </div>

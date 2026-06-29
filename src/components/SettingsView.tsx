@@ -80,6 +80,10 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   const [ocrConfigured, setOcrConfigured] = useState(false)
   const ocrSave = useActionFeedback()
 
+  const [agentParallelReads, setAgentParallelReads] = useState(true)
+  const [agentContextWindow, setAgentContextWindow] = useState(128000)
+  const loopSave = useActionFeedback({ resetMs: 1200 })
+
   const [aiForm, setAIForm] = useState({
     provider: 'openai' as AIProvider,
     apiKey: '',
@@ -95,10 +99,12 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   const [keepRecentChats, setKeepRecentChats] = useState(5)
   const [showTrimHistoryModal, setShowTrimHistoryModal] = useState(false)
   const [showClearDataModal, setShowClearDataModal] = useState(false)
+  const [braveSearchApiKey, setBraveSearchApiKey] = useState('')
+  const braveSearchSave = useActionFeedback()
   const { state: updateState, appVersion, checkForUpdates } = useAppUpdates()
   const updateCheck = useActionFeedback()
 
-  const { storage, models: modelCatalogAPI, file, contexts: contextsAPI } = useElectron()
+  const { storage, models: modelCatalogAPI, file, contexts: contextsAPI, chat } = useElectron()
   const canUseSameReasoningKey = !!aiConfig && aiConfig.provider === reasoningForm.provider
 
   useEffect(() => {
@@ -177,6 +183,14 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           model: oc.model || '',
         })
       }
+
+      const parallel = await storage.get('agentParallelReads') as boolean | null
+      if (parallel !== null && parallel !== undefined) setAgentParallelReads(parallel)
+      const windowSetting = await storage.get('agentContextWindow') as number | null
+      if (windowSetting !== null && windowSetting !== undefined) setAgentContextWindow(windowSetting)
+
+      const braveKey = await storage.getSecure('braveSearchApiKey')
+      setBraveSearchApiKey(braveKey ? '••••••••' : '')
     } catch (error) {
       console.error('Failed to load settings:', error)
     }
@@ -274,6 +288,18 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
     })
   }
 
+  const toggleParallelReads = (value: boolean) => {
+    void loopSave.run(async () => {
+      await storage.set('agentParallelReads', value)
+    })
+  }
+
+  const saveContextWindow = (value: number) => {
+    void loopSave.run(async () => {
+      await storage.set('agentContextWindow', value)
+    })
+  }
+
   const saveAgentProfile = async (nextProfile: UserProfile) => {
     await agentProfileSave.run(async () => {
       await storage.set('userProfile', nextProfile)
@@ -314,18 +340,32 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   const trimChatHistory = async () => {
     const history = await storage.get('chatHistory') as Array<{ id: string }> | null
     const all = history || []
-    await storage.set('chatHistory', all.slice(0, keepRecentChats))
+    const keep = all.slice(0, keepRecentChats)
+    const remove = all.slice(keepRecentChats)
+
+    for (const chatItem of remove) {
+      await chat.deleteChat(chatItem.id)
+    }
+
+    await storage.set('chatHistory', keep)
     notifyChatHistoryChanged()
     setShowTrimHistoryModal(false)
   }
 
   const clearAllData = async () => {
+    const history = await storage.get('chatHistory') as Array<{ id: string }> | null
+    const all = history || []
+    for (const chatItem of all) {
+      await chat.deleteChat(chatItem.id)
+    }
     await storage.set('chatHistory', [])
     await storage.set('userProfile', null)
     await storage.setSecure('aiConfig', '')
     await storage.setSecure('reasoningConfig', '')
     await storage.setSecure('ocrConfig', '')
     await storage.set('activeContextId', null)
+    await storage.set('agentParallelReads', true)
+    await storage.set('agentContextWindow', 128000)
     setShowClearDataModal(false)
     await loadSettings()
   }
@@ -345,6 +385,16 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
     return 'Using bundled defaults'
   }
 
+  const saveBraveSearchApiKey = () => {
+    void braveSearchSave.run(async () => {
+      if (!braveSearchApiKey.trim()) {
+        await storage.setSecure('braveSearchApiKey', '')
+      } else if (braveSearchApiKey !== '••••••••') {
+        await storage.setSecure('braveSearchApiKey', braveSearchApiKey.trim())
+      }
+    })
+  }
+
   const clearLabels: Record<Exclude<ClearTarget, null>, string> = {
     general: 'General Model',
     reasoning: 'Reasoning Model',
@@ -356,8 +406,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
       <div className="content-shell page-shell">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <h1 className="ui-page-title">Settings</h1>
-            <p className="text-sm text-neutral-500 mt-1">
+            <p className="ui-page-subtitle">
               Configure framework-level model, workspace, and runtime preferences.
             </p>
           </div>
@@ -383,9 +432,9 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
 
         <div className="space-y-6">
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="ui-section-title mb-4">Workspace Folder</h2>
+            <h2 className="ui-section-title mb-4">Agent's folder</h2>
             <p className="text-sm text-gray-600 mb-4">
-              This is the folder where the agent can read documents and create outputs.
+              Workspace folder where the agent reads documents and creates outputs.
             </p>
             <div className="flex items-center gap-4">
               <div className="ui-field ui-field--readonly flex flex-1 items-center gap-3 min-w-0">
@@ -401,9 +450,10 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4 gap-3">
-              <h2 className="ui-section-title">General Model</h2>
-              {aiConfig && <Badge tone="success">Active</Badge>}
+            <h2 className="ui-section-title mb-4">Main model</h2>
+            <div className="mb-4">
+              <p className="text-sm text-gray-600">The model used for the agent loop.</p>
+              {aiConfig && <Badge tone="success" className="mt-2">Active</Badge>}
             </div>
             <Callout className="mb-5">
               <p className="text-xs font-normal">
@@ -459,20 +509,11 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-1 gap-3">
-              <div className="flex items-center gap-3">
-                <div>
-                  <h2 className="ui-section-title">Reasoning Model</h2>
-                  <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                {reasoningConfigured && <Badge tone="success">Active</Badge>}
-              </div>
+            <h2 className="ui-section-title mb-4">Reasoning model</h2>
+            <div className="mb-4">
+              <p className="text-sm text-gray-600">Optional dedicated model for complex, multi-step tasks.</p>
+              {reasoningConfigured && <Badge tone="success" className="mt-2">Active</Badge>}
             </div>
-            <p className="text-sm text-gray-500 mb-2">
-              A dedicated model for complex, multi-step tasks. When configured, it takes over automatically whenever the agent needs to plan deeply.
-            </p>
             <Callout className="mb-5">
               <p className="text-xs font-normal">
                 <ModelRecommendationText section="reasoning" />
@@ -548,18 +589,11 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-1 gap-3">
-              <div>
-                <h2 className="ui-section-title">OCR Model</h2>
-                <p className="text-xs text-gray-400 font-normal mt-0.5">Optional</p>
-              </div>
-              <div className="flex items-center gap-3">
-                {ocrConfigured && <Badge tone="success">Active</Badge>}
-              </div>
+            <h2 className="ui-section-title mb-4">OCR Model</h2>
+            <div className="mb-4">
+              <p className="text-sm text-gray-600">Optional specialist model for scanned PDFs and image-based documents.</p>
+              {ocrConfigured && <Badge tone="success" className="mt-2">Active</Badge>}
             </div>
-            <p className="text-sm text-gray-500 mb-5">
-              A specialist model for scanned PDFs and image-based documents.
-            </p>
             <Callout className="mb-5">
               <p className="text-xs font-normal">
                 <ModelRecommendationText section="ocr" />
@@ -615,7 +649,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="ui-section-title mb-1">Agent Behavior</h2>
+            <h2 className="ui-section-title mb-4">User's preferences</h2>
             <p className="text-sm text-gray-500 mb-5">Control how the agent processes your requests.</p>
 
             <div className="space-y-6">
@@ -648,6 +682,70 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
                     status={maxIterSave.status}
                     busyMessage="Saving…"
                     successMessage="Saved"
+                    size="sm"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-5 space-y-5">
+                <div>
+                  <h3 className="font-medium text-gray-800">Loop settings</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Tune parallel reads and context compression.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 p-4">
+                  <div>
+                    <span className="font-medium text-gray-800">Allow parallel independent reads</span>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Run safe read-only tools concurrently when the model asks for several.
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={agentParallelReads}
+                    onChange={event => {
+                      const checked = event.target.checked
+                      setAgentParallelReads(checked)
+                      toggleParallelReads(checked)
+                    }}
+                    label="Parallel reads"
+                    className="shrink-0"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 p-4">
+                  <div>
+                    <span className="font-medium text-gray-800">Context window</span>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Compress older history when it reaches 50% of this limit.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Select
+                      value={agentContextWindow}
+                      onChange={event => {
+                        const val = Number(event.target.value)
+                        setAgentContextWindow(val)
+                        saveContextWindow(val)
+                      }}
+                      className="w-auto min-w-[7rem]"
+                    >
+                      <option value={64000}>64k</option>
+                      <option value={128000}>128k</option>
+                      <option value={200000}>200k</option>
+                      <option value={256000}>256k</option>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="h-5">
+                  <StatusText
+                    busy={loopSave.busy}
+                    status={loopSave.status}
+                    busyMessage="Saving loop settings…"
+                    successMessage="Loop settings saved"
+                    errorMessage="Could not save loop settings"
                     size="sm"
                   />
                 </div>
@@ -714,7 +812,39 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="ui-section-title mb-1">App updates</h2>
+            <h2 className="ui-section-title mb-4">Web search</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Web search uses DuckDuckGo by default. Add a Brave Search API key for reliable, higher-rate-limit search.
+            </p>
+            <div className="space-y-4">
+              <Field label="Brave Search API key">
+                <Input
+                  type="password"
+                  value={braveSearchApiKey}
+                  onChange={(e) => setBraveSearchApiKey(e.target.value)}
+                  onFocus={() => braveSearchApiKey === '••••••••' && setBraveSearchApiKey('')}
+                  placeholder="Optional Brave Search API key"
+                />
+              </Field>
+              <ActionRow
+                label="Save"
+                busy={braveSearchSave.busy}
+                status={braveSearchSave.status}
+                onAction={saveBraveSearchApiKey}
+                size="sm"
+                successMessage="Saved!"
+                errorMessage="Failed to save API key."
+                extraActions={
+                  <Button variant="secondary" size="sm" onClick={() => { setBraveSearchApiKey(''); void saveBraveSearchApiKey() }}>
+                    Clear
+                  </Button>
+                }
+              />
+            </div>
+          </section>
+
+          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="ui-section-title mb-4">Updates</h2>
             <p className="text-sm text-gray-500 mb-4">
               Installed releases check GitHub automatically on startup. Download installers from your website or GitHub Releases.
             </p>
@@ -764,7 +894,8 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-red-200 p-6">
-            <h2 className="ui-section-title text-red-700 mb-4">Danger Zone</h2>
+            <h2 className="ui-section-title text-red-700 mb-4">Danger zone</h2>
+            <p className="text-sm text-red-700 mb-4">Destructive actions that cannot be undone.</p>
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-4">
                 <div>

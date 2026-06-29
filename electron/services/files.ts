@@ -68,8 +68,12 @@ export class FileService {
   }
 
   async ensureWorkspaceFolders(): Promise<void> {
+    console.log('[FileService] Ensuring workspace folders for:', this.workspacePath)
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'contexts'), { recursive: true })
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'reports'), { recursive: true })
+    await fs.mkdir(path.join(this.workspacePath, '.smile', 'connectors'), { recursive: true })
+    await fs.mkdir(path.join(this.workspacePath, '.smile', 'memories'), { recursive: true })
+    console.log('[FileService] Workspace folders ensured')
   }
 
   /**
@@ -150,7 +154,7 @@ export class FileService {
       
       const files: FileInfo[] = await Promise.all(
         entries
-          .filter(entry => !entry.name.startsWith('.')) // Skip hidden files
+          .filter(entry => !entry.name.startsWith('.') || entry.name === '.smile') // Skip hidden files except the framework workspace folder
           .map(async (entry) => {
             const filePath = path.join(fullPath, entry.name)
             const stats = await fs.stat(filePath)
@@ -543,6 +547,149 @@ export class FileService {
       return { success: true, data: content }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to read file'
+      return { success: false, error: message }
+    }
+  }
+
+  /**
+   * Search file contents using ripgrep (WASM).
+   */
+  async searchFileContent(
+    query: string,
+    relativePath: string = '',
+    maxResults: number = 20,
+  ): Promise<{ success: boolean; data?: unknown[]; error?: string }> {
+    try {
+      const fullPath = this.validatePath(relativePath)
+      const stats = await fs.stat(fullPath).catch(() => null)
+      if (!stats) {
+        return { success: false, error: `Path not found: ${relativePath || '.'}` }
+      }
+
+      const args = [
+        '--json',
+        '-C', '2',
+        '-m', String(maxResults),
+        '--max-filesize', '50M',
+        '--no-binary',
+        '--hidden',
+        '--glob', '!.git',
+        '--glob', '!.smile',
+        query,
+        fullPath,
+      ]
+
+      const { ripgrep } = await import('ripgrep') as { ripgrep: (args: string[], options: { buffer?: boolean; preopens?: Record<string, string> }) => Promise<{ code: number; stdout: string; stderr: string }> }
+      const { code, stdout, stderr } = await ripgrep(args, {
+        buffer: true,
+        preopens: { '/workspace': this.workspacePath },
+      })
+
+      if (code !== 0 && code !== 1) {
+        return { success: false, error: stderr || `ripgrep exited with code ${code}` }
+      }
+
+      const lines = stdout.split('\n').filter(Boolean)
+      const matches: Array<{
+        file: string
+        line: number
+        content: string
+        contextBefore: string[]
+        contextAfter: string[]
+      }> = []
+
+      let currentMatch: typeof matches[number] | null = null
+
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line) as {
+            type: 'begin' | 'match' | 'end' | 'summary'
+            data: {
+              path?: { text: string }
+              lines?: { text: string }
+              line_number?: number
+              line?: { text: string }
+            }
+          }
+          if (parsed.type === 'begin') {
+            currentMatch = null
+          } else if (parsed.type === 'match' && parsed.data.line_number !== undefined) {
+            const filePath = parsed.data.path?.text || ''
+            const relative = path.relative(this.workspacePath, filePath)
+            currentMatch = {
+              file: relative,
+              line: parsed.data.line_number,
+              content: parsed.data.lines?.text?.trimEnd() || '',
+              contextBefore: [],
+              contextAfter: [],
+            }
+            matches.push(currentMatch)
+          } else if (parsed.type === 'end') {
+            currentMatch = null
+          }
+        } catch {
+          // Ignore malformed JSON lines
+        }
+      }
+
+      return { success: true, data: matches }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to search file contents'
+      console.error('[FileService] searchFileContent error:', message)
+      return { success: false, error: message }
+    }
+  }
+
+  /**
+   * Apply a surgical search/replace patch to a file.
+   */
+  async patchFile(
+    relativePath: string,
+    search: string,
+    replace: string,
+    count: number = 1,
+  ): Promise<{ success: boolean; data?: { replacements: number; path: string }; error?: string }> {
+    try {
+      const fullPath = this.validatePath(relativePath)
+      const content = await fs.readFile(fullPath, 'utf-8')
+
+      let replaced = 0
+      let remaining = count
+      let nextContent = content
+      const occurrences: Array<{ line: number; original: string }> = []
+
+      while (remaining > 0) {
+        const index = nextContent.indexOf(search)
+        if (index === -1) break
+
+        const before = nextContent.slice(0, index)
+        const lineNumber = before.split('\n').length
+        occurrences.push({ line: lineNumber, original: search })
+
+        nextContent = before + replace + nextContent.slice(index + search.length)
+        replaced++
+        remaining--
+      }
+
+      if (replaced === 0) {
+        return { success: false, error: `Search block not found in ${relativePath}` }
+      }
+
+      if (count > 1 && replaced < count && content.indexOf(search) !== -1) {
+        // This should not happen because we loop, but guard anyway
+      }
+
+      await fs.writeFile(fullPath, nextContent, 'utf-8')
+
+      return {
+        success: true,
+        data: {
+          replacements: replaced,
+          path: relativePath,
+        },
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to patch file'
       return { success: false, error: message }
     }
   }

@@ -30,6 +30,8 @@ export interface ElectronAPI {
     mkdir: (relativePath: string) => Promise<{ success: boolean; error?: string }>
     exists: (relativePath: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>
     search: (pattern: string, directory?: string) => Promise<{ success: boolean; data?: Array<{ name: string; path: string; size: number; isDirectory: boolean }>; error?: string }>
+    searchContent: (query: string, directory?: string, maxResults?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
+    patch: (relativePath: string, search: string, replace: string, count?: number) => Promise<{ success: boolean; data?: { replacements: number; path: string }; error?: string }>
     getFileInfo: (relativePath: string) => Promise<{ success: boolean; data?: { name: string; size: number; isDirectory: boolean; mimeType?: string }; error?: string }>
     ensureAttachmentsDir: () => Promise<{ success: boolean; path?: string; error?: string }>
     saveAttachment: (fileName: string, data: ArrayBuffer) => Promise<{ success: boolean; path?: string; error?: string }>
@@ -37,12 +39,18 @@ export interface ElectronAPI {
   ai: {
     configure: (config: AIConfig) => Promise<{ success: boolean }>
     configureReasoning: (config: AIConfig) => Promise<{ success: boolean }>
+    configureReview: (config: AIConfig) => Promise<{ success: boolean }>
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
       error?: string
     }>
     chatReasoning: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
+      success: boolean
+      data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
+      error?: string
+    }>
+    chatReview: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
       error?: string
@@ -68,6 +76,19 @@ export interface ElectronAPI {
       error?: string
     }>
     abortStream: () => void
+  }
+  web: {
+    search: (query: string, count?: number) => Promise<{ success: boolean; data?: Array<{ title: string; url: string; snippet: string }>; error?: string }>
+    fetch: (url: string, mode?: 'article' | 'raw') => Promise<{ success: boolean; data?: { title: string; url: string; content: string; mode: 'article' | 'raw' }; error?: string }>
+  }
+  chat: {
+    loadRecent: (limit?: number) => Promise<{ success: boolean; data?: Array<{ id: string; title: string; date: string; message_count: number; last_message_at: string }>; error?: string }>
+    loadMessages: (chatId: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
+    saveMessage: (chatId: string, message: unknown) => Promise<{ success: boolean; error?: string }>
+    upsertMessage: (chatId: string, message: unknown) => Promise<{ success: boolean; error?: string }>
+    updateMessage: (chatId: string, messageId: string, content: string, isStreaming: boolean) => Promise<{ success: boolean; error?: string }>
+    searchMessages: (query: string, limit?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
+    deleteChat: (chatId: string) => Promise<{ success: boolean; error?: string }>
   }
   mcp: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
@@ -174,6 +195,8 @@ export interface ElectronAPI {
     deleteGeneral: (id: string) => Promise<{ success: boolean; error?: string }>
     deleteLexicon: (id: string) => Promise<{ success: boolean; error?: string }>
     updateEntry: (category: 'general' | 'lexicon', id: string, content: string) => Promise<{ success: boolean; error?: string }>
+    searchIndex: (query: string, kind?: 'user' | 'learned' | 'source', limit?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
+    reindex: () => Promise<{ success: boolean; error?: string }>
     appendSourceLeaf: (leaf: {
       connectorId: string
       scopeId: string

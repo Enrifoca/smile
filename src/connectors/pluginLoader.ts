@@ -134,7 +134,6 @@ export function createPluginConnectorRuntime(
       for (const write of outcome.writes || []) {
         const formatted = input.formatToolResultForAI(write.name, write.result)
         input.cacheToolResult(write.name, write.args, formatted)
-        input.updateScratchpadAfterTool(write.name, write.args, formatted)
         input.invalidateCacheAfterWrite(write.name, write.args)
       }
       return { handled: true, message: outcome.message, resumeAgent: outcome.resumeAgent }

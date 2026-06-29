@@ -26,6 +26,7 @@ const CORE_CATEGORY_LINES: Record<string, string> = {
   scratchpad: 'working notes and plan updates for this turn',
   analysis: 'deep_thinking for structured analysis',
   context: 'read and update active project context',
+  web: 'search and fetch web content',
 }
 
 function summarizeCoreTools(tools: ToolDefinition[]): string[] {

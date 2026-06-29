@@ -30,6 +30,8 @@ export interface ProjectContext {
   updatedAt: string
   version: number
   connectors: Record<string, ContextConnectorConfig>
+  /** Whether web search/fetch tools are enabled for this context. Defaults to true. */
+  webSearchEnabled?: boolean
 }
 
 /** Legacy shape kept for one-time migration from electron-store. */

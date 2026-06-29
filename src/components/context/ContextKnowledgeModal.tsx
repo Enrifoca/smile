@@ -25,22 +25,31 @@ export function ContextKnowledgeModal({
 }: ContextKnowledgeModalProps) {
   const { contexts: contextsAPI } = useElectron()
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // The parent (ContextKnowledgeCard) drives the initial load. Keep local state
+  // in sync so the modal never stays stuck on "Loading…" when the parent finishes.
   const [content, setContent] = useState(initialContent ?? '')
+  const [loading, setLoading] = useState(initialLoading)
+  const [error, setError] = useState<string | null>(initialError)
+
   const [editMode, setEditMode] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(initialError)
-  const [loading, setLoading] = useState(initialLoading)
 
   useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [onClose])
+    setContent(initialContent ?? '')
+  }, [initialContent])
 
   useEffect(() => {
-    if (initialContent === null && !initialLoading && !initialError) {
+    setLoading(initialLoading)
+  }, [initialLoading])
+
+  useEffect(() => {
+    setError(initialError)
+  }, [initialError])
+
+  // Fallback: if the parent passed no initial request state, load ourselves.
+  useEffect(() => {
+    if (initialContent === null && !initialLoading && initialError === null) {
       setLoading(true)
       setError(null)
       contextsAPI
@@ -53,6 +62,14 @@ export function ContextKnowledgeModal({
         .finally(() => setLoading(false))
     }
   }, [contextId, contextsAPI, initialContent, initialLoading, initialError])
+
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onClose])
 
   const handleSave = async () => {
     setSaving(true)

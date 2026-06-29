@@ -43,10 +43,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     exists: (relativePath: string) => ipcRenderer.invoke('file:exists', relativePath),
     search: (pattern: string, directory?: string) => 
       ipcRenderer.invoke('file:search', pattern, directory),
+    searchContent: (query: string, relativePath?: string, maxResults?: number) =>
+      ipcRenderer.invoke('file:searchContent', query, relativePath, maxResults),
+    patch: (relativePath: string, search: string, replace: string, count?: number) =>
+      ipcRenderer.invoke('file:patch', relativePath, search, replace, count),
     getFileInfo: (relativePath: string) => ipcRenderer.invoke('file:getFileInfo', relativePath),
     ensureAttachmentsDir: () => ipcRenderer.invoke('file:ensureAttachmentsDir'),
     saveAttachment: (fileName: string, data: ArrayBuffer) => 
       ipcRenderer.invoke('file:saveAttachment', fileName, data),
+  },
+
+  // Web
+  web: {
+    search: (query: string, count?: number) => ipcRenderer.invoke('web:search', query, count),
+    fetch: (url: string, mode?: 'article' | 'raw') => ipcRenderer.invoke('web:fetch', url, mode),
   },
 
   // AI
@@ -55,10 +65,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('ai:configure', config),
     configureReasoning: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) =>
       ipcRenderer.invoke('ai:configureReasoning', config),
+    configureReview: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) =>
+      ipcRenderer.invoke('ai:configureReview', config),
     chat: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) =>
       ipcRenderer.invoke('ai:chat', messages, tools),
     chatReasoning: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) =>
       ipcRenderer.invoke('ai:chatReasoning', messages, tools),
+    chatReview: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) =>
+      ipcRenderer.invoke('ai:chatReview', messages),
     chatStream: (
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
       tools: unknown[] | undefined,
@@ -139,6 +153,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   },
 
+  chat: {
+    loadRecent: (limit?: number) => ipcRenderer.invoke('chat:loadRecent', limit),
+    loadMessages: (chatId: string) => ipcRenderer.invoke('chat:loadMessages', chatId),
+    saveMessage: (chatId: string, message: unknown) => ipcRenderer.invoke('chat:saveMessage', chatId, message),
+    upsertMessage: (chatId: string, message: unknown) => ipcRenderer.invoke('chat:upsertMessage', chatId, message),
+    updateMessage: (chatId: string, messageId: string, content: string, isStreaming: boolean) =>
+      ipcRenderer.invoke('chat:updateMessage', chatId, messageId, content, isStreaming),
+    searchMessages: (query: string, limit?: number) => ipcRenderer.invoke('chat:searchMessages', query, limit),
+    deleteChat: (chatId: string) => ipcRenderer.invoke('chat:deleteChat', chatId),
+  },
+
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
   },
@@ -214,6 +239,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteLexicon: (id: string) => ipcRenderer.invoke('memory:deleteLexicon', id),
     updateEntry: (category: 'general' | 'lexicon', id: string, content: string) =>
       ipcRenderer.invoke('memory:updateEntry', category, id, content),
+    searchIndex: (query: string, kind?: 'user' | 'learned' | 'source', limit?: number) =>
+      ipcRenderer.invoke('memory:searchIndex', query, kind, limit),
+    reindex: () => ipcRenderer.invoke('memory:reindex'),
     appendSourceLeaf: (leaf: {
       connectorId: string
       scopeId: string
@@ -250,6 +278,8 @@ export interface ElectronAPI {
     write: (relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
     exists: (relativePath: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>
     search: (pattern: string, directory?: string) => Promise<{ success: boolean; data?: Array<{ name: string; path: string; size: number; isDirectory: boolean }>; error?: string }>
+    searchContent: (query: string, directory?: string, maxResults?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
+    patch: (relativePath: string, search: string, replace: string, count?: number) => Promise<{ success: boolean; data?: { replacements: number; path: string }; error?: string }>
     getFileInfo: (relativePath: string) => Promise<{ success: boolean; data?: { name: string; size: number; isDirectory: boolean; mimeType?: string }; error?: string }>
     ensureAttachmentsDir: () => Promise<{ success: boolean; path?: string; error?: string }>
     saveAttachment: (fileName: string, data: ArrayBuffer) => Promise<{ success: boolean; path?: string; error?: string }>
@@ -263,6 +293,11 @@ export interface ElectronAPI {
       error?: string
     }>
     chatReasoning: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
+      success: boolean
+      data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
+      error?: string
+    }>
+    chatReview: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => Promise<{
       success: boolean
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
       error?: string
@@ -297,6 +332,14 @@ export interface ElectronAPI {
   }
   shell: {
     openExternal: (url: string) => Promise<{ success: boolean }>
+  }
+  chat: {
+    loadRecent: (limit?: number) => Promise<{ success: boolean; data?: Array<{ id: string; title: string; date: string; message_count: number; last_message_at: string }>; error?: string }>
+    loadMessages: (chatId: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
+    saveMessage: (chatId: string, message: unknown) => Promise<{ success: boolean; error?: string }>
+    upsertMessage: (chatId: string, message: unknown) => Promise<{ success: boolean; error?: string }>
+    updateMessage: (chatId: string, messageId: string, content: string, isStreaming: boolean) => Promise<{ success: boolean; error?: string }>
+    searchMessages: (query: string, limit?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
   }
   app: {
     getVersion: () => Promise<string>
@@ -363,6 +406,8 @@ export interface ElectronAPI {
     deleteGeneral: (id: string) => Promise<{ success: boolean; error?: string }>
     deleteLexicon: (id: string) => Promise<{ success: boolean; error?: string }>
     updateEntry: (category: 'general' | 'lexicon', id: string, content: string) => Promise<{ success: boolean; error?: string }>
+    searchIndex: (query: string, kind?: 'user' | 'learned' | 'source', limit?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
+    reindex: () => Promise<{ success: boolean; error?: string }>
     appendSourceLeaf: (leaf: {
       connectorId: string
       scopeId: string

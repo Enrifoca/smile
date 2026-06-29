@@ -56,6 +56,13 @@ interface StorageSchema {
   // Key: `${contextId}:${connectorId}` → Markdown.
   connectorKnowledge: Record<string, string>
 
+  // Agent loop settings
+  agentLightThinking: boolean
+  agentAutoMemoryReview: boolean
+  agentParallelReads: boolean
+  agentContextWindow: number
+  agentMemoryReviewModel: AIConfig | null
+
   // Encrypted data (stored as encrypted strings)
   'encrypted:aiConfig': string
   'encrypted:ocrConfig': string
@@ -105,6 +112,11 @@ export class StorageService {
         activeContextId: null,
         atlassianMcpAutoConnect: null,
         connectorKnowledge: {},
+        agentLightThinking: true,
+        agentAutoMemoryReview: false,
+        agentParallelReads: true,
+        agentContextWindow: 128000,
+        agentMemoryReviewModel: null,
         'encrypted:aiConfig': '',
         'encrypted:ocrConfig': ''
       }

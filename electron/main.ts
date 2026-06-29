@@ -18,6 +18,8 @@ import type { ProjectContext } from '../src/context/types'
 import { getMemoryService, MemoryService } from './services/memory'
 import { getContextService, ContextService } from './services/contexts'
 import { getSourceMemoryService } from './services/sourceMemory'
+import { getDatabaseService, DatabaseService } from './services/database'
+import { getWebService, WebService } from './services/web'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
 import { getUpdateService } from './services/updates'
 
@@ -34,6 +36,8 @@ let jiraAttachmentService: JiraAttachmentService | null = null
 let modelCatalogService: ModelCatalogService | null = null
 let connectorsService: ConnectorsService | null = null
 let contextService: ContextService | null = null
+let databaseService: DatabaseService | null = null
+let webService: WebService | null = null
 
 /** A connected MCP server that can answer generic tool calls from connectors. */
 interface McpServerHandle {
@@ -257,6 +261,125 @@ function createWindow() {
   applyAppIcon(mainWindow)
 }
 
+async function migrateChatHistoryToSqlite(db: DatabaseService, storage: StorageService): Promise<void> {
+  if (db.getMeta('messagesMigrated')) return
+  try {
+    const history = storage.get('chatHistory') as Array<{ id: string; title: string; date: string; messages: Array<Record<string, unknown>> }> | undefined
+    if (!history || history.length === 0) {
+      db.setMeta('messagesMigrated', 'true')
+      return
+    }
+    for (const chat of history) {
+      for (const raw of chat.messages || []) {
+        const msg = raw as {
+          id?: string
+          role: string
+          content: string
+          timestamp?: string
+          type?: string
+        }
+        db.upsertMessage({
+          id: msg.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          chat_id: chat.id,
+          role: msg.role,
+          content: msg.content ?? '',
+          timestamp: msg.timestamp || chat.date,
+          type: msg.type,
+        })
+      }
+    }
+    db.setMeta('messagesMigrated', 'true')
+    storage.set('chatHistory', [])
+    console.log(`[Database] Migrated ${history.length} chats to SQLite`)
+  } catch (error) {
+    console.error('[Database] Chat history migration failed:', error)
+  }
+}
+
+async function rebuildMemoryIndex(db: DatabaseService, memService: MemoryService): Promise<void> {
+  const memories = await memService.getMemories()
+  const rows: import('./services/database').MemoryIndexRow[] = []
+  const now = new Date().toISOString()
+
+  // User memory
+  if (memories.userMarkdown?.trim()) {
+    rows.push({
+      id: 'user-md',
+      kind: 'user',
+      source_file: '.smile/memories/user.md',
+      title: 'User Memory',
+      content: memories.userMarkdown,
+      updated_at: now,
+    })
+  }
+
+  // Learned notes
+  for (const entry of memories.general.entries) {
+    rows.push({
+      id: entry.id,
+      kind: 'learned',
+      source_file: '.smile/memories/learned.md',
+      title: 'General Learned Note',
+      content: entry.content,
+      updated_at: entry.updatedAt,
+    })
+  }
+  for (const entry of memories.lexicon.entries) {
+    rows.push({
+      id: entry.id,
+      kind: 'learned',
+      source_file: '.smile/memories/learned.md',
+      title: 'Lexicon Learned Note',
+      content: entry.content,
+      updated_at: entry.updatedAt,
+    })
+  }
+  for (const phrase of memories.lexicon.commonPhrases) {
+    rows.push({
+      id: `phrase-${phrase}`,
+      kind: 'learned',
+      source_file: '.smile/memories/learned.md',
+      title: 'Common Phrase',
+      content: phrase,
+      updated_at: now,
+    })
+  }
+  for (const note of memories.lexicon.vocabularyNotes) {
+    rows.push({
+      id: `vocab-${note}`,
+      kind: 'learned',
+      source_file: '.smile/memories/learned.md',
+      title: 'Vocabulary Note',
+      content: note,
+      updated_at: now,
+    })
+  }
+
+  // Source memory
+  const sourceService = getSourceMemoryService()
+  for (const scope of sourceService.listScopes()) {
+    const data = sourceService.readSource(scope.connectorId, scope.scopeId)
+    if (!data) continue
+    const parts: string[] = []
+    for (const leaf of data.buffer) parts.push(leaf.summary)
+    for (const summary of data.summaries) parts.push(summary.content)
+    const text = parts.join('\n')
+    if (!text.trim()) continue
+    rows.push({
+      id: `source-${scope.connectorId}-${scope.scopeId}`,
+      kind: 'source',
+      source_file: `.smile/memories/sources/${scope.connectorId}/${scope.scopeId}.md`,
+      title: `${scope.connectorId} / ${scope.scopeId}`,
+      content: text,
+      updated_at: data.summaries[0]?.createdAt ?? data.buffer[data.buffer.length - 1]?.createdAt ?? now,
+    })
+  }
+
+  // Replace entire index
+  db.clearMemoryIndex()
+  db.upsertMemoryIndex(rows)
+}
+
 // Initialize services
 async function initializeServices() {
   encryptionService = new EncryptionService()
@@ -274,6 +397,18 @@ async function initializeServices() {
     getSourceMemoryService().setWorkspace(workspace)
     getConnectorsService().setWorkspace(workspace)
     ensureContextService()
+    databaseService = getDatabaseService()
+    databaseService.setWorkspace(workspace)
+    webService = getWebService()
+    try {
+      const braveKey = await storageService.getSecure('braveSearchApiKey')
+      webService.setBraveApiKey(braveKey || null)
+    } catch { /* ignore missing key */ }
+
+    await migrateChatHistoryToSqlite(databaseService, storageService)
+    await rebuildMemoryIndex(databaseService, memoryService).catch(error => {
+      console.warn('[Database] Initial memory index build failed:', error)
+    })
   }
 
   void modelCatalogService.refreshAll().catch(error => {
@@ -500,6 +635,19 @@ ipcMain.handle('file:selectWorkspace', async () => {
     getSourceMemoryService().setWorkspace(workspacePath)
     getConnectorsService().setWorkspace(workspacePath)
     ensureContextService()
+    databaseService = getDatabaseService()
+    databaseService.setWorkspace(workspacePath)
+    webService = getWebService()
+    try {
+      const braveKey = await storageService.getSecure('braveSearchApiKey')
+      webService.setBraveApiKey(braveKey || null)
+    } catch { /* ignore missing key */ }
+
+    await migrateChatHistoryToSqlite(databaseService, storageService)
+    await rebuildMemoryIndex(databaseService, memoryService).catch(error => {
+      console.warn('[Database] Memory index rebuild after workspace switch failed:', error)
+    })
+
     return { success: true, path: workspacePath }
   }
   return { success: false }
@@ -565,6 +713,30 @@ ipcMain.handle('file:search', async (_, pattern: string, directory?: string) => 
   return fileService.searchFiles(pattern, directory || '')
 })
 
+ipcMain.handle('file:searchContent', async (_, query: string, directory?: string, maxResults?: number) => {
+  if (!fileService) return { success: false, error: 'Workspace not configured' }
+  return fileService.searchFileContent(query, directory || '', maxResults ?? 20)
+})
+
+ipcMain.handle('file:patch', async (_, relativePath: string, search: string, replace: string, count?: number) => {
+  if (!fileService) return { success: false, error: 'Workspace not configured' }
+  return fileService.patchFile(relativePath, search, replace, count ?? 1)
+})
+
+ipcMain.handle('web:search', async (_, query: string, count?: number) => {
+  const service = webService || getWebService()
+  try {
+    const braveKey = await storageService.getSecure('braveSearchApiKey')
+    service.setBraveApiKey(braveKey || null)
+  } catch { /* ignore missing key */ }
+  return service.webSearch(query, count)
+})
+
+ipcMain.handle('web:fetch', async (_, url: string, mode?: 'article' | 'raw') => {
+  const service = webService || getWebService()
+  return service.webFetch(url, mode)
+})
+
 ipcMain.handle('file:getFileInfo', async (_, relativePath: string) => {
   if (!fileService) return { success: false, error: 'Workspace not configured' }
   return fileService.getFileInfo(relativePath)
@@ -582,6 +754,7 @@ ipcMain.handle('file:saveAttachment', async (_, fileName: string, data: ArrayBuf
 
 // AI Service
 let reasoningAiService: AIService | null = null
+let reviewAiService: AIService | null = null
 
 ipcMain.handle('ai:configure', async (_, config: AIConfig) => {
   aiService = new AIService(config)
@@ -592,6 +765,32 @@ ipcMain.handle('ai:configure', async (_, config: AIConfig) => {
 ipcMain.handle('ai:configureReasoning', async (_, config: AIConfig) => {
   reasoningAiService = new AIService(withReasoningDefault(config))
   return { success: true }
+})
+
+// Review model configuration (cheap model for end-of-turn memory/context review)
+ipcMain.handle('ai:configureReview', async (_, config: AIConfig) => {
+  reviewAiService = new AIService(config)
+  return { success: true }
+})
+
+ipcMain.handle('ai:chatReview', async (_, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => {
+  if (!reviewAiService) {
+    const cfgStr = storageService.getSecure('memoryReviewModel')
+    if (cfgStr) {
+      try { reviewAiService = new AIService(JSON.parse(cfgStr) as AIConfig) }
+      catch { return { success: false, error: 'Review model not configured' } }
+    } else {
+      return { success: false, error: 'Review model not configured' }
+    }
+  }
+  try {
+    const response = await reviewAiService.chat(messages)
+    return { success: true, data: response }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Review model request failed'
+    console.error('[AI:chatReview] Error:', msg)
+    return { success: false, error: msg }
+  }
 })
 
 ipcMain.handle('ai:chatReasoning', async (_, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => {
@@ -1171,6 +1370,135 @@ ipcMain.handle('memory:listSources', async () => {
     return { success: true, data }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to list source memory' }
+  }
+})
+
+// ==================== CHAT HISTORY (SQLite) ====================
+
+ipcMain.handle('chat:loadRecent', async (_, limit?: number) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    const chats = databaseService.listRecentChats(limit ?? 100)
+    return { success: true, data: chats }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to load chats' }
+  }
+})
+
+ipcMain.handle('chat:loadMessages', async (_, chatId: string) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    const messages = databaseService.getMessagesForChat(chatId)
+    return { success: true, data: messages }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to load messages' }
+  }
+})
+
+ipcMain.handle('chat:saveMessage', async (_, chatId: string, message: unknown) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    const msg = message as {
+      id: string
+      role: string
+      content: string
+      timestamp: string
+      type?: string
+      metadata?: Record<string, unknown>
+    }
+    databaseService.insertMessage({
+      id: msg.id,
+      chat_id: chatId,
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      type: msg.type,
+      metadata: msg.metadata,
+    })
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to save message' }
+  }
+})
+
+ipcMain.handle('chat:upsertMessage', async (_, chatId: string, message: unknown) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    const msg = message as {
+      id: string
+      role: string
+      content: string
+      timestamp: string
+      type?: string
+      metadata?: Record<string, unknown>
+    }
+    databaseService.insertMessage({
+      id: msg.id,
+      chat_id: chatId,
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      type: msg.type,
+      metadata: msg.metadata,
+    })
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to save message' }
+  }
+})
+
+ipcMain.handle('chat:updateMessage', async (_, chatId: string, messageId: string, content: string, isStreaming: boolean) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    databaseService.updateMessage(messageId, {
+      content,
+      metadata: { isStreaming },
+    })
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to update message' }
+  }
+})
+
+ipcMain.handle('chat:searchMessages', async (_, query: string, limit?: number) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    const results = databaseService.searchMessages(query, limit ?? 20)
+    return { success: true, data: results }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to search messages' }
+  }
+})
+
+ipcMain.handle('chat:deleteChat', async (_, chatId: string) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    databaseService.deleteMessagesForChat(chatId)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to delete chat' }
+  }
+})
+
+// ==================== MEMORY INDEX (SQLite FTS5) ====================
+
+ipcMain.handle('memory:searchIndex', async (_, query: string, kind?: 'user' | 'learned' | 'source', limit?: number) => {
+  if (!databaseService) return { success: false, error: 'Workspace not configured' }
+  try {
+    const results = databaseService.searchMemoryIndex(query, kind, limit ?? 10)
+    return { success: true, data: results }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to search memory index' }
+  }
+})
+
+ipcMain.handle('memory:reindex', async () => {
+  if (!databaseService || !memoryService) return { success: false, error: 'Workspace not configured' }
+  try {
+    await rebuildMemoryIndex(databaseService, memoryService)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to reindex memory' }
   }
 })
 
