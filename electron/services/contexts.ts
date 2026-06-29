@@ -32,6 +32,7 @@ interface ContextFilePayload {
   updatedAt: string
   version: number
   connectors: Record<string, ContextConnectorConfig>
+  webSearchEnabled?: boolean
 }
 
 export class ContextService {
@@ -96,6 +97,7 @@ export class ContextService {
       updatedAt: payload.updatedAt,
       version: payload.version,
       connectors: payload.connectors,
+      webSearchEnabled: payload.webSearchEnabled,
     }
   }
 
@@ -151,6 +153,7 @@ export class ContextService {
       updatedAt: now,
       version: CONTEXT_FILE_VERSION,
       connectors: {},
+      webSearchEnabled: true,
     }
 
     fs.writeFileSync(this.jsonPath(slug), `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
@@ -171,6 +174,7 @@ export class ContextService {
       updatedAt: new Date().toISOString(),
       version: CONTEXT_FILE_VERSION,
       connectors: context.connectors,
+      webSearchEnabled: context.webSearchEnabled ?? existing.webSearchEnabled ?? true,
     }
 
     this.writeJsonFile(payload)
@@ -273,6 +277,7 @@ export class ContextService {
         updatedAt: now,
         version: CONTEXT_FILE_VERSION,
         connectors,
+        webSearchEnabled: true,
       }
 
       fs.writeFileSync(this.jsonPath(slug), `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')

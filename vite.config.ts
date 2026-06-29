@@ -19,7 +19,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['electron', 'electron-store', 'pdf-parse', 'mammoth', 'adm-zip']
+              external: ['electron', 'electron-store', 'pdf-parse', 'mammoth', 'adm-zip', 'better-sqlite3', 'ripgrep', 'jsdom', 'canvas', 'bufferutil', 'utf-8-validate', 'duck-duck-scrape', '@mozilla/readability']
             }
           }
         }

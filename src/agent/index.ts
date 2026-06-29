@@ -3,18 +3,8 @@ import { AgentActivity, Message, PendingAction, ToolEntry, UserProfile, type Age
 import { AIResponse, AgentConfig } from './config'
 import { shouldAdmitSourceLeaf } from '../memory/sourceAdmission'
 import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
-import { SessionScratchpad, getCoreScratchpadNote } from './scratchpad'
-import {
-  assemblePromptTiers,
-  buildPlanSection,
-  buildReasoningLightSection,
-  buildScratchpadSection,
-} from './promptTiers'
-import {
-  buildDeepThinkingTurnSection,
-  formatDeepThinkingToolAck,
-  type DeepThinkingRequest,
-} from './deepThinking'
+
+import { assemblePromptTiers } from './promptTiers'
 import { buildEnabledCapabilitiesSection, type ConnectorCapabilitySummary } from './capabilities'
 import { maybeCompressConversationHistory, estimateTokens } from './historyCompression'
 import { selectLearnedNotesForPrompt } from '../memory/learnedBudget'
@@ -33,7 +23,6 @@ import { formatCoreToolResultForAI } from './toolResults'
 import { isFailedToolResult } from './toolErrors'
 import {
   buildIncompleteWorkflowNudge,
-  buildPendingWriteScratchpadSuffix,
   shouldNudgeIncompleteWorkflow,
   type ToolRunRecord,
 } from './taskContinuity'
@@ -41,7 +30,7 @@ import { compressToolResult } from './compression'
 import type { MarkdownArtifact } from './artifacts'
 import { isReportArtifactPath, titleFromReportPath } from './artifacts'
 import type { AIStreamProgressEvent } from '../shared/streamProgress'
-import { formatAgentErrorMessage, isRetryableAIError } from '../shared/aiErrors'
+import { formatAgentErrorMessage } from '../shared/aiErrors'
 
 const THINK_OPEN = '<think>'
 const THINK_CLOSE = '</think>'
@@ -72,9 +61,6 @@ export class Agent {
   private summarizedToolSignatures = new Set<string>()
   // Results from tool calls in the current turn, surfaced in the context inspector.
   private latestToolResultsThisTurn: NonNullable<AgentContextSnapshot['latestToolResults']> = []
-  private sessionScratchpad = new SessionScratchpad()
-  private turnPlan = ''
-  private pendingDeepThinking: DeepThinkingRequest | null = null
   private agentLoopIteration = 0
   private abortFlag = false
   private thinkOnlyNudgedThisTurn = false
@@ -82,6 +68,7 @@ export class Agent {
   private taskContinuationNudgedThisTurn = false
   private toolsRunThisTurn: ToolRunRecord[] = []
   private lastToolEntryThisTurn: ToolEntry | null = null
+  private useReasoningThisTurn = false
 
   private setAgentStatus(status: string | null): void {
     this.config.onAgentStatus?.(status)
@@ -193,6 +180,7 @@ export class Agent {
       || e.category === 'file-manage'
       || e.category === 'context'
       || e.category === 'memory'
+      || e.category === 'web'
     )
     if (hasWrite) return "I'll make the requested change."
     if (hasRead) return "I'll look into that for you."
@@ -303,10 +291,15 @@ export class Agent {
 
   private getCoreToolDefinitions(): ToolDefinition[] {
     const contextToolNames = new Set(['context_read', 'context_append', 'context_replace_section'])
-    if (!this.activeContext) {
-      return toolDefinitions.filter(tool => !contextToolNames.has(tool.name))
-    }
-    return toolDefinitions
+    const webToolNames = new Set(['web_search', 'web_fetch'])
+    return toolDefinitions.filter(tool => {
+      if (contextToolNames.has(tool.name) && !this.activeContext) return false
+      if (webToolNames.has(tool.name)) {
+        // Web tools are enabled by default; explicitly disabled contexts hide them.
+        return this.activeContext?.webSearchEnabled !== false
+      }
+      return true
+    })
   }
 
   private getEnabledConnectors(): ConnectorRuntime[] {
@@ -393,15 +386,13 @@ export class Agent {
     this.setAgentStatus(null)
   }
 
-  async processMessage(userMessage: string): Promise<void> {
+  async processMessage(userMessage: string, options?: { useReasoning?: boolean }): Promise<void> {
+    this.useReasoningThisTurn = options?.useReasoning ?? false
     await this.syncActiveContextFromSource()
     this.abortFlag = false
     this.toolResultCache.clear()
     this.summarizedToolSignatures.clear()
     this.latestToolResultsThisTurn = []
-    this.sessionScratchpad = new SessionScratchpad()
-    this.turnPlan = ''
-    this.pendingDeepThinking = null
     this.agentLoopIteration = 0
     this.thinkOnlyNudgedThisTurn = false
     this.reportWriteSucceededThisTurn = false
@@ -437,6 +428,8 @@ export class Agent {
       }
       this.conversationHistory.push(errorMsg)
       this.config.onMessage(errorMsg)
+    } finally {
+      this.useReasoningThisTurn = false
     }
   }
 
@@ -467,10 +460,6 @@ export class Agent {
         break
       }
       if (!response) throw new Error('No response from AI')
-
-      if (response.toolCalls?.length && assistantPreamble?.trim()) {
-        this.sessionScratchpad.appendGoal(assistantPreamble.trim())
-      }
 
       if (response.toolCalls && response.toolCalls.length > 0) {
         let hadError = false
@@ -592,8 +581,6 @@ export class Agent {
               this.toolResultCache.set(cacheKey, formattedResult)
               // Invalidate stale reads after write operations
               this.invalidateCacheAfterWrite(toolCall.name, toolCall.arguments)
-              // Auto-populate scratchpad with a note about what was done
-              this.updateScratchpadAfterTool(toolCall.name, toolCall.arguments, formattedResult)
               void this.persistSourceMemoryAfterWrite(toolCall.name, toolCall.arguments, formattedResult)
               if (!isFromCache) {
                 this.emitArtifactMessageFromResult(toolCall.name, toolCall.arguments, result)
@@ -772,10 +759,6 @@ export class Agent {
     connectorSections: string[]
     capabilitiesSection: string
     contextSection: string
-    scratchpadSection: string
-    planSection: string
-    reasoningLightSection: string
-    deepThinkingSection: string
   }): void {
     if (!this.config.onContextSnapshot) return
 
@@ -783,10 +766,12 @@ export class Agent {
       .filter(m => m.role === 'user')
       .slice(-1)[0]?.content ?? ''
 
-    const recentHistory = params.relevantHistory.map(m => ({
-      role: m.role,
-      content: m.content.length > 2000 ? `${m.content.slice(0, 2000)}…` : m.content,
-    }))
+    const recentHistory = params.relevantHistory
+      .filter(m => m.role !== 'system' && m.type !== 'summary')
+      .map(m => ({
+        role: m.role,
+        content: m.content.length > 2000 ? `${m.content.slice(0, 2000)}…` : m.content,
+      }))
 
     const historySummary = recentHistory
       .map(m => `**${m.role}:** ${m.content}`)
@@ -821,10 +806,6 @@ export class Agent {
       section('Capabilities', params.capabilitiesSection),
       section('Active context', params.contextSection),
       section('Connector context', params.connectorSections.join('\n\n')),
-      section('Plan', params.planSection),
-      section('Scratchpad', params.scratchpadSection),
-      section('Reasoning instructions', params.reasoningLightSection),
-      section('Deep thinking context', params.deepThinkingSection),
       section('Recent conversation history', historySummary),
     ]
 
@@ -858,11 +839,7 @@ export class Agent {
       this.config.memory,
       this.config.monitoredScopes || [],
       {
-        scratchpadSection: '',
         contextSection: '',
-        planSection: '',
-        reasoningLightSection: '',
-        deepThinkingSection: '',
         capabilitiesSection: '',
       },
     )
@@ -881,20 +858,9 @@ export class Agent {
     preambleMessageId?: string
     aborted?: boolean
   }> {
-    const hasReasoningModel = !!(this.config.callAIReasoningStream || this.config.callAIReasoning)
-    const isFirstLoopIteration = this.agentLoopIteration === 1
-    const deepThinkingActive = !!this.pendingDeepThinking
-    const useReasoning = hasReasoningModel && (isFirstLoopIteration || deepThinkingActive)
-
     const contextSection = await this.buildActiveContextSection()
     const connectorSections = this.getConnectorPromptSections()
     const capabilitiesSection = this.buildCapabilitiesSection()
-    const scratchpadSection = buildScratchpadSection(this.sessionScratchpad.serialize())
-    const planSection = buildPlanSection(this.turnPlan)
-    const reasoningLightSection = buildReasoningLightSection(isFirstLoopIteration, hasReasoningModel, deepThinkingActive)
-    const deepThinkingSection = deepThinkingActive && this.pendingDeepThinking
-      ? buildDeepThinkingTurnSection(this.pendingDeepThinking)
-      : ''
 
     const tiers = assemblePromptTiers(
       this.config.userProfile,
@@ -902,11 +868,7 @@ export class Agent {
       this.config.memory,
       this.config.monitoredScopes || [],
       {
-        scratchpadSection,
         contextSection,
-        planSection,
-        reasoningLightSection,
-        deepThinkingSection,
         capabilitiesSection,
       },
     )
@@ -927,10 +889,6 @@ export class Agent {
       connectorSections,
       capabilitiesSection,
       contextSection,
-      scratchpadSection,
-      planSection,
-      reasoningLightSection,
-      deepThinkingSection,
     })
 
     const tools = this.getAllToolDefinitions().map(tool => ({
@@ -942,18 +900,15 @@ export class Agent {
       },
     }))
 
-    const effectiveCallAIStream = (useReasoning && this.config.callAIReasoningStream)
-      ? this.config.callAIReasoningStream
-      : this.config.callAIStream
-    const effectiveCallAI = (useReasoning && this.config.callAIReasoning)
-      ? this.config.callAIReasoning
-      : this.config.callAI
+    const useReasoningStream = this.useReasoningThisTurn && !!this.config.callAIReasoningStream
+    const useReasoningNonStream = this.useReasoningThisTurn && !!this.config.callAIReasoning
+    const effectiveCallAIStream = useReasoningStream ? this.config.callAIReasoningStream : this.config.callAIStream
+    const effectiveCallAI = useReasoningNonStream ? this.config.callAIReasoning : this.config.callAI
 
     this.setActivityPhase({
       kind: 'awaiting_model',
-      useReasoning,
-      isFirstReasoningIteration: useReasoning && isFirstLoopIteration && !deepThinkingActive,
-      isDeepThinkingIteration: deepThinkingActive,
+      useReasoning: useReasoningStream || useReasoningNonStream,
+      isFirstReasoningIteration: useReasoningStream || useReasoningNonStream,
       lastEntry: this.lastToolEntryThisTurn,
     })
 
@@ -1065,16 +1020,6 @@ export class Agent {
       if (this.abortFlag) {
         return this.finalizeAbortedStream(responseMsgId, responseStarted, responseContent)
       }
-      if (
-        !result.success
-        && useReasoning
-        && this.config.callAIStream
-        && isRetryableAIError(result.error || '')
-      ) {
-        console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
-        this.setActivityPhase({ kind: 'reasoning_fallback' })
-        result = await this.config.callAIStream(messages, tools, onToken, event => this.handleStreamProgress(event))
-      }
       if (this.abortFlag) {
         return this.finalizeAbortedStream(responseMsgId, responseStarted, responseContent)
       }
@@ -1155,19 +1100,13 @@ export class Agent {
     }
 
     // Fallback: non-streaming
+    if (!effectiveCallAI) {
+      throw new Error('No AI caller available')
+    }
     let result = await effectiveCallAI(messages, tools)
     if (this.abortFlag) {
       this.abortFlag = false
       return { response: null, wasStreamed: false, aborted: true }
-    }
-    if (
-      !result.success
-      && useReasoning
-      && isRetryableAIError(result.error || '')
-    ) {
-      console.warn('[Agent] Reasoning model unavailable, falling back to chat model:', result.error)
-      this.setActivityPhase({ kind: 'reasoning_fallback' })
-      result = await this.config.callAI(messages, tools)
     }
     if (this.abortFlag) {
       this.abortFlag = false
@@ -1202,10 +1141,8 @@ export class Agent {
     }
 
     return { response, wasStreamed: false, assistantPreamble: preambleText || undefined }
-    } finally {
-      if (deepThinkingActive) {
-        this.pendingDeepThinking = null
-      }
+    } catch (error) {
+      throw error
     }
   }
 
@@ -1379,21 +1316,6 @@ export class Agent {
     }
   }
 
-  /**
-   * Auto-append a one-liner to the session scratchpad after key tool results.
-   * This ensures the agent always "knows" what it has already done even when
-   * old tool result messages are pushed out of the 40-message context window.
-   */
-  private updateScratchpadAfterTool(toolName: string, args: Record<string, unknown>, formattedResult: string): void {
-    let note = getCoreScratchpadNote(toolName, args, formattedResult)
-    note = note || this.getConnectorForTool(toolName)?.definition.getScratchpadNote?.(toolName, args, formattedResult) || ''
-    if (note) {
-      const path = String(args.path || '')
-      note += buildPendingWriteScratchpadSuffix(toolName, path)
-      this.sessionScratchpad.appendDone(note)
-    }
-  }
-
   private maybeNudgeTaskContinuation(responseText: string): boolean {
     if (this.taskContinuationNudgedThisTurn) return false
     if (!shouldNudgeIncompleteWorkflow(this.toolsRunThisTurn, responseText, {
@@ -1409,22 +1331,6 @@ export class Agent {
       timestamp: new Date().toISOString(),
     })
     return true
-  }
-
-  private activateDeepThinking(args: Record<string, unknown>): { success: boolean; data?: string; error?: string } {
-    const callReasoning = this.config.callAIReasoning || this.config.callAIReasoningStream
-    if (!callReasoning) {
-      return { success: false, error: 'Reasoning model not configured. Configure a reasoning model in Settings or proceed without deep_thinking.' }
-    }
-
-    const question = String(args.question || '').trim()
-    if (!question) {
-      return { success: false, error: 'question is required' }
-    }
-
-    const context = args.context ? String(args.context) : undefined
-    this.pendingDeepThinking = { question, context }
-    return { success: true, data: formatDeepThinkingToolAck() }
   }
 
   private async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -1448,23 +1354,11 @@ export class Agent {
       return this.config.executeMemoryTool(name, args)
     } else if (name.startsWith('context_')) {
       return this.config.executeContextTool(name, args)
-    } else if (name === 'scratchpad_write') {
-      const note = (args.note as string) || ''
-      const updatePlan = args.update_plan === true
-      if (note.trim()) {
-        if (updatePlan) {
-          this.turnPlan = note.trim()
-          this.sessionScratchpad.appendNote(`Plan: ${note.trim()}`)
-        } else {
-          this.sessionScratchpad.appendNote(note.trim())
-        }
+    } else if (name === 'web_search' || name === 'web_fetch') {
+      if (!this.config.executeWebTool) {
+        throw new Error(`Web tool ${name} is not configured`)
       }
-      return {
-        success: true,
-        data: updatePlan ? 'Plan updated in working notes.' : 'Note added to working notes.',
-      }
-    } else if (name === 'deep_thinking') {
-      return this.activateDeepThinking(args)
+      return this.config.executeWebTool(name, args)
     }
     
     throw new Error(`Unknown tool: ${name}`)
@@ -1527,7 +1421,6 @@ export class Agent {
       contextEnvelope,
       executeTool: (name, args) => this.executeTool(name, args),
       formatToolResultForAI: (name, result) => this.formatToolResultForAI(name, result),
-      updateScratchpadAfterTool: (name, args, formattedResult) => this.updateScratchpadAfterTool(name, args, formattedResult),
       invalidateCacheAfterWrite: (name, args) => this.invalidateCacheAfterWrite(name, args),
       cacheToolResult: (name, args, formattedResult) => {
         this.toolResultCache.set(`${name}:${JSON.stringify(args)}`, formattedResult)
@@ -1584,7 +1477,6 @@ export class Agent {
       content: `[tool_result: ${action.type}]\n${formattedResult}`,
       timestamp: new Date().toISOString(),
     })
-    this.updateScratchpadAfterTool(action.type, action.data, formattedResult)
     this.invalidateCacheAfterWrite(action.type, action.data)
     void this.persistSourceMemoryAfterWrite(action.type, action.data, formattedResult)
 

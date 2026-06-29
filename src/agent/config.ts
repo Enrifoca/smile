@@ -34,6 +34,7 @@ export interface AgentConfig {
   executeFileTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeMemoryTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeContextTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
+  executeWebTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>
   /** Load context markdown for prompt injection (full file or tool-only gate). */
   loadContextPromptBody?: (contextId: string) => Promise<ContextPromptBody>
   /** Reload the active context record from storage before tool calls (avoids stale scope config). */
@@ -60,4 +61,19 @@ export interface AgentConfig {
   abortAIStream?: () => void
   /** Estimated model context window for history compression (tokens). Default 128000. */
   contextWindowTokens?: number
+  /** Loop settings */
+  agentLightThinking?: boolean
+  agentParallelReads?: boolean
+  /** Whether to run an end-of-turn memory/context review (default false). */
+  agentAutoMemoryReview?: boolean
+  /** Optional cheap model for end-of-turn memory/context review. */
+  agentMemoryReviewModel?: { provider: string; apiKey: string; model?: string } | null
+  /** Optional dedicated review-model caller. Falls back to callAI when unset. */
+  callReviewAI?: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>) => Promise<{
+    success: boolean
+    data?: AIResponse
+    error?: string
+  }>
+  /** Dequeue a mid-turn steering message from the renderer, if any. */
+  dequeueSteeringMessage?: () => Promise<string | null>
 }

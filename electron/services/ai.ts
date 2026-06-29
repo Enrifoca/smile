@@ -465,7 +465,8 @@ export class AIService {
     tools?: ToolDefinition[],
     stream = false
   ): { body: Record<string, unknown>; headers: Record<string, string> } {
-    const systemMessage = messages.find(m => m.role === 'system')?.content || ''
+    const systemMessages = messages.filter(m => m.role === 'system')
+    const systemMessage = systemMessages.map(m => m.content).join('\n\n')
     const chatMessages = messages.filter(m => m.role !== 'system')
     const useExtendedThinking = isReasoningModel('anthropic', model)
 

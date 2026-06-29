@@ -170,7 +170,7 @@ function ToolSummaryBlock({ entries }: { entries: ToolEntry[] }) {
 export default function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
 
-  if (message.type === 'tool_result') {
+  if (message.type === 'tool_result' || message.type === 'summary') {
     return null
   }
 

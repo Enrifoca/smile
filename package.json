@@ -32,13 +32,16 @@
     "@ai-sdk/anthropic": "^0.0.55",
     "@ai-sdk/openai": "^0.0.70",
     "@anthropic-ai/sdk": "^0.30.0",
+    "@mozilla/readability": "^0.6.0",
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.16",
     "ai": "^3.4.0",
     "axios": "^1.7.0",
+    "better-sqlite3": "^12.11.1",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.9",
     "form-data": "^4.0.5",
+    "jsdom": "^25.0.0",
     "jspdf": "^4.2.1",
     "mammoth": "^1.12.0",
     "mcp-remote": "^0.1.37",
@@ -46,11 +49,14 @@
     "pdf-parse": "^2.4.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "ripgrep": "^0.3.1",
     "uuid": "^10.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@smile/connector-sdk": "file:packages/connector-sdk",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/jsdom": "^21.1.0",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^20.14.0",
     "@types/pdf-parse": "^1.1.5",
@@ -75,6 +81,9 @@
     "vite-plugin-electron-renderer": "^0.14.5",
     "wait-on": "^7.2.0"
   },
+  "overrides": {
+    "undici": "^6.21.0"
+  },
   "build": {
     "appId": "com.smile.framework",
     "productName": "smile:D",
@@ -85,7 +94,7 @@
       "dist/**/*",
       "dist-electron/**/*",
       "bundled/**/*",
-      "node_modules/mcp-remote/**/*"
+      "node_modules/**/*"
     ],
     "win": {
       "target": [

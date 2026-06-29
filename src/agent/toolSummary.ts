@@ -2,7 +2,8 @@ import { ToolEntry } from './types'
 
 const FILE_READ_TOOLS = new Set(['file_read', 'file_read_ocr', 'file_list', 'file_search'])
 const FILE_WRITE_TOOLS = new Set(['file_write', 'report_write', 'file_mkdir'])
-const MEMORY_TOOLS = new Set(['memory_update', 'memory_delete', 'scratchpad_write', 'deep_thinking', 'context_read', 'context_append', 'context_replace_section'])
+const WEB_READ_TOOLS = new Set(['web_search', 'web_fetch'])
+const MEMORY_TOOLS = new Set(['memory_update', 'memory_delete', 'context_read', 'context_append', 'context_replace_section'])
 
 function countConnectorOps(entries: ToolEntry[], kind: 'read' | 'write'): { count: number; name?: string } {
   const filtered = entries.filter(entry => {
@@ -19,6 +20,7 @@ export function summariseToolEntries(entries: ToolEntry[]): string {
 
   const fileReads = entries.filter(entry => FILE_READ_TOOLS.has(entry.tool)).length
   const fileWrites = entries.filter(entry => FILE_WRITE_TOOLS.has(entry.tool)).length
+  const webReads = entries.filter(entry => WEB_READ_TOOLS.has(entry.tool)).length
   const memoryWrites = entries.filter(entry => MEMORY_TOOLS.has(entry.tool)).length
   const connectorReads = countConnectorOps(entries, 'read')
   const connectorWrites = countConnectorOps(entries, 'write')
@@ -38,6 +40,9 @@ export function summariseToolEntries(entries: ToolEntry[]): string {
   }
   if (fileWrites > 0) {
     parts.push(`Wrote ${fileWrites} file${fileWrites > 1 ? 's' : ''}`)
+  }
+  if (webReads > 0) {
+    parts.push(`Searched web (${webReads})`)
   }
   if (memoryWrites > 0) {
     parts.push(memoryWrites === 1 ? 'Updated memory' : `Updated memory (${memoryWrites})`)

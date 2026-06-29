@@ -37,7 +37,38 @@ export const fileDeleteSchema = z.object({
   path: z.string().describe('Relative path to the file to delete'),
 })
 
+export const fileSearchContentSchema = z.object({
+  query: z.string().describe('Text or regex to search for inside files. Supports ripgrep syntax.'),
+  path: z.string().optional().describe('Optional relative subdirectory to scope the search.'),
+  max_results: z.number().optional().describe('Maximum number of matches to return (default 20).'),
+})
+
+export const filePatchSchema = z.object({
+  path: z.string().describe('Relative path to the file to patch'),
+  search: z.string().describe('Exact block of text to find. Must match whitespace and line breaks precisely.'),
+  replace: z.string().describe('Replacement text. Keep the same indentation style unless intentionally changing it.'),
+  count: z.number().optional().describe('Maximum number of occurrences to replace (default 1, use a large number for all).'),
+})
+
+// ============ WEB TOOLS ============
+
+export const webSearchSchema = z.object({
+  query: z.string().describe('Search query'),
+  count: z.number().optional().describe('Number of results to return (default 5, max 10).'),
+})
+
+export const webFetchSchema = z.object({
+  url: z.string().describe('URL to fetch'),
+  mode: z.enum(['article', 'raw']).optional().describe('article extracts readable article text; raw returns the page body as-is (default article).'),
+})
+
 // ============ MEMORY TOOLS ============
+
+export const memorySearchSchema = z.object({
+  query: z.string().describe('Search query for memory entries'),
+  kind: z.enum(['user', 'learned', 'source']).optional().describe('Optional filter by memory kind'),
+  max_results: z.number().optional().describe('Maximum number of results (default 10).'),
+})
 
 export const memoryUpdateSchema = z.object({
   section: z.enum(['learned', 'style'])
@@ -51,18 +82,6 @@ export const memoryDeleteSchema = z.object({
     .describe('Which memory area to delete from. Use "all" when the user asks to remove a topic everywhere.'),
   query: z.string()
     .describe('Case-insensitive text to match and delete from memory entries, for example "weekly reports" or "reports in markdown".'),
-})
-
-// ============ SCRATCHPAD TOOL ============
-
-export const scratchpadWriteSchema = z.object({
-  note: z.string().describe('Short note for working notes (this turn). Use update_plan: true to set or revise the current plan — keep it concise and actionable. Required after deep_thinking if the analysis changes your next steps.'),
-  update_plan: z.boolean().optional().describe('When true, replaces the Current plan section with this note. Use after deep_thinking or when the plan changes.'),
-})
-
-export const deepThinkingSchema = z.object({
-  question: z.string().describe('What you need analyzed (mapping, risks, next steps, ambiguities).'),
-  context: z.string().optional().describe('Optional excerpts or facts already known (from reads, scratchpad, user message). Do not paste entire files.'),
 })
 
 export const contextReadSchema = z.object({})
@@ -128,7 +147,46 @@ export const toolDefinitions: ToolDefinition[] = [
     category: 'file-read',
   },
 
+  // File content tools
+  {
+    name: 'file_search_content',
+    description: 'Search inside files for text or regex. Use this when you need to find where something is used or mentioned across the workspace, before reading individual files.',
+    schema: fileSearchContentSchema,
+    requiresConfirmation: false,
+    category: 'file-read',
+  },
+  {
+    name: 'file_patch',
+    description: 'Make a surgical search/replace edit to an existing file. Verify the file contents with file_read first if you are not certain of the exact text. Requires confirmation.',
+    schema: filePatchSchema,
+    requiresConfirmation: true,
+    category: 'file-write',
+  },
+
+  // Web tools
+  {
+    name: 'web_search',
+    description: 'Search the web with DuckDuckGo. Use for current events, documentation, or facts not in the workspace. Always cite sources.',
+    schema: webSearchSchema,
+    requiresConfirmation: false,
+    category: 'web',
+  },
+  {
+    name: 'web_fetch',
+    description: 'Fetch a web page and extract readable article text or raw content. Use after web_search to read a specific result, or when the user provides a URL.',
+    schema: webFetchSchema,
+    requiresConfirmation: false,
+    category: 'web',
+  },
+
   // Memory Tools
+  {
+    name: 'memory_search',
+    description: 'Search user memory, learned notes, and connector source memory. Use before claiming something is not in memory.',
+    schema: memorySearchSchema,
+    requiresConfirmation: false,
+    category: 'memory',
+  },
   {
     name: 'memory_update',
     description: 'Save a new Learned Note. Use proactively when: (1) the user explicitly says to remember something, (2) you notice a clear reusable preference, (3) the user corrects you on something they always want done differently.',
@@ -144,21 +202,6 @@ export const toolDefinitions: ToolDefinition[] = [
     category: 'memory',
   },
 
-  // Scratchpad
-  {
-    name: 'scratchpad_write',
-    description: 'Add a short note to working notes, or update the current plan (update_plan: true). Use after deep_thinking when the analysis changes your next steps. Do not paste file contents — knowledge stays in history.',
-    schema: scratchpadWriteSchema,
-    requiresConfirmation: false,
-    category: 'scratchpad',
-  },
-  {
-    name: 'deep_thinking',
-    description: 'Activate extended reasoning on your next step when light thinking is not enough — for deep analysis (large data, trade-offs, synthesis) or a sharper scratchpad plan. Requires a configured reasoning model. After the deep step, update the plan if needed and continue with tools.',
-    schema: deepThinkingSchema,
-    requiresConfirmation: false,
-    category: 'analysis',
-  },
 
   // Active context tools (require an active project context)
   {

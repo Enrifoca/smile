@@ -13,6 +13,7 @@ export type ToolCategory =
   | 'scratchpad'
   | 'analysis'
   | 'context'
+  | 'web'
 
 export interface ToolDefinition {
   name: string
@@ -60,7 +61,6 @@ export interface ConnectorDefinition<TContext = unknown> {
     contextEnvelope?: ContextEnvelope
     executeTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
     formatToolResultForAI: (name: string, result: unknown) => string
-    updateScratchpadAfterTool: (name: string, args: Record<string, unknown>, formattedResult: string) => void
     invalidateCacheAfterWrite: (name: string, args: Record<string, unknown>) => void
     cacheToolResult: (name: string, args: Record<string, unknown>, formattedResult: string) => void
   }) => Promise<{ handled: boolean; message?: string; resumeAgent?: boolean }>

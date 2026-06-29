@@ -99,12 +99,32 @@ export function ContextConnectorsPanel({ context, onSaved }: ContextConnectorsPa
     updateConnector(connectorId, { config })
   }
 
+  function setWebSearchEnabled(enabled: boolean) {
+    const next: ProjectContext = { ...draft, webSearchEnabled: enabled }
+    void persist(next)
+  }
+
   return (
     <div className="space-y-4">
       <p className="ui-type-ui">
         Folder: <code className="ui-text-meta">{getContextFolderPath(draft)}</code>
         {saving ? <span className="ml-2 ui-text-meta">Saving…</span> : null}
       </p>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="ui-text-strong text-neutral-900">Web search</p>
+            <p className="mt-0.5 ui-text-meta">Allow the agent to search and fetch web content for this context.</p>
+          </div>
+          <Toggle
+            checked={draft.webSearchEnabled ?? true}
+            onChange={event => setWebSearchEnabled(event.target.checked)}
+            label="Enable web search for this context"
+            className="ui-toggle--compact shrink-0"
+          />
+        </div>
+      </div>
 
       {loadingConnectors ? (
         <Spinner size="sm" />

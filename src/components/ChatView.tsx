@@ -56,6 +56,17 @@ const StopIcon = () => (
   </svg>
 )
 
+const ThinkingIcon = ({ active = false }: { active?: boolean }) => (
+  <svg className="w-5 h-5" fill={active ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+    />
+  </svg>
+)
+
 export default function ChatView({
   chatId,
   isVisible,
@@ -75,10 +86,12 @@ export default function ChatView({
   const [managedProjects, setManagedProjects] = useState<ConnectorScope[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [dismissedReportMessageId, setDismissedReportMessageId] = useState<string | null>(null)
+  const [useThinking, setUseThinking] = useState(false)
+  const [reasoningConfigured, setReasoningConfigured] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Streaming content accumulator (keyed by message id)
   const streamingContentRef = useRef<Map<string, string>>(new Map())
-  // Hard cap: allow at most 1 memory_update per user turn (reset on each send)
+  // Hard cap: allow at most 3 memory writes per user turn (reset on each send)
   const memoryUpdateCountRef = useRef(0)
 
   // Stable chat ID for the current session. When chatId prop is null (new chat),
@@ -138,7 +151,7 @@ export default function ChatView({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const electron = useElectron()
-  const { storage, mcp, file, ai, memory: memoryAPI, contexts: contextsAPI } = electron
+  const { storage, mcp, file, web, chat: chatAPI, ai, memory: memoryAPI, contexts: contextsAPI } = electron
 
   const transcriptReport = useMemo(() => getActiveReportFromMessages(messages), [messages])
   const pinnedReport = useMemo(() => {
@@ -240,18 +253,47 @@ export default function ChatView({
     fileInputRef.current?.click()
   }
 
-  // Initialize agent and pre-load chat history into memory
+  // Initialize agent and pre-load chat history from SQLite
   useEffect(() => {
     initializeAgent()
-    storage.get('chatHistory').then(h => {
-      const arr = h as Array<{ id: string; title: string; date: string; messages: Message[] }> | null
-      chatHistoryRef.current = arr || []
-      historyLoadedRef.current = true
-    }).catch(() => {
-      chatHistoryRef.current = []
-      historyLoadedRef.current = true
-    })
+    loadChatHistoryFromSqlite()
   }, [])
+
+  const loadChatHistoryFromSqlite = async () => {
+    try {
+      const recent = await chatAPI.loadRecent(100)
+      if (recent.success && recent.data) {
+        const loaded: typeof chatHistoryRef.current = []
+        for (const summary of recent.data) {
+          const msgResult = await chatAPI.loadMessages(summary.id)
+          const messages = (msgResult.success ? msgResult.data : []) as Message[]
+          const firstUserMsg = messages.find(m => m.role === 'user')
+          const title = (summary.title && summary.title !== summary.id)
+            ? summary.title
+            : (firstUserMsg?.content.substring(0, 50) || 'New Chat')
+          loaded.push({
+            id: summary.id,
+            title,
+            date: summary.date,
+            messages,
+          })
+        }
+        chatHistoryRef.current = loaded
+        const summaries = loaded.map(c => ({ id: c.id, title: c.title, date: c.date }))
+        await storage.set('chatHistory', summaries)
+        notifyChatHistoryChanged()
+      } else {
+        chatHistoryRef.current = []
+        await storage.set('chatHistory', [])
+        notifyChatHistoryChanged()
+      }
+    } catch (error) {
+      console.error('Failed to load chat history from SQLite:', error)
+      chatHistoryRef.current = []
+    } finally {
+      historyLoadedRef.current = true
+    }
+  }
 
   // Listen for MCP connection state changes
   useEffect(() => {
@@ -396,6 +438,42 @@ export default function ChatView({
           reasoningConfigured = true
         }
       } catch { /* reasoning model is optional */ }
+      setReasoningConfigured(reasoningConfigured)
+
+      // Load optional review model config (cheap model for memory/context review)
+      let reviewConfigured = false
+      let reviewModelConfig: { provider: string; apiKey: string; model?: string } | null = null
+      try {
+        const reviewConfigStr = await storage.getSecure('memoryReviewModel')
+        if (reviewConfigStr) {
+          const reviewCfg = JSON.parse(reviewConfigStr)
+          await ai.configureReview(reviewCfg)
+          reviewModelConfig = reviewCfg as { provider: string; apiKey: string; model?: string }
+          reviewConfigured = true
+        }
+      } catch { /* review model is optional */ }
+
+      // Load agent loop settings
+      let agentLightThinking = false
+      let agentParallelReads = true
+      let agentAutoMemoryReview = false
+      let agentContextWindow = 128_000
+      try {
+        const light = await storage.get('agentLightThinking') as boolean | null
+        if (light !== null && light !== undefined) agentLightThinking = light
+      } catch { /* use default */ }
+      try {
+        const parallel = await storage.get('agentParallelReads') as boolean | null
+        if (parallel !== null && parallel !== undefined) agentParallelReads = parallel
+      } catch { /* use default */ }
+      try {
+        const autoReview = await storage.get('agentAutoMemoryReview') as boolean | null
+        if (autoReview !== null && autoReview !== undefined) agentAutoMemoryReview = autoReview
+      } catch { /* use default */ }
+      try {
+        const windowSetting = await storage.get('agentContextWindow') as number | null
+        if (windowSetting !== null && windowSetting !== undefined) agentContextWindow = windowSetting
+      } catch { /* use default */ }
 
       const newAgent = new Agent({
         userProfile,
@@ -419,6 +497,7 @@ export default function ChatView({
         executeFileTool,
         executeMemoryTool,
         executeContextTool,
+        executeWebTool,
         loadContextPromptBody: async (contextId: string): Promise<ContextPromptBody> => {
           const result = await contextsAPI.getPromptBody(contextId)
           if (result.success && result.data) return result.data
@@ -438,6 +517,24 @@ export default function ChatView({
           callAIReasoning: async (messages, tools) => ai.chatReasoning(messages, tools),
           callAIReasoningStream: async (messages, tools, onToken, onProgress) => ai.chatReasoningStream(messages, tools, onToken, onProgress),
         }),
+        agentLightThinking,
+        agentParallelReads,
+        agentAutoMemoryReview,
+        contextWindowTokens: agentContextWindow,
+        agentMemoryReviewModel: reviewModelConfig,
+        ...(reviewConfigured && {
+          callReviewAI: async (messages) => ai.chatReview(messages),
+        }),
+        dequeueSteeringMessage: async () => {
+          const targetChatId = runningChatIdRef.current
+          if (!targetChatId) return null
+          const next = dequeueMessage(targetChatId)
+          if (next) {
+            setQueuedVersion(v => v + 1)
+            return next
+          }
+          return null
+        },
       })
 
       setAgent(newAgent)
@@ -457,14 +554,12 @@ export default function ChatView({
     }
 
     try {
-      const history = await storage.get('chatHistory') as Array<{
-        id: string
-        messages: Message[]
-      }> | null
-
-      if (history) chatHistoryRef.current = history as typeof chatHistoryRef.current
-      const chat = history?.find(c => c.id === id)
-      if (chat) setMessages(clearStreamingFlags(chat.messages))
+      const result = await chatAPI.loadMessages(id)
+      if (result.success && result.data) {
+        const msgs = clearStreamingFlags(result.data as Message[])
+        chatHistoryRef.current.push({ id, title: 'Untitled', date: new Date().toISOString(), messages: msgs })
+        setMessages(msgs)
+      }
     } catch (error) {
       console.error('Failed to load chat messages:', error)
     }
@@ -486,15 +581,16 @@ export default function ChatView({
     if (applyCachedChat(id, true)) return
 
     try {
-      const history = await storage.get('chatHistory') as Array<{
-        id: string
-        messages: Message[]
-      }> | null
-      
-      const chat = history?.find(c => c.id === id)
-      if (chat) {
-        chatHistoryRef.current = history as typeof chatHistoryRef.current
-        const msgs = clearStreamingFlags(chat.messages)
+      const result = await chatAPI.loadMessages(id)
+      if (result.success && result.data) {
+        const msgs = clearStreamingFlags(result.data as Message[])
+        const existing = chatHistoryRef.current.findIndex(c => c.id === id)
+        const chatData = { id, title: 'Untitled', date: new Date().toISOString(), messages: msgs }
+        if (existing >= 0) {
+          chatHistoryRef.current[existing] = chatData
+        } else {
+          chatHistoryRef.current.unshift(chatData)
+        }
         setMessages(msgs)
         agent?.loadHistory(msgs)
       }
@@ -533,16 +629,26 @@ export default function ChatView({
     return isFirstPersist
   }, [])
 
-  const persistHistoryNow = useCallback(() => {
+  const persistHistoryNow = useCallback(async () => {
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current)
       persistTimerRef.current = null
     }
-    storage.set('chatHistory', chatHistoryRef.current).catch(err =>
-      console.error('Failed to persist chat:', err),
-    )
+    for (const chat of chatHistoryRef.current) {
+      for (const message of chat.messages) {
+        chatAPI.upsertMessage(chat.id, {
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          timestamp: message.timestamp,
+          type: message.type,
+        }).catch(err => console.error('Failed to persist message:', err))
+      }
+    }
+    const summaries = chatHistoryRef.current.map(c => ({ id: c.id, title: c.title, date: c.date }))
+    await storage.set('chatHistory', summaries)
     notifyChatHistoryChanged()
-  }, [storage])
+  }, [chatAPI, storage])
 
   const schedulePersist = useCallback(() => {
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
@@ -793,7 +899,32 @@ export default function ChatView({
         }
         case 'file_mkdir':  return await file.mkdir(args.path as string)
         case 'file_search': return await file.search(args.pattern as string, args.directory as string | undefined)
+        case 'file_search_content':
+          return await file.searchContent(
+            args.query as string,
+            args.path as string | undefined,
+            args.max_results as number | undefined,
+          )
+        case 'file_patch':
+          return await file.patch(
+            args.path as string,
+            args.search as string,
+            args.replace as string,
+            args.count as number | undefined,
+          )
         default:            return { success: false, error: `Unknown file tool: ${name}` }
+      }
+    } catch (error) {
+      throw error
+    }
+  }
+
+  const executeWebTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    try {
+      switch (name) {
+        case 'web_search': return await web.search(args.query as string, args.count as number | undefined)
+        case 'web_fetch':  return await web.fetch(args.url as string, args.mode as 'article' | 'raw' | undefined)
+        default:           return { success: false, error: `Unknown web tool: ${name}` }
       }
     } catch (error) {
       throw error
@@ -886,9 +1017,21 @@ export default function ChatView({
 
   const executeMemoryTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
+      if (name === 'memory_search') {
+        const query = String(args.query || '').trim()
+        if (!query) return { success: false, error: 'query is required' }
+        const result = await memoryAPI.searchIndex(
+          query,
+          args.kind as 'user' | 'learned' | 'source' | undefined,
+          args.max_results as number | undefined,
+        )
+        if (!result.success) return { success: false, error: result.error || 'Memory search failed' }
+        return { success: true, data: result.data || [] }
+      }
+
       if (name === 'memory_update') {
-        if (memoryUpdateCountRef.current >= 1) {
-          return { success: true, data: 'Already saved this turn. Do not call memory_update again. Provide your final response now.' }
+        if (memoryUpdateCountRef.current >= 3) {
+          return { success: true, data: 'Memory write limit reached for this turn (3). Provide your final response now.' }
         }
         memoryUpdateCountRef.current++
         const section = args.section as 'learned' | 'style' | 'general' | 'lexicon'
@@ -907,7 +1050,8 @@ export default function ChatView({
           const result = await memoryAPI.addGeneral(content, 'learned')
           if (!result.success) return { success: false, error: result.error || 'Could not save learned note' }
         }
-        return { success: true, data: 'Saved to learned memory. Do not call memory_update again this turn. Give your final response now.' }
+        void memoryAPI.reindex()
+        return { success: true, data: 'Saved to learned memory.' }
       }
 
       if (name === 'memory_delete') {
@@ -947,6 +1091,7 @@ export default function ChatView({
         }
 
         await memoryAPI.save(mem)
+        void memoryAPI.reindex()
         return { success: true, data: `Deleted ${deleted} memory entr${deleted === 1 ? 'y' : 'ies'} matching "${args.query}".` }
       }
 
@@ -1082,7 +1227,7 @@ export default function ChatView({
       } else {
         await refreshAgentProfile()
         agent.setActiveContext(activeContext)
-        await agent.processMessage(userMessage)
+        await agent.processMessage(userMessage, { useReasoning: useThinking })
       }
     } finally {
       if (runningChatIdRef.current === targetChatId) {
@@ -1107,6 +1252,7 @@ export default function ChatView({
     }
 
     await sendUserMessage(message)
+    setUseThinking(false)
   }
 
   // Auto-send queued messages when any run finishes, even for a chat that is not currently visible.
@@ -1352,6 +1498,21 @@ export default function ChatView({
               aria-label="Attach files"
             >
               <PaperclipIcon />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setUseThinking(v => !v)}
+              disabled={!reasoningConfigured || isLoading || mcpConnectionState === 'connecting'}
+              className={[
+                'ui-chat-input-action',
+                useThinking ? 'text-neutral-900' : 'text-gray-400 hover:text-gray-600',
+                (!reasoningConfigured || isLoading || mcpConnectionState === 'connecting') && 'disabled:text-gray-300',
+              ].filter(Boolean).join(' ')}
+              title={reasoningConfigured ? 'Think (use reasoning model)' : 'Reasoning model not configured'}
+              aria-label="Toggle thinking"
+            >
+              <ThinkingIcon active={useThinking} />
             </button>
 
             <textarea
