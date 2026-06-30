@@ -28,6 +28,12 @@ npm run build:mac   # macOS → release/*.dmg + .zip (zip is used by auto-update
 
 On Windows, if the build fails extracting `winCodeSign` with a symlink error, use `CSC_IDENTITY_AUTO_DISCOVERY=false` as above (already set in CI). `signAndEditExecutable: false` in `package.json` avoids editing the executable for signing.
 
+Native modules such as `better-sqlite3` are unpacked from the asar archive automatically (`asarUnpack: ["**/*.node"]`). If you are developing on Windows and see `Cannot find module 'better-sqlite3'`, rebuild it for Electron:
+
+```bash
+npm run rebuild:native
+```
+
 Outputs land in `release/`.
 
 Generate app icons from `public/icon.svg` (white canvas, `:D` mark) before release:
