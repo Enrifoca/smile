@@ -20,6 +20,7 @@
     "preview": "vite preview",
     "electron:dev": "node scripts/brand-electron.mjs && node scripts/dev-electron.mjs",
     "typecheck": "tsc --noEmit",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "validate:sandbox": "electron scripts/validate-sandbox.cjs",
     "validate:contract": "node packages/connector-sdk/bin/smile-connector.cjs check-contract",
     "validate:connector": "node packages/connector-sdk/bin/smile-connector.cjs validate",
@@ -54,6 +55,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.6",
     "@smile/connector-sdk": "file:packages/connector-sdk",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jsdom": "^21.1.0",
@@ -90,6 +92,9 @@
     "directories": {
       "output": "release"
     },
+    "asarUnpack": [
+      "**/*.node"
+    ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
