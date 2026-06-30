@@ -23,8 +23,11 @@ import { getWebService, WebService } from './services/web'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
 import { getUpdateService } from './services/updates'
 
-// Ensure the app name is smile:D in the Dock/Finder, both in dev and packaged builds.
-app.setName('smile:D')
+// Use the friendly product name on macOS, but a filesystem-safe name elsewhere.
+// Windows cannot create %APPDATA% directories that contain ':' (e.g. "smile:D"),
+// which would make electron-store / userData initialization fail before the window opens.
+const APP_DISPLAY_NAME = process.platform === 'darwin' ? 'smile:D' : 'smileD'
+app.setName(APP_DISPLAY_NAME)
 
 // Services
 let encryptionService: EncryptionService
@@ -228,6 +231,16 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true
     }
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(
+      `[Window] Failed to load ${validatedURL}: ${errorDescription} (code ${errorCode})`,
+    )
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[Window] Renderer process gone:', details)
   })
 
   if (isDev) {
@@ -1522,12 +1535,19 @@ ipcMain.handle('updates:install', () => {
 
 // App lifecycle
 app.whenReady().then(async () => {
-  app.setName('smile:D')
   applyAppIcon()
-  await initializeServices()
-  void autoConnectAtlassianMcpOnStartup()
-  createWindow()
-  getUpdateService().scheduleStartupCheck()
+  try {
+    await initializeServices()
+    void autoConnectAtlassianMcpOnStartup()
+    createWindow()
+    getUpdateService().scheduleStartupCheck()
+  } catch (error) {
+    console.error('[Startup] Service initialization failed:', error)
+    dialog.showErrorBox(
+      'smile:D failed to start',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
