@@ -27,7 +27,7 @@
     "test:connector": "node packages/connector-sdk/bin/smile-connector.cjs test",
     "icons": "node scripts/generate-icons.mjs && node scripts/brand-electron.mjs",
     "brand-electron": "node scripts/brand-electron.mjs",
-    "postinstall": "node scripts/brand-electron.mjs"
+    "postinstall": "electron-builder install-app-deps && node scripts/brand-electron.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^0.0.55",

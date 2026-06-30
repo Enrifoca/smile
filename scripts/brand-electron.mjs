@@ -20,7 +20,13 @@ async function main() {
     return
   }
 
-  const { default: rcedit } = await import('rcedit')
+  const rceditModule = await import('rcedit')
+  const rcedit = rceditModule.rcedit ?? rceditModule.default
+  if (typeof rcedit !== 'function') {
+    throw new TypeError(
+      `rcedit export is not a function (available keys: ${Object.keys(rceditModule).join(', ')})`,
+    )
+  }
 
   if (!fs.existsSync(sourceExe)) {
     console.warn('brand-electron: electron.exe not found — run npm install first')
