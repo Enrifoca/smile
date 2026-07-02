@@ -24,7 +24,6 @@ export function isReadOnlyTool(tool: ToolRunRecord): boolean {
 }
 
 export function isWriteTool(tool: ToolRunRecord): boolean {
-  if (tool.name === 'scratchpad_write' || tool.name === 'deep_thinking') return false
   if (tool.category === 'connector-write' || tool.category === 'connector-attachment') return true
   if (tool.category === 'file-write') return true
   if (tool.name === 'file_write' || tool.name === 'report_write' || tool.name === 'file_mkdir') return true
@@ -115,10 +114,4 @@ export function buildReportGroundingHint(path: string): string {
   return ' Next: if updating this report, call report_write with the same path. Preserve existing facts; only apply requested edits. Do not invent content.'
 }
 
-export function buildPendingWriteScratchpadSuffix(toolName: string, path: string): string {
-  if (!path) return ''
-  if ((toolName === 'file_read' || toolName === 'file_read_ocr') && isReportPath(path)) {
-    return ` - pending: report_write to ${path.replace(/\\/g, '/')}`
-  }
-  return ''
-}
+

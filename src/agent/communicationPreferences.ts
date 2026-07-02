@@ -51,7 +51,7 @@ export function buildCommunicationPreferencesPrompt(profile: UserProfile | null)
   const tone = describeSpectrum(profile.toneSpectrum, 'formal', 'casual')
 
   return [
-    'Communication preferences (follow strictly):',
+    'These user preferences are binding for every response you generate. Adapt your tone, level of detail, and style to match them, without announcing that you are doing so.',
     `- Technical ↔ conversational: ${style} (${profile.styleSpectrum}/100). Prefer precise terminology when technical; use plain language when conversational.`,
     `- Concise ↔ detailed: ${detail} (${profile.detailSpectrum}/100). Match depth to the question without padding or skipping necessary steps.`,
     `- Formal ↔ casual: ${tone} (${profile.toneSpectrum}/100). Adjust register accordingly while staying professional.`,

@@ -10,10 +10,7 @@ export type ToolCategory =
   | 'file-write'
   | 'file-manage'
   | 'memory'
-  | 'scratchpad'
-  | 'analysis'
   | 'context'
-  | 'web'
 
 export interface ToolDefinition {
   name: string
@@ -40,13 +37,12 @@ export interface ConnectorDefinition<TContext = unknown> {
   getActionConfirmationPrompt?: (name: string, args: Record<string, unknown>) => string | null
   getActionPreview?: (name: string, args: Record<string, unknown>) => string | null
   formatToolResultForAI?: (name: string, result: unknown) => string | null
-  getScratchpadNote?: (name: string, args: Record<string, unknown>, formattedResult: string) => string | null
   invalidateCacheAfterWrite?: (name: string, args: Record<string, unknown>, cacheKeys: string[]) => string[]
   /** Map a write tool call to a monitored connector scope for source memory. */
   getScopeForSourceMemory?: (name: string, args: Record<string, unknown>) => { connectorId: string; scopeId: string } | null
   /**
    * Optional high-level capability tokens for agent prompt injection (e.g. `email`, `web-search`).
-   * Declared in connector `manifest.json`; summarized in the Enabled capabilities prompt section.
+   * Declared in connector `manifest.json`; summarized in the Connector context prompt section.
    */
   agentCapabilities?: string[]
   /** Optional override for the source memory leaf summary on writes. */

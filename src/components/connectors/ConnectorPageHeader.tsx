@@ -33,7 +33,7 @@ export function ConnectorPageHeader({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="ui-page-title">{name}</h1>
-          {integrationLabel ? <Badge className="ui-text-meta font-normal">{integrationLabel}</Badge> : null}
+          {integrationLabel ? <Badge tone="primary">{integrationLabel}</Badge> : null}
           {configured ? <Badge tone="success">Configured</Badge> : null}
         </div>
         {description ? <p className="mt-1 ui-type-ui">{description}</p> : null}

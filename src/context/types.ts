@@ -30,8 +30,6 @@ export interface ProjectContext {
   updatedAt: string
   version: number
   connectors: Record<string, ContextConnectorConfig>
-  /** Whether web search/fetch tools are enabled for this context. Defaults to true. */
-  webSearchEnabled?: boolean
 }
 
 /** Legacy shape kept for one-time migration from electron-store. */
@@ -62,10 +60,3 @@ export function getContextFolderPath(context: ProjectContext): string {
   return `.smile/contexts/${context.slug}`
 }
 
-export function getContextJsonPath(context: ProjectContext): string {
-  return `${getContextFolderPath(context)}/${context.slug}.json`
-}
-
-export function getContextMarkdownPath(context: ProjectContext): string {
-  return `${getContextFolderPath(context)}/${context.slug}.md`
-}

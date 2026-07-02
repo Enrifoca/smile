@@ -53,12 +53,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('file:saveAttachment', fileName, data),
   },
 
-  // Web
-  web: {
-    search: (query: string, count?: number) => ipcRenderer.invoke('web:search', query, count),
-    fetch: (url: string, mode?: 'article' | 'raw') => ipcRenderer.invoke('web:fetch', url, mode),
-  },
-
   // AI
   ai: {
     configure: (config: { provider: 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'; apiKey: string; model?: string }) =>

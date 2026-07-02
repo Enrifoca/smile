@@ -33,10 +33,6 @@ export const fileSearchSchema = z.object({
   directory: z.string().optional().describe('Specific subdirectory to search in (searches all folders if not specified)'),
 })
 
-export const fileDeleteSchema = z.object({
-  path: z.string().describe('Relative path to the file to delete'),
-})
-
 export const fileSearchContentSchema = z.object({
   query: z.string().describe('Text or regex to search for inside files. Supports ripgrep syntax.'),
   path: z.string().optional().describe('Optional relative subdirectory to scope the search.'),
@@ -51,16 +47,6 @@ export const filePatchSchema = z.object({
 })
 
 // ============ WEB TOOLS ============
-
-export const webSearchSchema = z.object({
-  query: z.string().describe('Search query'),
-  count: z.number().optional().describe('Number of results to return (default 5, max 10).'),
-})
-
-export const webFetchSchema = z.object({
-  url: z.string().describe('URL to fetch'),
-  mode: z.enum(['article', 'raw']).optional().describe('article extracts readable article text; raw returns the page body as-is (default article).'),
-})
 
 // ============ MEMORY TOOLS ============
 
@@ -161,22 +147,6 @@ export const toolDefinitions: ToolDefinition[] = [
     schema: filePatchSchema,
     requiresConfirmation: true,
     category: 'file-write',
-  },
-
-  // Web tools
-  {
-    name: 'web_search',
-    description: 'Search the web with DuckDuckGo. Use for current events, documentation, or facts not in the workspace. Always cite sources.',
-    schema: webSearchSchema,
-    requiresConfirmation: false,
-    category: 'web',
-  },
-  {
-    name: 'web_fetch',
-    description: 'Fetch a web page and extract readable article text or raw content. Use after web_search to read a specific result, or when the user provides a URL.',
-    schema: webFetchSchema,
-    requiresConfirmation: false,
-    category: 'web',
   },
 
   // Memory Tools

@@ -10,6 +10,29 @@ function buildUserContext(profile: UserProfile | null): string {
   return buildCommunicationPreferencesPrompt(profile)
 }
 
+/** Build a short environment context block (current date, time, timezone). */
+export function buildEnvironmentContextSection(): string {
+  const now = new Date()
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const date = now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+  const time = now.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return [
+    '## Environment Context',
+    `- Current date: ${date}`,
+    `- Current time: ${time}`,
+    `- User timezone: ${timeZone}`,
+  ].join('\n')
+}
+
 const WRITE_CONFIRMATION_MODE = [
   'For write operations:',
   '- In the same turn, write a short chat message listing exactly what you will create or change (titles, targets, counts), then call the write tool.',

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
-import { Agent, Message, PendingAction, UserProfile, type AgentContextSnapshot } from '../agent'
+import { Agent, Message, PendingAction, UserProfile, type AgentContextSnapshot, type ToolEntry } from '../agent'
 import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
@@ -15,7 +15,7 @@ import ChatMessage from './ChatMessage'
 import { Button } from './ui/Button'
 import { ChatBanner, ChatEmptyState, ChatActivityIndicator, WriteActionConfirmModule, ActiveReportPill } from './chat'
 import { useChatActivity } from '../chat/ChatActivityContext'
-import { notifyChatHistoryChanged } from '../shell/chatHistoryEvents'
+import { CHAT_HISTORY_CHANGED, notifyChatHistoryChanged } from '../shell/chatHistoryEvents'
 
 interface ChatViewProps {
   chatId: string | null
@@ -103,6 +103,7 @@ export default function ChatView({
   // so concurrent saves never race against each other via storage reads.
   const chatHistoryRef = useRef<Array<{ id: string; title: string; date: string; messages: Message[] }>>([])
   const historyLoadedRef = useRef(false)
+  const isLoadingHistoryRef = useRef(false)
   const runningChatIdRef = useRef<string | null>(null)
   const activeChatIdRef = useRef<string | null>(null)
   const pendingByChatRef = useRef<Map<string, PendingAction>>(new Map())
@@ -151,7 +152,7 @@ export default function ChatView({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const electron = useElectron()
-  const { storage, mcp, file, web, chat: chatAPI, ai, memory: memoryAPI, contexts: contextsAPI } = electron
+  const { storage, mcp, file, chat: chatAPI, ai, memory: memoryAPI, contexts: contextsAPI } = electron
 
   const transcriptReport = useMemo(() => getActiveReportFromMessages(messages), [messages])
   const pinnedReport = useMemo(() => {
@@ -167,6 +168,19 @@ export default function ChatView({
   useEffect(() => {
     agent?.setActiveContext(activeContext)
   }, [agent, activeContext])
+
+  // If the user starts typing while a write action is awaiting approval, they
+  // are implicitly choosing to respond instead. Dismiss the approval bar silently
+  // so it doesn't block the composer.
+  useEffect(() => {
+    if (!pendingAction || !agent) return
+    if (input.trim().length === 0) return
+    const actionId = pendingAction.id
+    const targetId = runningChatIdRef.current ?? activeChatIdRef.current ?? chatIdRef.current
+    agent.rejectAction(actionId, { silent: true })
+    setPendingAction(null)
+    if (targetId) pendingByChatRef.current.delete(targetId)
+  }, [input, pendingAction, agent])
 
   const loadMemoryForAgent = async (): Promise<MemoryStore | null> => {
     try {
@@ -259,14 +273,16 @@ export default function ChatView({
     loadChatHistoryFromSqlite()
   }, [])
 
-  const loadChatHistoryFromSqlite = async () => {
+  const loadChatHistoryFromSqlite = async (options?: { silent?: boolean }) => {
+    if (isLoadingHistoryRef.current) return
+    isLoadingHistoryRef.current = true
     try {
       const recent = await chatAPI.loadRecent(100)
       if (recent.success && recent.data) {
         const loaded: typeof chatHistoryRef.current = []
         for (const summary of recent.data) {
           const msgResult = await chatAPI.loadMessages(summary.id)
-          const messages = (msgResult.success ? msgResult.data : []) as Message[]
+          const messages = normalizeLoadedMessages((msgResult.success ? msgResult.data : []) as Message[])
           const firstUserMsg = messages.find(m => m.role === 'user')
           const title = (summary.title && summary.title !== summary.id)
             ? summary.title
@@ -281,19 +297,37 @@ export default function ChatView({
         chatHistoryRef.current = loaded
         const summaries = loaded.map(c => ({ id: c.id, title: c.title, date: c.date }))
         await storage.set('chatHistory', summaries)
-        notifyChatHistoryChanged()
+        if (!options?.silent) notifyChatHistoryChanged()
       } else {
         chatHistoryRef.current = []
         await storage.set('chatHistory', [])
-        notifyChatHistoryChanged()
+        if (!options?.silent) notifyChatHistoryChanged()
       }
     } catch (error) {
       console.error('Failed to load chat history from SQLite:', error)
       chatHistoryRef.current = []
     } finally {
+      isLoadingHistoryRef.current = false
       historyLoadedRef.current = true
     }
   }
+
+  // Reload the in-memory chat cache when another part of the app mutates history
+  // (e.g. Settings trims or clears conversations).
+  useEffect(() => {
+    const handleHistoryChanged = () => {
+      // Cancel any pending persist so a stale cache can't overwrite the freshly
+      // trimmed SQLite data.
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current)
+        persistTimerRef.current = null
+      }
+      // Reload silently so we don't re-dispatch the same event and loop.
+      void loadChatHistoryFromSqlite({ silent: true })
+    }
+    window.addEventListener(CHAT_HISTORY_CHANGED, handleHistoryChanged)
+    return () => window.removeEventListener(CHAT_HISTORY_CHANGED, handleHistoryChanged)
+  }, [])
 
   // Listen for MCP connection state changes
   useEffect(() => {
@@ -497,7 +531,6 @@ export default function ChatView({
         executeFileTool,
         executeMemoryTool,
         executeContextTool,
-        executeWebTool,
         loadContextPromptBody: async (contextId: string): Promise<ContextPromptBody> => {
           const result = await contextsAPI.getPromptBody(contextId)
           if (result.success && result.data) return result.data
@@ -549,14 +582,14 @@ export default function ChatView({
   const loadMessagesOnly = async (id: string) => {
     const cached = chatHistoryRef.current.find(c => c.id === id)
     if (cached) {
-      setMessages(clearStreamingFlags(cached.messages))
+      setMessages(normalizeLoadedMessages(cached.messages))
       return
     }
 
     try {
       const result = await chatAPI.loadMessages(id)
       if (result.success && result.data) {
-        const msgs = clearStreamingFlags(result.data as Message[])
+        const msgs = normalizeLoadedMessages(result.data as Message[])
         chatHistoryRef.current.push({ id, title: 'Untitled', date: new Date().toISOString(), messages: msgs })
         setMessages(msgs)
       }
@@ -568,10 +601,24 @@ export default function ChatView({
   const clearStreamingFlags = (msgs: Message[]): Message[] =>
     msgs.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
 
+  const restoreToolEntries = (msgs: Message[]): Message[] =>
+    msgs.map(m => {
+      if (m.type === 'tool_summary' && !m.toolEntries) {
+        const metadata = (m as Message & { metadata?: { toolEntries?: ToolEntry[] } | null }).metadata
+        if (metadata?.toolEntries) {
+          return { ...m, toolEntries: metadata.toolEntries }
+        }
+      }
+      return m
+    })
+
+  const normalizeLoadedMessages = (msgs: Message[]): Message[] =>
+    restoreToolEntries(clearStreamingFlags(msgs))
+
   const applyCachedChat = (id: string, loadAgentHistory: boolean): boolean => {
     const cached = chatHistoryRef.current.find(c => c.id === id)
     if (!cached) return false
-    const msgs = clearStreamingFlags(cached.messages)
+    const msgs = normalizeLoadedMessages(cached.messages)
     setMessages(msgs)
     if (loadAgentHistory) agent?.loadHistory(msgs)
     return true
@@ -583,7 +630,7 @@ export default function ChatView({
     try {
       const result = await chatAPI.loadMessages(id)
       if (result.success && result.data) {
-        const msgs = clearStreamingFlags(result.data as Message[])
+        const msgs = normalizeLoadedMessages(result.data as Message[])
         const existing = chatHistoryRef.current.findIndex(c => c.id === id)
         const chatData = { id, title: 'Untitled', date: new Date().toISOString(), messages: msgs }
         if (existing >= 0) {
@@ -634,17 +681,22 @@ export default function ChatView({
       clearTimeout(persistTimerRef.current)
       persistTimerRef.current = null
     }
+    const writes: Promise<unknown>[] = []
     for (const chat of chatHistoryRef.current) {
       for (const message of chat.messages) {
-        chatAPI.upsertMessage(chat.id, {
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          timestamp: message.timestamp,
-          type: message.type,
-        }).catch(err => console.error('Failed to persist message:', err))
+        writes.push(
+          chatAPI.upsertMessage(chat.id, {
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            timestamp: message.timestamp,
+            type: message.type,
+            metadata: message.toolEntries ? { toolEntries: message.toolEntries } : undefined,
+          }),
+        )
       }
     }
+    await Promise.all(writes).catch(err => console.error('Failed to persist messages:', err))
     const summaries = chatHistoryRef.current.map(c => ({ id: c.id, title: c.title, date: c.date }))
     await storage.set('chatHistory', summaries)
     notifyChatHistoryChanged()
@@ -913,18 +965,6 @@ export default function ChatView({
             args.count as number | undefined,
           )
         default:            return { success: false, error: `Unknown file tool: ${name}` }
-      }
-    } catch (error) {
-      throw error
-    }
-  }
-
-  const executeWebTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
-    try {
-      switch (name) {
-        case 'web_search': return await web.search(args.query as string, args.count as number | undefined)
-        case 'web_fetch':  return await web.fetch(args.url as string, args.mode as 'article' | 'raw' | undefined)
-        default:           return { success: false, error: `Unknown web tool: ${name}` }
       }
     } catch (error) {
       throw error
@@ -1575,7 +1615,7 @@ export default function ChatView({
               <span className="inline-flex items-center justify-center gap-1 flex-wrap">
                 <span>Press Enter to send, Shift+Enter for new line. Drop files or click</span>
                 <PaperclipIcon className="w-3.5 h-3.5 shrink-0" />
-                <span>to attach.</span>
+                <span>to attach. Select the light bulb to invoke the Reasoning model.</span>
               </span>
             )}
           </p>

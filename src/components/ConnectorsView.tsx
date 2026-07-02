@@ -65,7 +65,7 @@ function ConnectorCard({
       <CatalogEntryIcon connector={connector} iconDataUrl={iconDataUrl} />
       <span className="connector-card-name">{connector.name}</span>
       {typeLabel && (
-        <Badge className="connector-card-type-badge ui-text-meta font-normal">
+        <Badge tone="primary" className="connector-card-type-badge">
           {typeLabel}
         </Badge>
       )}

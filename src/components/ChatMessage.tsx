@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { Message, type ToolEntry } from '../agent/types'
 import { summariseToolEntries } from '../agent/toolSummary'
-import { MarkdownArtifactCard } from './chat/artifacts'
+import { MarkdownArtifactCard, MarkdownRenderer } from './chat/artifacts'
 
 interface ChatMessageProps {
   message: Message
@@ -200,6 +200,16 @@ export default function ChatMessage({ message }: ChatMessageProps) {
     return null
   }
 
+  // System notices (e.g. user refused a write tool call). Rendered as a
+  // centered, muted line so they don't look like assistant prose.
+  if (message.role === 'system') {
+    return (
+      <div className="ui-chat-system-message">
+        <span>{message.content}</span>
+      </div>
+    )
+  }
+
   // Render rich content
   const renderContent = (content: string) => {
     // Strip any stray [Tool: ...] / [tool_result: ...] prefixes that should
@@ -221,33 +231,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
         )
       }
       return (
-        <div key={i} className="ui-prose-chat">
-          {part.split('\n').map((line, j) => {
-            line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            line = line.replace(/\*(.*?)\*/g, '<em>$1</em>')
-            line = line.replace(/`(.*?)`/g, '<code class="ui-md-code">$1</code>')
-            line = line.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" class="text-neutral-700 hover:underline" target="_blank">$1</a>')
-            if (line.startsWith('- ') || line.startsWith('• ')) {
-              return (
-                <div key={j} className="flex items-start gap-2">
-                  <span className="text-gray-400">•</span>
-                  <span dangerouslySetInnerHTML={{ __html: line.slice(2) }} />
-                </div>
-              )
-            }
-            const numberedMatch = line.match(/^(\d+)\.\s(.*)/)
-            if (numberedMatch) {
-              return (
-                <div key={j} className="flex items-start gap-2">
-                  <span className="text-gray-400 min-w-[1.5rem]">{numberedMatch[1]}.</span>
-                  <span dangerouslySetInnerHTML={{ __html: numberedMatch[2] }} />
-                </div>
-              )
-            }
-            if (!line.trim()) return <div key={j} className="h-2" />
-            return <p key={j} className="mb-1" dangerouslySetInnerHTML={{ __html: line }} />
-          })}
-        </div>
+        <MarkdownRenderer key={i} content={part} className="ui-prose-chat" />
       )
     })
   }

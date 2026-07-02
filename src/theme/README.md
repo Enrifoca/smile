@@ -33,7 +33,7 @@ Edit `tokens.css` to change framework-wide UI defaults without hunting through c
 
 ## Legacy sidebar tokens
 
-`--sidebar-expanded-width`, `--sidebar-collapse-button-size`, etc. apply to the old `Sidebar.tsx` layout. New shell code uses `--secondary-sidebar-width` and panel toggle classes instead.
+`--sidebar-expanded-width`, `--sidebar-collapse-button-size`, etc. apply to the legacy single-sidebar layout. New shell code uses `--secondary-sidebar-width` and panel toggle classes instead.
 
 Prefer adding new design decisions here first, then consuming them through **`src/components/ui/`** and `.ui-*` classes in `src/styles/globals.css`.
 

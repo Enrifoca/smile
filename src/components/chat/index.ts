@@ -1,6 +1,5 @@
 export {
   WriteActionConfirmModule,
-  default as WriteActionConfirm,
   type WriteActionConfirmModuleProps,
 } from './WriteActionConfirmModule'
 

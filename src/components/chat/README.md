@@ -7,7 +7,8 @@ Chat-specific UI built on the shared kit in `src/components/ui/`.
 When the agent calls a write tool, it explains the action in the chat transcript. Approval is a compact **Accept / Refuse** bar pinned above the message composer (`WriteActionConfirmModule` in `WriteActionConfirmModule.tsx`).
 
 - The agent speaks in chat; the bar is only for approval.
-- To iterate, the user types changes in the chat (same as before).
+- To iterate, the user types changes in the chat (same as before). As soon as the user starts typing, the bar is dismissed silently and the write is treated as refused.
+- Clicking **Refuse** emits a visible system message in the transcript and records the refusal in conversation history.
 - Button copy defaults live in `writeActionConfirmDefaults.ts`.
 - Primary label can come from the connector's `getActionConfirmation` → `approveLabel`.
 
@@ -50,6 +51,16 @@ After a completed activity row, the next step is usually another **model round**
 
 When the agent calls `report_write`, a **report card** appears in chat (Manus-style). Click to open the full markdown in a modal. The same report is also pinned above the composer as an **active report pill** (dismiss with × to ask unrelated questions). Modules live in `src/components/chat/artifacts/`. See `src/components/chat/artifacts/README.md`.
 
+## Chat message rendering
+
+Normal user and assistant bubbles are rendered by `ChatMessage.tsx`. Code fences are shown as dedicated code blocks; all other prose is passed through the shared `MarkdownRenderer` so headings, lists, tables, inline formatting, and links render correctly in the chat transcript.
+
+`role: 'system'` messages (e.g. write-tool refusal feedback) are rendered as a centered, muted notice instead of an assistant bubble so they don't look like model-generated prose. Style: `.ui-chat-system-message` in `src/styles/globals.css`.
+
+## Composer hint
+
+The input footer explains keyboard shortcuts and attachments, and reminds the user that selecting the light-bulb toggle invokes the Reasoning model.
+
 ## Other chat modules
 
 | Module | Use |
@@ -61,4 +72,3 @@ When the agent calls `report_write`, a **report card** appears in chat (Manus-st
 
 Agent-side status labels and task continuity: [src/agent/activityStatus.md](../../agent/activityStatus.md), [src/agent/taskContinuity.md](../../agent/taskContinuity.md).
 
-Legacy import: `./ActionConfirm` re-exports `WriteActionConfirmModule`.

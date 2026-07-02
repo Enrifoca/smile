@@ -5,7 +5,9 @@ import { shouldAdmitSourceLeaf } from '../memory/sourceAdmission'
 import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
 
 import { assemblePromptTiers } from './promptTiers'
-import { buildEnabledCapabilitiesSection, type ConnectorCapabilitySummary } from './capabilities'
+import { buildCoreCapabilitiesSection, buildConnectorContextSection } from './capabilities'
+import { buildCommunicationPreferencesPrompt } from './communicationPreferences'
+import { buildEnvironmentContextSection } from '../prompts'
 import { maybeCompressConversationHistory, estimateTokens } from './historyCompression'
 import { selectLearnedNotesForPrompt } from '../memory/learnedBudget'
 import { formatActiveScopesForPrompt } from '../memory/promptSections'
@@ -69,6 +71,9 @@ export class Agent {
   private toolsRunThisTurn: ToolRunRecord[] = []
   private lastToolEntryThisTurn: ToolEntry | null = null
   private useReasoningThisTurn = false
+  // The original user message for the current turn, stored separately because
+  // runtime nudges are also pushed with role: 'user'.
+  private currentUserMessage = ''
 
   private setAgentStatus(status: string | null): void {
     this.config.onAgentStatus?.(status)
@@ -180,7 +185,6 @@ export class Agent {
       || e.category === 'file-manage'
       || e.category === 'context'
       || e.category === 'memory'
-      || e.category === 'web'
     )
     if (hasWrite) return "I'll make the requested change."
     if (hasRead) return "I'll look into that for you."
@@ -262,17 +266,8 @@ export class Agent {
     }
 
     const lines = [`\n\n## Active Context: ${context.name}`]
-    lines.push(`The user scoped this conversation to the "${context.name}" project. Only connectors enabled for this context are available.`)
+    lines.push(`The user scoped this conversation to the "${context.name}" project. Only connectors enabled for this context are available; their tools and instructions are listed in the Connector context section.`)
     lines.push(`Context folder: \`${getContextFolderPath(context)}\` (portable - share this folder with teammates).`)
-
-    const enabledScopes = Object.entries(context.connectors).filter(([, entry]) => entry.enabled)
-    if (enabledScopes.length > 0) {
-      lines.push('\n### Enabled connector scope (enforced by each connector handler)')
-      for (const [connectorId, entry] of enabledScopes) {
-        const configJson = JSON.stringify(entry.config || {})
-        lines.push(`- **${connectorId}**: ${configJson}`)
-      }
-    }
 
     if (body?.injectFull && body.markdown) {
       lines.push(`\n### Context knowledge (full)\n${body.markdown}`)
@@ -291,13 +286,8 @@ export class Agent {
 
   private getCoreToolDefinitions(): ToolDefinition[] {
     const contextToolNames = new Set(['context_read', 'context_append', 'context_replace_section'])
-    const webToolNames = new Set(['web_search', 'web_fetch'])
     return toolDefinitions.filter(tool => {
       if (contextToolNames.has(tool.name) && !this.activeContext) return false
-      if (webToolNames.has(tool.name)) {
-        // Web tools are enabled by default; explicitly disabled contexts hide them.
-        return this.activeContext?.webSearchEnabled !== false
-      }
       return true
     })
   }
@@ -359,24 +349,14 @@ export class Agent {
 
   private getConnectorPromptSections(): string[] {
     return this.getEnabledConnectors()
-      .map(connector => connector.definition.getPromptSection?.(connector.context) || '')
+      .map(connector => buildConnectorContextSection(connector))
       .filter(Boolean)
   }
 
-  private getConnectorCapabilitySummaries(): ConnectorCapabilitySummary[] {
-    return this.getEnabledConnectors().map(connector => ({
-      name: connector.definition.name,
-      agentCapabilities: connector.definition.agentCapabilities,
-      tools: connector.definition.tools,
-    }))
-  }
-
-  private buildCapabilitiesSection(): string {
-    const body = buildEnabledCapabilitiesSection(
-      this.getAllToolDefinitions(),
-      this.getConnectorCapabilitySummaries(),
-    )
-    return body.trim() ? `## Enabled capabilities\n\n${body}` : ''
+  private buildCoreCapabilitiesSectionString(): string {
+    const coreTools = this.getCoreToolDefinitions()
+    const body = buildCoreCapabilitiesSection(coreTools)
+    return body.trim() ? `## Core capabilities\n\n${body}` : ''
   }
 
   /** Stop the agent and cancel any in-flight AI stream. */
@@ -387,6 +367,7 @@ export class Agent {
   }
 
   async processMessage(userMessage: string, options?: { useReasoning?: boolean }): Promise<void> {
+    this.currentUserMessage = userMessage
     this.useReasoningThisTurn = options?.useReasoning ?? false
     await this.syncActiveContextFromSource()
     this.abortFlag = false
@@ -438,7 +419,7 @@ export class Agent {
     const maxIterations = this.config.maxIterations ?? 10
     const hasLimit = maxIterations > 0
     let consecutiveErrors = 0
-    const maxConsecutiveErrors = 2
+    const maxConsecutiveErrors = 4
 
     try {
     while (!hasLimit || iterations < maxIterations) {
@@ -645,7 +626,16 @@ export class Agent {
               this.conversationHistory.push({ id: uuidv4(), role: 'assistant', content: errResp.content, timestamp: new Date().toISOString() })
               this.config.onMessage({ id: uuidv4(), role: 'assistant', content: errResp.content, timestamp: new Date().toISOString() })
             } else if (!errStreamed) {
-              const fallback = 'I encountered repeated errors. Please check the configuration or rephrase your request.'
+              const lastError = this.latestToolResultsThisTurn
+                .slice()
+                .reverse()
+                .find(r => r.isError)
+              const errorDetail = lastError
+                ? lastError.result.replace(/^Error:\s*/, '').slice(0, 200)
+                : null
+              const fallback = errorDetail
+                ? `I encountered repeated errors. Last error: ${errorDetail}. Please check the configuration or rephrase your request.`
+                : 'I encountered repeated errors. Please check the configuration or rephrase your request.'
               this.conversationHistory.push({ id: uuidv4(), role: 'assistant', content: fallback, timestamp: new Date().toISOString() })
               this.config.onMessage({ id: uuidv4(), role: 'assistant', content: fallback, timestamp: new Date().toISOString() })
             }
@@ -755,6 +745,7 @@ export class Agent {
 
   private emitContextSnapshot(params: {
     systemPrompt: string
+    foundation: string
     relevantHistory: Message[]
     connectorSections: string[]
     capabilitiesSection: string
@@ -762,9 +753,7 @@ export class Agent {
   }): void {
     if (!this.config.onContextSnapshot) return
 
-    const lastUserMessage = this.conversationHistory
-      .filter(m => m.role === 'user')
-      .slice(-1)[0]?.content ?? ''
+    const lastUserMessage = this.currentUserMessage
 
     const recentHistory = params.relevantHistory
       .filter(m => m.role !== 'system' && m.type !== 'summary')
@@ -800,20 +789,21 @@ export class Agent {
       memoryContent = parts.join('\n\n')
     }
 
+    const userContext = buildCommunicationPreferencesPrompt(this.config.userProfile)
+    const environmentContext = buildEnvironmentContextSection()
+
     const sections: AgentContextSnapshot['sections'] = [
-      { name: 'System prompt', present: true, tokens: estimateTokens(params.systemPrompt) },
-      { name: 'Memory', present: memoryContent.length > 0, content: memoryContent, tokens: memoryContent ? estimateTokens(memoryContent) : 0 },
-      section('Capabilities', params.capabilitiesSection),
+      section('System prompt', params.foundation),
+      section('User context', userContext),
+      section('Environment context', environmentContext),
+      section('Memory', memoryContent),
+      section('Core capabilities', params.capabilitiesSection),
       section('Active context', params.contextSection),
       section('Connector context', params.connectorSections.join('\n\n')),
       section('Recent conversation history', historySummary),
     ]
 
-    const totalTokens =
-      sections.reduce((sum, s) => sum + (s.tokens ?? 0), 0) +
-      estimateTokens(lastUserMessage) +
-      (recentHistory?.reduce((sum, m) => sum + estimateTokens(m.content), 0) ?? 0) +
-      (this.latestToolResultsThisTurn?.reduce((sum, r) => sum + estimateTokens(r.result) + estimateTokens(JSON.stringify(r.args)), 0) ?? 0)
+    const totalTokens = sections.reduce((sum, s) => sum + (s.tokens ?? 0), 0)
 
     const snapshot: AgentContextSnapshot = {
       userMessage: lastUserMessage,
@@ -860,7 +850,7 @@ export class Agent {
   }> {
     const contextSection = await this.buildActiveContextSection()
     const connectorSections = this.getConnectorPromptSections()
-    const capabilitiesSection = this.buildCapabilitiesSection()
+    const capabilitiesSection = this.buildCoreCapabilitiesSectionString()
 
     const tiers = assemblePromptTiers(
       this.config.userProfile,
@@ -885,6 +875,7 @@ export class Agent {
 
     this.emitContextSnapshot({
       systemPrompt,
+      foundation: tiers.foundation,
       relevantHistory,
       connectorSections,
       capabilitiesSection,
@@ -899,6 +890,9 @@ export class Agent {
         parameters: tool.jsonSchema ?? (tool.schema ? zodToJsonSchema(tool.schema) : { type: 'object', properties: {} }),
       },
     }))
+
+    console.log('[Agent] Available tools:', tools.map(t => t.function.name).join(', '))
+    console.log('[Agent] Connector context sections:', connectorSections.length)
 
     const useReasoningStream = this.useReasoningThisTurn && !!this.config.callAIReasoningStream
     const useReasoningNonStream = this.useReasoningThisTurn && !!this.config.callAIReasoning
@@ -1354,13 +1348,8 @@ export class Agent {
       return this.config.executeMemoryTool(name, args)
     } else if (name.startsWith('context_')) {
       return this.config.executeContextTool(name, args)
-    } else if (name === 'web_search' || name === 'web_fetch') {
-      if (!this.config.executeWebTool) {
-        throw new Error(`Web tool ${name} is not configured`)
-      }
-      return this.config.executeWebTool(name, args)
     }
-    
+
     throw new Error(`Unknown tool: ${name}`)
   }
 
@@ -1505,8 +1494,8 @@ export class Agent {
 
     const rejectionMsg: Message = {
       id: uuidv4(),
-      role: 'assistant',
-      content: 'No problem, I\'ve cancelled that action.',
+      role: 'system',
+      content: `User refused the ${action.type} write tool call.`,
       timestamp: new Date().toISOString(),
     }
     this.conversationHistory.push(rejectionMsg)

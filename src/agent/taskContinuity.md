@@ -31,7 +31,6 @@ User message (in conversation history — no keyword intent layer)
 | `shouldNudgeIncompleteWorkflow` | Detect incomplete workflows from explicit pending-write tool state |
 | `buildIncompleteWorkflowNudge` | System message injected to continue the loop |
 | `buildReportGroundingHint(path)` | Appended to `file_read` results for report paths |
-| `buildPendingWriteScratchpadSuffix` | Scratchpad hint after reads only when the framework can see a pending write |
 
 ## Related files
 

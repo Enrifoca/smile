@@ -42,7 +42,8 @@ export interface AgentContextSnapshotSection {
 export interface AgentContextSnapshot {
   /** The last user message that started this turn. */
   userMessage: string
-  /** Sections included in the latest call to the model, in prompt order. */
+  /** Sections included in the latest call to the model, in prompt order.
+   *  Each section is non-overlapping so token sums are not duplicated. */
   sections: AgentContextSnapshotSection[]
   /** The assembled system prompt content sent to the model (may be large). */
   systemPrompt?: string
@@ -52,7 +53,7 @@ export interface AgentContextSnapshot {
   latestToolResults?: Array<{ tool: string; args: Record<string, unknown>; result: string; isError: boolean }>
   /** Full formatted memory content included in the system prompt. */
   memoryContent?: string
-  /** Estimated total tokens for the latest call (system prompt + history + tool results). */
+  /** Estimated total tokens for the latest call (sum of all non-overlapping prompt sections, including recent conversation history). Tool results are shown separately and not included here. */
   totalTokens?: number
   /** Debug metadata about the call. */
   metadata?: { model?: string; reasoningModel?: string; timestamp: string; iteration: number }

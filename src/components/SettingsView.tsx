@@ -19,6 +19,7 @@ import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { ModelRecommendationText } from '../settings/ModelRecommendationText'
 import { useAppUpdates } from '../context/UpdateContext'
 import { notifyChatHistoryChanged } from '../shell/chatHistoryEvents'
+import { notifyModelConfigChanged } from '../shell/modelConfigEvents'
 import {
   AIConfig,
   AIProvider,
@@ -99,8 +100,6 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   const [keepRecentChats, setKeepRecentChats] = useState(5)
   const [showTrimHistoryModal, setShowTrimHistoryModal] = useState(false)
   const [showClearDataModal, setShowClearDataModal] = useState(false)
-  const [braveSearchApiKey, setBraveSearchApiKey] = useState('')
-  const braveSearchSave = useActionFeedback()
   const { state: updateState, appVersion, checkForUpdates } = useAppUpdates()
   const updateCheck = useActionFeedback()
 
@@ -110,6 +109,14 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   useEffect(() => {
     void loadSettings()
   }, [])
+
+  useEffect(() => {
+    const handleWorkspaceChanged = () => {
+      void file.getWorkspace().then(path => setWorkspace(path))
+    }
+    window.addEventListener('workspace:changed', handleWorkspaceChanged)
+    return () => window.removeEventListener('workspace:changed', handleWorkspaceChanged)
+  }, [file])
 
   const loadModelCatalog = async (refresh = false) => {
     setRefreshingModels(refresh)
@@ -188,9 +195,6 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
       if (parallel !== null && parallel !== undefined) setAgentParallelReads(parallel)
       const windowSetting = await storage.get('agentContextWindow') as number | null
       if (windowSetting !== null && windowSetting !== undefined) setAgentContextWindow(windowSetting)
-
-      const braveKey = await storage.getSecure('braveSearchApiKey')
-      setBraveSearchApiKey(braveKey ? '••••••••' : '')
     } catch (error) {
       console.error('Failed to load settings:', error)
     }
@@ -211,6 +215,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
       }
       await storage.setSecure('aiConfig', JSON.stringify(config))
       setAIConfig(config)
+      notifyModelConfigChanged()
       const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
       if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
     })
@@ -232,6 +237,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
       }
       const config = { provider: reasoningForm.provider, apiKey, model: reasoningForm.model || undefined }
       await storage.setSecure('reasoningConfig', JSON.stringify(config))
+      notifyModelConfigChanged()
       const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
       if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
       setReasoningConfigured(true)
@@ -255,6 +261,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
         model: ocrForm.model || undefined,
       }
       await storage.setSecure('ocrConfig', JSON.stringify(config))
+      notifyModelConfigChanged()
       const catalogResult = await modelCatalogAPI.refreshProvider(config.provider)
       if (catalogResult.success && catalogResult.data) setModelCatalog(catalogResult.data)
       setOcrConfigured(true)
@@ -279,6 +286,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
       setOcrConfigured(false)
       setOcrForm({ provider: 'mistral', apiKey: '', model: '' })
     }
+    notifyModelConfigChanged()
     setClearTarget(null)
   }
 
@@ -323,7 +331,9 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
 
   const selectWorkspace = async () => {
     try {
+      console.log('[Settings] Selecting workspace...')
       const result = await file.selectWorkspace()
+      console.log('[Settings] selectWorkspace result:', result)
       if (result.success && result.path) {
         setWorkspace(result.path)
         window.dispatchEvent(new CustomEvent('workspace:changed', { detail: { path: result.path } }))
@@ -331,6 +341,12 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
         if (contextsResult.success && contextsResult.data) {
           onContextsChange?.(contextsResult.data)
         }
+      } else {
+        // Sync local state with the persisted workspace in case the handler
+        // returned a different result shape.
+        const persisted = await file.getWorkspace()
+        console.log('[Settings] Persisted workspace:', persisted)
+        setWorkspace(persisted)
       }
     } catch (error) {
       console.error('Failed to select workspace:', error)
@@ -338,27 +354,68 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   }
 
   const trimChatHistory = async () => {
-    const history = await storage.get('chatHistory') as Array<{ id: string }> | null
-    const all = history || []
+    // Prefer the SQLite-backed chat list as the source of truth so trimmed chats
+    // are removed from the database and cannot be restored on the next launch.
+    // Fall back to the electron-store cache when no workspace/database is ready.
+    const recentResult = await chat.loadRecent(100)
+    let all: Array<{ id: string; title: string; date: string }> = []
+
+    if (recentResult.success && recentResult.data) {
+      all = recentResult.data
+    } else {
+      console.warn('[Trim] Could not load from SQLite, falling back to local store:', recentResult.error)
+      const history = await storage.get('chatHistory') as Array<{ id: string; title: string; date: string }> | null
+      all = history || []
+    }
+
     const keep = all.slice(0, keepRecentChats)
     const remove = all.slice(keepRecentChats)
 
     for (const chatItem of remove) {
-      await chat.deleteChat(chatItem.id)
+      const result = await chat.deleteChat(chatItem.id)
+      if (!result.success) {
+        console.error(`[Trim] Failed to delete chat ${chatItem.id}:`, result.error)
+      }
     }
 
-    await storage.set('chatHistory', keep)
+    // Verify the deletes actually landed in SQLite.
+    const verifyResult = await chat.loadRecent(100)
+    if (verifyResult.success && verifyResult.data) {
+      const remainingIds = new Set(verifyResult.data.map(c => c.id))
+      for (const chatItem of remove) {
+        if (remainingIds.has(chatItem.id)) {
+          console.error(`[Trim] Chat ${chatItem.id} still exists after delete`)
+        }
+      }
+    }
+
+    // Preserve human-readable titles already stored in the cache.
+    const existingHistory = await storage.get('chatHistory') as Array<{ id: string; title: string; date: string }> | null
+    const titleById = new Map(existingHistory?.map(c => [c.id, c.title]) ?? [])
+
+    const keptSummaries = keep.map(chatItem => ({
+      id: chatItem.id,
+      title: titleById.get(chatItem.id) || chatItem.title,
+      date: chatItem.date,
+    }))
+    await storage.set('chatHistory', keptSummaries)
     notifyChatHistoryChanged()
     setShowTrimHistoryModal(false)
   }
 
   const clearAllData = async () => {
-    const history = await storage.get('chatHistory') as Array<{ id: string }> | null
-    const all = history || []
-    for (const chatItem of all) {
-      await chat.deleteChat(chatItem.id)
+    // Delete every chat from the SQLite source of truth, not just the cache.
+    const recentResult = await chat.loadRecent(100)
+    if (recentResult.success && recentResult.data) {
+      for (const chatItem of recentResult.data) {
+        const result = await chat.deleteChat(chatItem.id)
+        if (!result.success) {
+          console.error(`[Clear all] Failed to delete chat ${chatItem.id}:`, result.error)
+        }
+      }
     }
     await storage.set('chatHistory', [])
+    notifyChatHistoryChanged()
     await storage.set('userProfile', null)
     await storage.setSecure('aiConfig', '')
     await storage.setSecure('reasoningConfig', '')
@@ -383,16 +440,6 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
     if (roleCatalog.error) return 'Refresh failed, using cached/default models'
     if (roleCatalog.lastFetchedAt) return `Updated ${new Date(roleCatalog.lastFetchedAt).toLocaleString()}`
     return 'Using bundled defaults'
-  }
-
-  const saveBraveSearchApiKey = () => {
-    void braveSearchSave.run(async () => {
-      if (!braveSearchApiKey.trim()) {
-        await storage.setSecure('braveSearchApiKey', '')
-      } else if (braveSearchApiKey !== '••••••••') {
-        await storage.setSecure('braveSearchApiKey', braveSearchApiKey.trim())
-      }
-    })
   }
 
   const clearLabels: Record<Exclude<ClearTarget, null>, string> = {
@@ -450,10 +497,12 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="ui-section-title mb-4">Main model</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="ui-section-title">Main model</h2>
+              {aiConfig && <Badge tone="success">Active</Badge>}
+            </div>
             <div className="mb-4">
               <p className="text-sm text-gray-600">The model used for the agent loop.</p>
-              {aiConfig && <Badge tone="success" className="mt-2">Active</Badge>}
             </div>
             <Callout className="mb-5">
               <p className="text-xs font-normal">
@@ -509,10 +558,12 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="ui-section-title mb-4">Reasoning model</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="ui-section-title">Reasoning model</h2>
+              {reasoningConfigured && <Badge tone="success">Active</Badge>}
+            </div>
             <div className="mb-4">
               <p className="text-sm text-gray-600">Optional dedicated model for complex, multi-step tasks.</p>
-              {reasoningConfigured && <Badge tone="success" className="mt-2">Active</Badge>}
             </div>
             <Callout className="mb-5">
               <p className="text-xs font-normal">
@@ -589,10 +640,12 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="ui-section-title mb-4">OCR Model</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="ui-section-title">OCR Model</h2>
+              {ocrConfigured && <Badge tone="success">Active</Badge>}
+            </div>
             <div className="mb-4">
               <p className="text-sm text-gray-600">Optional specialist model for scanned PDFs and image-based documents.</p>
-              {ocrConfigured && <Badge tone="success" className="mt-2">Active</Badge>}
             </div>
             <Callout className="mb-5">
               <p className="text-xs font-normal">
@@ -808,38 +861,6 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
                   />
                 </div>
               </div>
-            </div>
-          </section>
-
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="ui-section-title mb-4">Web search</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Web search uses DuckDuckGo by default. Add a Brave Search API key for reliable, higher-rate-limit search.
-            </p>
-            <div className="space-y-4">
-              <Field label="Brave Search API key">
-                <Input
-                  type="password"
-                  value={braveSearchApiKey}
-                  onChange={(e) => setBraveSearchApiKey(e.target.value)}
-                  onFocus={() => braveSearchApiKey === '••••••••' && setBraveSearchApiKey('')}
-                  placeholder="Optional Brave Search API key"
-                />
-              </Field>
-              <ActionRow
-                label="Save"
-                busy={braveSearchSave.busy}
-                status={braveSearchSave.status}
-                onAction={saveBraveSearchApiKey}
-                size="sm"
-                successMessage="Saved!"
-                errorMessage="Failed to save API key."
-                extraActions={
-                  <Button variant="secondary" size="sm" onClick={() => { setBraveSearchApiKey(''); void saveBraveSearchApiKey() }}>
-                    Clear
-                  </Button>
-                }
-              />
             </div>
           </section>
 

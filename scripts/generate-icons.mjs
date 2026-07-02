@@ -90,6 +90,14 @@ async function main() {
   )
   fs.writeFileSync(path.join(publicDir, 'icon.ico'), await toIco(icoBuffers))
 
+  // Windows gets a slightly larger mark so the :D reads well at Start-menu / .exe sizes.
+  const windowsSvg = svg.replace(/font-size="170"/, 'font-size="210"')
+  const windowsIcoSizes = [16, 20, 24, 30, 32, 40, 48, 60, 64, 72, 80, 96, 128, 256]
+  const windowsIcoBuffers = await Promise.all(
+    windowsIcoSizes.map(size => sharp(Buffer.from(windowsSvg)).resize(size, size).png().toBuffer()),
+  )
+  fs.writeFileSync(path.join(publicDir, 'icon-windows.ico'), await toIco(windowsIcoBuffers))
+
   const png512 = fs.readFileSync(png512Path)
   const icns = png2icons.createICNS(png512, png2icons.BICUBIC, 0)
   if (!icns) throw new Error('Failed to generate icon.icns')

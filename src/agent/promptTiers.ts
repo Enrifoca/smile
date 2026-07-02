@@ -1,7 +1,7 @@
 import { UserProfile } from './types'
 import { ConnectorScope } from '../connectors/registry'
 import { MemoryStore, formatMemoryForPrompt } from '../types/memory'
-import { getSystemPromptFoundation, getSystemPromptScopeBlocks } from '../prompts'
+import { getSystemPromptFoundation, getSystemPromptScopeBlocks, buildEnvironmentContextSection } from '../prompts'
 
 export interface PromptTierTurnContext {
   contextSection: string
@@ -28,6 +28,7 @@ export function assemblePromptTiers(
   const scope = scopeBlocks.join('\n\n').trim()
 
   const turnParts = [
+    buildEnvironmentContextSection(),
     memory ? formatMemoryForPrompt(memory, monitoredScopes) : '',
     turn.capabilitiesSection,
     turn.contextSection,

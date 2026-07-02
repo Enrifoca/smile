@@ -31,17 +31,16 @@ Desktop workspace layout for smile:D.
 | `WorkspaceToolbar.tsx` | Breadcrumb under tabs |
 | `WorkspaceContent.tsx` | Routes to views (`ChatView`, `ContextHomeView`, etc.) |
 | `InspectorPanel.tsx` | Reports (list, modal, pin toggle) + Context (read-only) |
-| `StatusBar.tsx` | Configured models + workspace path |
+| `StatusBar.tsx` | Configured models + workspace path; refreshes on `smile:model-config-changed` |
 | `PanelCollapseIcon.tsx` | Sidebar layout open/close icon |
 
-## Legacy (unused in current shell)
+## Cross-component events
 
-These files remain from an earlier layout and are **not** mounted by `AppShell`:
+Custom DOM events used by the shell:
 
-- `ActivityBar.tsx`
-- `SecondarySidebar.tsx`
-
-The old monolithic `src/components/Sidebar.tsx` is likewise unused. Prefer extending `AppShell` and the components above.
+- `workspace:changed` — workspace folder changed.
+- `smile:chat-history-changed` — chat history mutated (trim, clear, etc.).
+- `smile:model-config-changed` — AI/reasoning/OCR model config saved or cleared. Dispatched from `SettingsView`, listened to by `StatusBar`.
 
 ## Palette
 

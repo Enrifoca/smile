@@ -4,8 +4,6 @@ import { CompressionRule } from './types'
 const CATEGORY_DEFAULTS: Partial<Record<ToolCategory, CompressionRule>> = {
   'file-read': { skip: true },
   'memory': { skip: true },
-  'scratchpad': { skip: true },
-  'analysis': { skip: true },
   'connector-read': { maxChars: 8000, maxLines: 120 },
   'connector-write': { maxChars: 2000, maxLines: 40 },
   'connector-attachment': { maxChars: 1500, maxLines: 30 },

@@ -113,32 +113,6 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
         afterLabel: 'Analyzing workspace results…',
       }
     }
-    case 'web_search': {
-      const query = str(args.query)
-      const active = `Searching the web for "${query}"…`
-      return {
-        tool: name,
-        label: `Searched the web for "${query}"`,
-        group: 'web',
-        category: 'web',
-        preparingLabel: active,
-        runningLabel: active,
-        afterLabel: 'Analyzing web results…',
-      }
-    }
-    case 'web_fetch': {
-      const url = str(args.url)
-      const active = `Fetching ${url}…`
-      return {
-        tool: name,
-        label: `Fetched ${url}`,
-        group: 'web',
-        category: 'web',
-        preparingLabel: active,
-        runningLabel: active,
-        afterLabel: 'Analyzing page content…',
-      }
-    }
     case 'memory_update':
       return {
         tool: name,

@@ -14,7 +14,7 @@ Theme tokens: **`src/theme/tokens.css`**. Semantic styles: **`src/styles/globals
 
 - App shell layout (`shell/` — titlebar, chat history sidebar, tabs, inspector, status bar; see `shell/README.md`)
 - Chat UI (`chat/` — write action bar, banner, empty state)
-- Write action bar above composer (`ActionConfirm.tsx` re-exports `WriteActionConfirmModule`)
+- Write action bar above composer (`WriteActionConfirmModule` in `src/components/chat/`)
 - Settings shell
 - Connector catalog and connected connector list
 - Reusable connector setup layout modules (`connectors/ConnectorSettingsModules.tsx`)

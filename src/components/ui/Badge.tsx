@@ -1,6 +1,6 @@
 import { joinClasses } from './classNames'
 
-export type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger'
+export type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'primary'
 
 export interface BadgeProps {
   children: React.ReactNode

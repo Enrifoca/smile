@@ -3,8 +3,10 @@
  *
  * Loads a connector's `handler.js` source (sent by the trusted host, so this
  * process needs no filesystem access) into a constrained `node:vm` context with
- * no `require`/`process`/`fetch`. The handler reaches the outside world only
- * through the `host` bridge, whose methods are RPC calls back to the host broker.
+ * no `require`/`process`/`fetch`. Standard globals exposed to handlers:
+ * `console`, `setTimeout`/`clearTimeout`/`setInterval`/`clearInterval`, `URL`,
+ * and `URLSearchParams`. The handler reaches the outside world only through the
+ * `host` bridge, whose methods are RPC calls back to the host broker.
  *
  * This is the process boundary + a constrained JS context (apiVersion 1.0). A
  * stronger isolate (isolated-vm / QuickJS) can replace the vm layer later without
@@ -80,6 +82,8 @@ function loadHandler(source: string, apiVersion: string): void {
     clearTimeout,
     setInterval,
     clearInterval,
+    URL,
+    URLSearchParams,
   })
 
   const script = new vm.Script(source, { filename: 'handler.js' })

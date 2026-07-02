@@ -17,7 +17,7 @@ flowchart TD
 
 ## Responsibilities
 
-- `src/agent` owns the conversation loop, tool execution flow, pending action lifecycle, scratchpad, streaming, and result handling.
+- `src/agent` owns the conversation loop, tool execution flow, pending action lifecycle, streaming, and result handling.
 - `src/prompts` owns core Markdown prompts and prompt assembly.
 - `src/connectors` owns the connector contract, catalog metadata, registry, and plugin loading — runtime packages live in the workspace; shipped sources in `bundled/connectors/`.
 - `src/components` owns generic UI. Connector settings use `GenericConnectorSettingsView` driven by manifest auth/MCP fields.

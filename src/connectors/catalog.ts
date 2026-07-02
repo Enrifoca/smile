@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 
 import { createWorkspaceIconComponent } from '../components/connectors/GenericConnectorIcon'
+import { BraveIcon } from '../components/connectors/BraveIcon'
 import { JiraIcon } from '../components/connectors/JiraIcon'
 import type { ConnectorIntegrationType, ConnectorManifest } from './contract'
 
@@ -37,6 +38,15 @@ export const INTEGRATION_TYPE_LABELS: Record<ConnectorIntegrationType, string> =
 }
 
 const BUNDLED_CATALOG: Array<Omit<CatalogEntry, 'Icon'>> = [
+  {
+    id: 'brave',
+    name: 'Brave Search',
+    description: 'Web search via the Brave Search API. Add an API key to get citeable search results.',
+    origin: 'bundled',
+    integrationType: 'rest',
+    tagline: 'Web search',
+    CatalogGraphic: BraveIcon,
+  },
   {
     id: 'jira',
     name: 'Jira',

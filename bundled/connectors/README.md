@@ -11,6 +11,7 @@ bundled/connectors/<id>/
   prompt.md
   handler.js
   icon.svg | icon.png   # optional catalog artwork
+  README.md             # optional documentation for users
 ```
 
 Install copies the folder into `<workspace>/.smile/connectors/<id>/`.
