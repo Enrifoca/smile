@@ -32,17 +32,6 @@ Connector `approveAction` can set `resumeAgent: true` (see `src/connectors/types
 
 Agent emits `Message.type: 'artifact'` after successful `report_write` (and `file_write` under `.smile/reports/*.md` as fallback).
 
-## Deep thinking
-
-| Module | Role |
-| --- | --- |
-| `deepThinking.ts` | Reasoning-model pass for `deep_thinking` tool |
-| `capabilities.ts` | Tool-registry summary shared with main agent and deep thinking |
-
-The reasoning pass receives enabled tools, active context, connector prompt excerpts, working notes, and current plan — see [deepThinking.md](./deepThinking.md).
-
-Mode switch: `deep_thinking` activates extended reasoning on the **next** loop iteration via a Turn-tier prompt section — no separate API call.
-
 ## Streaming
 
 | Module | Role |

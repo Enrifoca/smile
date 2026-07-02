@@ -1,4 +1,5 @@
 import { useMemo, type ReactElement } from 'react'
+import { linkifyUrls } from '../../../shared/linkify'
 import { joinClasses } from '../../ui/classNames'
 
 export interface MarkdownRendererProps {
@@ -7,11 +8,12 @@ export interface MarkdownRendererProps {
 }
 
 function renderInline(text: string): string {
-  return text
+  const withLinks = text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code class="ui-md-code">$1</code>')
     .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" class="ui-md-link" target="_blank" rel="noreferrer">$1</a>')
+  return linkifyUrls(withLinks, 'ui-md-link')
 }
 
 function isTableRow(line: string): boolean {
@@ -135,5 +137,20 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     return elements
   }, [content])
 
-  return <div className={joinClasses('ui-md', className)}>{blocks}</div>
+  const handleLinkClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    const anchor = target.closest('a') as HTMLAnchorElement | null
+    if (!anchor) return
+    const href = anchor.getAttribute('href')
+    if (!href) return
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      event.preventDefault()
+      event.stopPropagation()
+      window.electronAPI?.shell?.openExternal(href).catch((err: Error) => {
+        console.error('Failed to open external URL:', err)
+      })
+    }
+  }
+
+  return <div className={joinClasses('ui-md', className)} onClick={handleLinkClick}>{blocks}</div>
 }

@@ -131,53 +131,56 @@ export class DatabaseService {
       }
     }
 
-    // Triggers to keep FTS indexes in sync
+    // Triggers to keep FTS indexes in sync.
+    // Drop and recreate so any older, buggy definitions are replaced.
+    // Note: messages_fts/memory_index_fts are content tables (not external-content
+    // tables), so deletes/updates must use ordinary DELETE FROM statements. The
+    // external-content 'INSERT INTO fts(fts, rowid) VALUES('delete', rowid)'
+    // syntax is invalid for this configuration and raises SQL logic errors.
     const triggers = [
       {
         name: 'messages_fts_insert',
-        sql: `CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+        sql: `CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
           INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
         END;`,
       },
       {
         name: 'messages_fts_update',
-        sql: `CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
-          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+        sql: `CREATE TRIGGER messages_fts_update AFTER UPDATE ON messages BEGIN
+          DELETE FROM messages_fts WHERE rowid = old.rowid;
           INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
         END;`,
       },
       {
         name: 'messages_fts_delete',
-        sql: `CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
-          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+        sql: `CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+          DELETE FROM messages_fts WHERE rowid = old.rowid;
         END;`,
       },
       {
         name: 'memory_index_fts_insert',
-        sql: `CREATE TRIGGER IF NOT EXISTS memory_index_fts_insert AFTER INSERT ON memory_index BEGIN
+        sql: `CREATE TRIGGER memory_index_fts_insert AFTER INSERT ON memory_index BEGIN
           INSERT INTO memory_index_fts(rowid, title, content) VALUES (new.rowid, new.title, new.content);
         END;`,
       },
       {
         name: 'memory_index_fts_update',
-        sql: `CREATE TRIGGER IF NOT EXISTS memory_index_fts_update AFTER UPDATE ON memory_index BEGIN
-          INSERT INTO memory_index_fts(memory_index_fts, rowid, title, content) VALUES ('delete', old.rowid, old.title, old.content);
+        sql: `CREATE TRIGGER memory_index_fts_update AFTER UPDATE ON memory_index BEGIN
+          DELETE FROM memory_index_fts WHERE rowid = old.rowid;
           INSERT INTO memory_index_fts(rowid, title, content) VALUES (new.rowid, new.title, new.content);
         END;`,
       },
       {
         name: 'memory_index_fts_delete',
-        sql: `CREATE TRIGGER IF NOT EXISTS memory_index_fts_delete AFTER DELETE ON memory_index BEGIN
-          INSERT INTO memory_index_fts(memory_index_fts, rowid, title, content) VALUES ('delete', old.rowid, old.title, old.content);
+        sql: `CREATE TRIGGER memory_index_fts_delete AFTER DELETE ON memory_index BEGIN
+          DELETE FROM memory_index_fts WHERE rowid = old.rowid;
         END;`,
       },
     ]
 
     for (const trigger of triggers) {
-      const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name=?").get(trigger.name)
-      if (!exists) {
-        db.exec(trigger.sql)
-      }
+      db.exec(`DROP TRIGGER IF EXISTS ${trigger.name};`)
+      db.exec(trigger.sql)
     }
   }
 
@@ -294,9 +297,10 @@ export class DatabaseService {
     }
   }
 
-  deleteMessagesForChat(chatId: string): void {
+  deleteMessagesForChat(chatId: string): { changes: number } {
     const db = this.ensureDb()
-    db.prepare('DELETE FROM messages WHERE chat_id = ?').run(chatId)
+    const result = db.prepare('DELETE FROM messages WHERE chat_id = ?').run(chatId)
+    return { changes: result.changes }
   }
 
   listRecentChats(limit = 100): ChatSummary[] {

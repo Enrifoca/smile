@@ -73,7 +73,8 @@ Legacy Tailwind `rounded-xl` on Settings sections is normalized to `--radius-con
 
 - Source: `public/icon.svg` — **subtle rounded corners** (`rx="48"` on 512px canvas, ~9%).
 - Regenerate platform assets after SVG changes: `npm run icons` (also re-runs `brand-electron` on Windows).
-- Dev taskbar on Windows uses `bin/smile-dev.exe` with embedded `public/icon.ico`.
+- macOS uses `public/icon.icns`; Windows uses `public/icon-windows.ico` with a larger `:D` mark and extra sizes for Start-menu / .exe shell icons.
+- Dev taskbar on Windows uses `bin/smile-dev.exe` with embedded `public/icon-windows.ico`.
 
 ---
 
@@ -221,14 +222,15 @@ One primary CTA per logical block. Never use red for a non-destructive primary C
 
 ## Chips
 
-**Purpose:** show that something is **on / active / connected** — nothing else.
+**Purpose:** show that something is **on / active / connected**, or tag an **integration type** (connector REST/MCP/etc.).
 
 | State | Appearance |
 | --- | --- |
 | **Active** | Green text + green border (`Badge tone="success"`) |
 | **Inactive** | **No chip.** Absence = off. |
+| **Integration type** | White fill, black border, black label (`Badge tone="primary"`) — used for connector MCP/REST/etc. labels. |
 
-Do not use chips for integration type labels, versions, or categories.
+Do not use chips for versions or categories.
 
 ---
 
@@ -265,6 +267,7 @@ Range sliders (`RangeSlider` in Communication preferences): **mouse wheel scroll
 
 - Catalog tiles: `connector-card` — `1px` border, `--radius-control`, base typography; hover `--color-hover-surface`.
 - Green dot top-right when configured (`connector-card-active-dot`).
+- Integration type labels (REST, MCP, etc.) are **white chips with a black border and black label** (`Badge tone="primary"`).
 - Detail/settings: `ui-page-frame` + `Panel variant="soft"` (sharp corners via `--radius-control`).
 - Tool rows in settings: `connector-tool-item`.
 - Inline paths/commands: `ui-inline-code`.

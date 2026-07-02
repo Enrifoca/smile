@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '../connectors/types'
+import type { ToolDefinition, ConnectorRuntime } from '../connectors/types'
 
 /** Human-readable labels for manifest `agentCapabilities` tokens. */
 export const AGENT_CAPABILITY_LABELS: Record<string, string> = {
@@ -23,10 +23,7 @@ const CORE_CATEGORY_LINES: Record<string, string> = {
   'file-write': 'write workspace files and markdown reports',
   'file-manage': 'list and search workspace files',
   memory: 'read and update persistent memory',
-  scratchpad: 'working notes and plan updates for this turn',
-  analysis: 'deep_thinking for structured analysis',
   context: 'read and update active project context',
-  web: 'search and fetch web content',
 }
 
 function summarizeCoreTools(tools: ToolDefinition[]): string[] {
@@ -68,39 +65,46 @@ function summarizeConnectorTools(connector: ConnectorCapabilitySummary): string[
 }
 
 /**
- * Dynamic capability summary injected each turn from the tool registry.
- * Replaces static deny-lists in the system prompt.
+ * Dynamic core capability summary injected each turn from the tool registry.
+ * Lists only built-in (non-connector) tools that are currently enabled.
  */
-export function buildEnabledCapabilitiesSection(
-  allTools: ToolDefinition[],
-  connectors: ConnectorCapabilitySummary[],
-): string {
-  const coreTools = allTools.filter(tool => !tool.category.startsWith('connector-'))
+export function buildCoreCapabilitiesSection(coreTools: ToolDefinition[]): string {
   const coreLines = summarizeCoreTools(coreTools)
 
-  const connectorBlocks = connectors
-    .map(connector => {
-      const toolLines = summarizeConnectorTools(connector)
-      if (toolLines.length === 0) return ''
-      return [`**${connector.name}**`, ...toolLines].join('\n')
-    })
-    .filter(Boolean)
-
   const parts = [
-    'Your abilities this session are **exactly** the tools listed below. Do not suggest or attempt actions outside this set.',
+    'Your core abilities this session are **exactly** the built-in tools listed below. Do not suggest or attempt actions outside this set plus the connector tools in Connector context.',
     '',
-    '### Core',
-    ...(coreLines.length > 0 ? coreLines : ['- AI reasoning only (no workspace or connector tools enabled)']),
-  ]
-
-  if (connectorBlocks.length > 0) {
-    parts.push('', '### Connectors', ...connectorBlocks)
-  }
-
-  parts.push(
+    ...(coreLines.length > 0 ? coreLines : ['- AI reasoning only (no workspace tools enabled)']),
     '',
     'If the user asks for something no tool covers, say so plainly and offer what you can do with the tools above.',
-  )
+  ]
 
   return parts.join('\n')
+}
+
+/**
+ * Build a unified Connector context block for a single connector.
+ * Combines the connector's own prompt section (instructions, scope, examples)
+ * with the list of tools it provides, so the model sees one coherent block
+ * per connector instead of split instructions and capability lists.
+ */
+export function buildConnectorContextSection(connector: ConnectorRuntime): string {
+  const definition = connector.definition
+  const promptSection = definition.getPromptSection?.(connector.context) ?? ''
+  const summary: ConnectorCapabilitySummary = {
+    name: definition.name,
+    agentCapabilities: definition.agentCapabilities,
+    tools: definition.tools,
+  }
+  const toolLines = summarizeConnectorTools(summary)
+
+  const parts: string[] = []
+  if (promptSection.trim()) {
+    parts.push(promptSection.trim())
+  }
+  if (toolLines.length > 0) {
+    parts.push('**Available tools**', ...toolLines)
+  }
+
+  return parts.length > 0 ? parts.join('\n\n') : ''
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useElectron } from '../../hooks/useElectron'
 import type { AIConfig, OCRConfig } from '../../shared/modelCatalog'
 import { FolderIcon } from './shellIcons'
+import { MODEL_CONFIG_CHANGED } from '../../shell/modelConfigEvents'
 
 function shortenPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
@@ -50,9 +51,11 @@ export default function StatusBar() {
     }
     window.addEventListener('focus', refresh)
     window.addEventListener('workspace:changed', refresh)
+    window.addEventListener(MODEL_CONFIG_CHANGED, refresh)
     return () => {
       window.removeEventListener('focus', refresh)
       window.removeEventListener('workspace:changed', refresh)
+      window.removeEventListener(MODEL_CONFIG_CHANGED, refresh)
     }
   }, [storage, file])
 

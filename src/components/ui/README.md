@@ -20,7 +20,7 @@ Rebrand the app: change tokens + `.ui-*` rules first. Components pick up changes
 | `Button` | All clickable actions (`variant`, `size`, `loading`) |
 | `ActionRow` | Primary action + success/error feedback (save, submit) |
 | `ActionFeedback` / `StatusText` | Feedback only (auto-save, refresh status) |
-| `Badge` | Connected / configured / active labels |
+| `Badge` | Connected / configured / active labels; `tone="primary"` for white integration-type chips with black border/label |
 | `Alert` | Inline error or blocking messages |
 | `Callout` | Helper snippets (tips, best picks) |
 | `Toggle` | Boolean settings |
@@ -43,7 +43,6 @@ Chat-specific compositions live in **`src/components/chat/`** — they use kit p
 
 Styles: `.ui-write-action-bar`, `.ui-chat-*`. Defaults: `src/components/chat/writeActionConfirmDefaults.ts`. Guide: `src/components/chat/README.md`.
 
-Legacy aliases (`SaveActionRow`, `SaveFeedback`, `useSaveAction`) remain for older imports but new code should use `ActionRow`, `ActionFeedback`, `useActionFeedback`.
 
 ## Feedback hook
 

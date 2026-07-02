@@ -12,7 +12,7 @@ const root = path.join(__dirname, '..')
 const binDir = path.join(root, 'bin')
 const sourceExe = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe')
 const brandedExe = path.join(binDir, 'smile-dev.exe')
-const iconPath = path.join(root, 'public', 'icon.ico')
+const iconPath = path.join(root, 'public', 'icon-windows.ico')
 
 async function main() {
   if (process.platform !== 'win32') {
@@ -33,7 +33,7 @@ async function main() {
     return
   }
   if (!fs.existsSync(iconPath)) {
-    console.warn('brand-electron: public/icon.ico missing — run npm run icons first')
+    console.warn('brand-electron: public/icon-windows.ico missing — run npm run icons first')
     return
   }
 

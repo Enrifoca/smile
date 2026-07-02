@@ -17,8 +17,6 @@
 - `src/components`: generic React UI.
 - `src/components/shell`: desktop workspace chrome (titlebar, chat history, tabs, inspector).
 - `src/shell`: workspace tab types and `useWorkspaceTabs` hook.
-- `src/components/shell`: desktop workspace chrome (titlebar, chat history, tabs, inspector).
-- `src/shell`: workspace tab types and `useWorkspaceTabs` hook.
 - `src/components/ui`: shared UI kit (buttons, forms, panels, feedback).
 - `src/components/connectors`: reusable connector setup UI shells (`ConnectorSettingsModules.tsx`).
 - `src/hooks`: renderer hooks for desktop APIs.

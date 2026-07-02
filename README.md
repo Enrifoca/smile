@@ -1,28 +1,41 @@
 # smile:D
 
-smile:D is a desktop framework for building vertical AI agents for work.
+A desktop framework for building vertical AI agents for work.
 
-It gives you the reusable structure: a local desktop shell, multi-model agent loop, human-in-the-loop tool approvals, editable memory, workspace file access, and a connector system. Bring a use case, add connector modules, tune the prompts, and ship a focused agent for that domain.
+[![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/enrifoca/smile?color=black&label=release)](https://github.com/enrifoca/smile/releases/latest)
+[![Built by Enrico Focaccia](https://img.shields.io/badge/Built%20by-Enrico%20Focaccia-black?logo=linkedin)](https://www.linkedin.com/in/enrico-focaccia/)
+
+smile:D gives you the reusable structure: a local desktop shell, multi-model agent loop, human-in-the-loop tool approvals, editable memory, workspace file access, and a connector system. Bring a use case, add connector modules, tune the prompts, and ship a focused agent for that domain.
+
+[![Download latest release](https://img.shields.io/badge/Download-latest%20release-black?style=for-the-badge)](https://github.com/enrifoca/smile/releases/latest)
 
 ## Features
 
-- **Desktop agent shell** - Electron, React, TypeScript, Vite, and Tailwind.
-- **Multi-model runtime** - Configure chat, reasoning, and OCR-capable models.
-- **Human-in-the-loop writes** - Read tools can run freely; write tools pause for user approval.
-- **Editable memory** - User memory lives in Markdown under `.smile/memories`.
-- **Workspace access** - Agents can read, search, OCR, and write inside a selected local folder.
-- **Connector modules** - Third-party capabilities are intended to live outside the core agent loop.
-- **Clean white-label UI** - Minimal black and white interface ready to adapt to a vertical use case.
+| Feature | What it means |
+| --- | --- |
+| **Multimodal** | Choose your chat model, switch to a reasoning model, and use the OCR model for scanned or image-based documents. |
+| **Human in the loop** | Read tools run freely; write tools pause for your approval before they execute. |
+| **Editable memory** | User memory and learned notes live in Markdown under `.smile/memories`. |
+| **Compression** | Verbose tool output is shrunk before it re-enters the model context. |
+| **Context management** | Switch easily between project contexts to keep work scoped. |
+| **Connector modules** | Create and install your own connector packages under `.smile/connectors/<id>/`. |
+| **Clean white-label UI** | Minimal black-and-white interface, ready to adapt to a vertical use case. |
 
-## Getting Started
+## Getting started
 
-### Prerequisites
+### End users
 
-- Node.js 18+
-- npm
-- An API key from one supported model provider
+Download the latest installer for your platform from [GitHub Releases](https://github.com/enrifoca/smile/releases/latest).
 
-### Installation
+| Platform | Installer |
+| --- | --- |
+| macOS Apple Silicon | `.dmg` / `.zip` |
+| Windows | `.exe` (NSIS installer) |
+
+> Unsigned installers will show platform warnings (macOS “unidentified developer”, Windows SmartScreen / Defender). You can allow them in system security settings.
+
+### Developers
 
 ```bash
 # Install dependencies
@@ -52,19 +65,32 @@ Published releases (installers + auto-update): see [docs/distribution.md](docs/d
 
 ## Configuration
 
-On first launch, the app will guide you through:
+There is no first-launch onboarding wizard. After the app opens, configure everything from **Settings** in the title bar:
 
-1. **AI Provider** - Choose and configure your preferred AI provider.
-2. **Workspace** - Select a folder for document access and generated outputs.
-3. **Memory** - Edit durable user instructions in Markdown.
-4. **Connectors** - Install code packages under `<workspace>/.smile/connectors/<id>/` (see Connectors section and `docs/creating-a-connector.md`).
+1. **AI Provider** — choose and configure your chat, reasoning, and OCR providers.
+2. **Workspace** — select a folder for document access and generated outputs.
+3. **Memory** — edit durable user instructions in Markdown.
+4. **Connectors** — install packages under `<workspace>/.smile/connectors/<id>/` (see the Connectors section and `docs/creating-a-connector.md`).
+
+## Supported AI providers
+
+Chat, reasoning, and OCR models can be configured independently.
+
+| Provider | Chat | Reasoning | OCR | Notes |
+| --- | :---: | :---: | :---: | --- |
+| **OpenAI** | ✅ | ✅ | — | GPT models; reasoning via `o1`/`o3`/`o4` |
+| **Anthropic** | ✅ | ✅ | — | Claude models; reasoning via Claude 3.7 Sonnet / Claude 4 |
+| **Mistral** | ✅ | ✅ | ✅ | `mistral-large-latest`, `magistral-*`, `mistral-ocr-latest` |
+| **Groq** | ✅ | ✅ | — | Mixture of hosted open-weight and reasoning models |
+| **Moonshot / Kimi** | ✅ | ✅ | — | Kimi K2 family, including thinking variants |
+| **DeepSeek** | — | ✅ | ✅ | `deepseek-reasoner`, DeepSeek OCR |
 
 ## Framework Pillars
 
-- **Multi models** - Main model, reasoning model, and OCR model are configured independently.
-- **Human in the loop** - Connector write actions show Accept/Refuse above the composer before execution.
-- **Craftable modules** - Connectors contribute tools, prompt sections, auth, preview labels, and approval copy.
-- **Memory management** - User memory is authoritative; learned notes are lower priority; scratchpad is per-turn.
+- **Multimodal by default** — chat, reasoning, and OCR models are configured independently.
+- **Human in the loop** — connector write actions show Accept/Refuse above the composer before execution.
+- **Craftable modules** — connectors contribute tools, prompt sections, auth, preview labels, and approval copy.
+- **Editable memory & contexts** — user memory is authoritative; project contexts keep work scoped.
 
 ## Connector Contract
 
@@ -191,10 +217,6 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). — see [LICENSE](LICENSE).
 
 ## Contributing
 

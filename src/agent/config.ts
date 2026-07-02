@@ -34,7 +34,6 @@ export interface AgentConfig {
   executeFileTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeMemoryTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeContextTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
-  executeWebTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>
   /** Load context markdown for prompt injection (full file or tool-only gate). */
   loadContextPromptBody?: (contextId: string) => Promise<ContextPromptBody>
   /** Reload the active context record from storage before tool calls (avoids stale scope config). */

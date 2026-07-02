@@ -19,7 +19,6 @@ import { getMemoryService, MemoryService } from './services/memory'
 import { getContextService, ContextService } from './services/contexts'
 import { getSourceMemoryService } from './services/sourceMemory'
 import { getDatabaseService, DatabaseService } from './services/database'
-import { getWebService, WebService } from './services/web'
 import { SourceMemoryLeafInput } from '../src/memory/sourceTypes'
 import { getUpdateService } from './services/updates'
 
@@ -40,7 +39,6 @@ let modelCatalogService: ModelCatalogService | null = null
 let connectorsService: ConnectorsService | null = null
 let contextService: ContextService | null = null
 let databaseService: DatabaseService | null = null
-let webService: WebService | null = null
 
 /** A connected MCP server that can answer generic tool calls from connectors. */
 interface McpServerHandle {
@@ -213,7 +211,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    minWidth: 800,
+    minWidth: 1000,
     minHeight: 600,
     show: false,
     ...(appIcon ? { icon: appIcon } : {}),
@@ -412,11 +410,6 @@ async function initializeServices() {
     ensureContextService()
     databaseService = getDatabaseService()
     databaseService.setWorkspace(workspace)
-    webService = getWebService()
-    try {
-      const braveKey = await storageService.getSecure('braveSearchApiKey')
-      webService.setBraveApiKey(braveKey || null)
-    } catch { /* ignore missing key */ }
 
     await migrateChatHistoryToSqlite(databaseService, storageService)
     await rebuildMemoryIndex(databaseService, memoryService).catch(error => {
@@ -633,13 +626,16 @@ ipcMain.handle('models:refreshProvider', async (_, provider: ModelProvider) => {
 
 // File operations
 ipcMain.handle('file:selectWorkspace', async () => {
+  console.log('[Main] file:selectWorkspace invoked')
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
     title: 'Select Workspace Folder'
   })
-  
+  console.log('[Main] dialog result:', { canceled: result.canceled, filePaths: result.filePaths })
+
   if (!result.canceled && result.filePaths.length > 0) {
     const workspacePath = result.filePaths[0]
+    console.log('[Main] Setting workspace to:', workspacePath)
     await storageService.setWorkspacePath(workspacePath)
     fileService = new FileService(workspacePath, getConfiguredOcrService)
     await fileService.ensureWorkspaceFolders()
@@ -650,19 +646,16 @@ ipcMain.handle('file:selectWorkspace', async () => {
     ensureContextService()
     databaseService = getDatabaseService()
     databaseService.setWorkspace(workspacePath)
-    webService = getWebService()
-    try {
-      const braveKey = await storageService.getSecure('braveSearchApiKey')
-      webService.setBraveApiKey(braveKey || null)
-    } catch { /* ignore missing key */ }
 
     await migrateChatHistoryToSqlite(databaseService, storageService)
     await rebuildMemoryIndex(databaseService, memoryService).catch(error => {
       console.warn('[Database] Memory index rebuild after workspace switch failed:', error)
     })
 
+    console.log('[Main] Workspace selected:', workspacePath)
     return { success: true, path: workspacePath }
   }
+  console.log('[Main] Workspace selection canceled')
   return { success: false }
 })
 
@@ -734,20 +727,6 @@ ipcMain.handle('file:searchContent', async (_, query: string, directory?: string
 ipcMain.handle('file:patch', async (_, relativePath: string, search: string, replace: string, count?: number) => {
   if (!fileService) return { success: false, error: 'Workspace not configured' }
   return fileService.patchFile(relativePath, search, replace, count ?? 1)
-})
-
-ipcMain.handle('web:search', async (_, query: string, count?: number) => {
-  const service = webService || getWebService()
-  try {
-    const braveKey = await storageService.getSecure('braveSearchApiKey')
-    service.setBraveApiKey(braveKey || null)
-  } catch { /* ignore missing key */ }
-  return service.webSearch(query, count)
-})
-
-ipcMain.handle('web:fetch', async (_, url: string, mode?: 'article' | 'raw') => {
-  const service = webService || getWebService()
-  return service.webFetch(url, mode)
 })
 
 ipcMain.handle('file:getFileInfo', async (_, relativePath: string) => {
@@ -1419,7 +1398,7 @@ ipcMain.handle('chat:saveMessage', async (_, chatId: string, message: unknown) =
       type?: string
       metadata?: Record<string, unknown>
     }
-    databaseService.insertMessage({
+    databaseService.upsertMessage({
       id: msg.id,
       chat_id: chatId,
       role: msg.role,
@@ -1445,7 +1424,7 @@ ipcMain.handle('chat:upsertMessage', async (_, chatId: string, message: unknown)
       type?: string
       metadata?: Record<string, unknown>
     }
-    databaseService.insertMessage({
+    databaseService.upsertMessage({
       id: msg.id,
       chat_id: chatId,
       role: msg.role,
@@ -1486,9 +1465,10 @@ ipcMain.handle('chat:searchMessages', async (_, query: string, limit?: number) =
 ipcMain.handle('chat:deleteChat', async (_, chatId: string) => {
   if (!databaseService) return { success: false, error: 'Workspace not configured' }
   try {
-    databaseService.deleteMessagesForChat(chatId)
-    return { success: true }
+    const result = databaseService.deleteMessagesForChat(chatId)
+    return { success: true, deleted: result.changes }
   } catch (error) {
+    console.error(`[Main] Failed to delete chat ${chatId}:`, error)
     return { success: false, error: error instanceof Error ? error.message : 'Failed to delete chat' }
   }
 })

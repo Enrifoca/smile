@@ -1,0 +1,44 @@
+{
+  "apiVersion": "1.0",
+  "id": "brave",
+  "name": "Brave Search",
+  "version": "1.0.0",
+  "description": "Web search via the Brave Search API. Add an API key in settings to enable high-quality, citeable search results.",
+  "handlerKind": "code",
+  "integrationType": "rest",
+  "auth": {
+    "type": "api-key",
+    "fields": [
+      { "key": "apiKey", "label": "Brave Search API key", "secret": true }
+    ]
+  },
+  "permissions": {
+    "http": ["https://api.search.brave.com"],
+    "secrets": ["apiKey"]
+  },
+  "ui": {
+    "catalogLabel": "Brave Search",
+    "connectedLabel": "Brave Search ready"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Web search"
+  },
+  "agentCapabilities": ["web-search"],
+  "tools": [
+    {
+      "name": "brave_web_search",
+      "description": "Search the web using Brave Search. Use for current events, documentation, or facts not in the workspace. Always cite the source URLs.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query" },
+          "count": { "type": "integer", "description": "Number of results (default 5, max 20)" }
+        },
+        "required": ["query"]
+      }
+    }
+  ]
+}

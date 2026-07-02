@@ -15,17 +15,18 @@ Each model call assembles three layers (`src/agent/promptTiers.ts`):
 | --- | --- | --- |
 | **Foundation** | `system.md` (core rules) | Stable |
 | **Scope** | User profile (communication preferences), connector `prompt.md` sections | Semi-stable per session |
-| **Turn** | Memory, enabled capabilities, scratchpad, active context, current plan, analysis | Changes every iteration |
+| **Turn** | Environment context (current date/time/timezone), memory, core capabilities, active context, current plan | Changes every iteration |
 
-### Enabled capabilities (dynamic)
+### Core capabilities and Connector context (dynamic)
 
-`src/agent/capabilities.ts` builds a **Enabled capabilities** section from the live tool registry (core tools + enabled connectors). Injected each turn so the model does not rely on static deny-lists in `system.md`.
+`src/agent/capabilities.ts` builds two non-overlapping turn-tier sections:
+
+- **Core capabilities** lists the built-in (non-connector) tools currently available.
+- **Connector context** lives in the Scope tier and merges each enabled connector's own `prompt.md` instructions with the list of tools it provides.
+
+Both are injected each turn so the model does not rely on static deny-lists in `system.md`.
 
 Connectors may declare optional `agentCapabilities` tokens in `manifest.json` (e.g. `"email"`, `"web-search"`) for human-readable capability labels — see [creating-a-connector.md](./creating-a-connector.md).
-
-### Deep thinking context
-
-The `deep_thinking` tool sets a pending flag; the **next** model call uses the reasoning model and injects `buildDeepThinkingTurnSection()` into the Turn tier. No separate system prompt or subprocess. See [src/agent/deepThinking.md](../src/agent/deepThinking.md).
 
 ## Connector Prompts
 
@@ -52,11 +53,11 @@ Connector prompts should not include:
 
 Prompt templates use simple `{{variable}}` placeholders rendered by `src/prompts/loader.ts`.
 
-Keep interpolation simple. If logic becomes complex, compute the text in TypeScript and inject it as one variable (as with enabled capabilities and user communication preferences).
+Keep interpolation simple. If logic becomes complex, compute the text in TypeScript and inject it as one variable (as with core capabilities, connector context, and user communication preferences).
 
 ## User communication preferences
 
-Settings → Behavior → Communication preferences (technical/conversational, concise/detailed, formal/casual) are rendered into the **User Context** scope block via `src/agent/communicationPreferences.ts`. They affect the main agent's visible replies, including a `deep_thinking` turn because deep thinking is a mode switch in the same prompt pipeline.
+Settings → Behavior → Communication preferences (technical/conversational, concise/detailed, formal/casual) are rendered into the **User Context** scope block via `src/agent/communicationPreferences.ts`. They affect the main agent's visible replies.
 
 ## Tool Results In History
 

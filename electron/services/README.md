@@ -2,7 +2,7 @@
 
 Desktop services live in the **Electron main process**. They exist because some work cannot (or should not) run in the renderer: OAuth callbacks, long-lived MCP proxy processes, secret storage, CORS-free HTTP, filesystem access, and provider SDKs that assume Node.js.
 
-**Connectors do not live here.** Connector packages live under `<workspace>/.smile/connectors/<id>/` and run in a sandbox (`handler.js`). A desktop service is **optional transport infrastructure** brokered through `host.mcp.call`, `host.http.request`, or `host.call` when the integration needs main-process capabilities.
+**Connectors do not live here.** Connector packages live under `<workspace>/.smile/connectors/<id>/` and run in a sandbox (`handler.js`). A desktop service is **optional transport infrastructure** brokered through `host.mcp.call`, `host.http.fetch`, or `host.call` when the integration needs main-process capabilities.
 
 ## Two layers (do not confuse them)
 
@@ -160,7 +160,7 @@ Declarative connector tools map 1:1 in the manifest:
 
 ### REST pattern
 
-Use when you call HTTP APIs directly. Prefer `host.http.request` from `handler.js` when URLs fit `permissions.http`. Add a dedicated service when OAuth, uploads, or SDK clients require main process.
+Use when you call HTTP APIs directly. Prefer `host.http.fetch` from `handler.js` when URLs fit `permissions.http`. Add a dedicated service when OAuth, uploads, or SDK clients require main process.
 
 ---
 

@@ -73,10 +73,6 @@ export function useElectron() {
     ],
   )
 
-  const webSearch = useCallback(async (query: string, count?: number) => api.web.search(query, count), [])
-  const webFetch = useCallback(async (url: string, mode?: 'article' | 'raw') => api.web.fetch(url, mode), [])
-  const web = useMemo(() => ({ search: webSearch, fetch: webFetch }), [webSearch, webFetch])
-
   const chatLoadRecent = useCallback(async (limit?: number) => api.chat.loadRecent(limit), [])
   const chatLoadMessages = useCallback(async (chatId: string) => api.chat.loadMessages(chatId), [])
   const chatSaveMessage = useCallback(async (chatId: string, message: unknown) => api.chat.saveMessage(chatId, message), [])
@@ -303,7 +299,6 @@ export function useElectron() {
     windowControls,
     models,
     file,
-    web,
     chat,
     ai,
     mcp,

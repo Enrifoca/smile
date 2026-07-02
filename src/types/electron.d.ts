@@ -77,10 +77,6 @@ export interface ElectronAPI {
     }>
     abortStream: () => void
   }
-  web: {
-    search: (query: string, count?: number) => Promise<{ success: boolean; data?: Array<{ title: string; url: string; snippet: string }>; error?: string }>
-    fetch: (url: string, mode?: 'article' | 'raw') => Promise<{ success: boolean; data?: { title: string; url: string; content: string; mode: 'article' | 'raw' }; error?: string }>
-  }
   chat: {
     loadRecent: (limit?: number) => Promise<{ success: boolean; data?: Array<{ id: string; title: string; date: string; message_count: number; last_message_at: string }>; error?: string }>
     loadMessages: (chatId: string) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
@@ -88,7 +84,7 @@ export interface ElectronAPI {
     upsertMessage: (chatId: string, message: unknown) => Promise<{ success: boolean; error?: string }>
     updateMessage: (chatId: string, messageId: string, content: string, isStreaming: boolean) => Promise<{ success: boolean; error?: string }>
     searchMessages: (query: string, limit?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
-    deleteChat: (chatId: string) => Promise<{ success: boolean; error?: string }>
+    deleteChat: (chatId: string) => Promise<{ success: boolean; deleted?: number; error?: string }>
   }
   mcp: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>

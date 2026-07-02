@@ -70,6 +70,7 @@ This guide is the single source of truth for connector authors. The stable runti
 | `handler.js` | yes when `handlerKind` is `code` (default) | Sandboxed tool implementation |
 | `prompt.md` | strongly recommended | Domain instructions injected into the agent system prompt |
 | `icon.png` (or path in `catalog.icon`) | no | Catalog card image |
+| `README.md` | recommended | User-facing documentation for the connector package |
 
 There are no built-in connector packages inside the agent loop. Workspace connectors are discovered from `<workspace>/.smile/connectors/<id>/`. The app also ships **catalog entries** under `bundled/connectors/<id>/` (installable from **Connectors → Catalog**) and optional catalog artwork in `src/connectors/catalog.ts` — see [Bundled catalog](#bundled-catalog) below.
 
@@ -117,7 +118,7 @@ Optional tokens that describe what the connector enables in plain language for t
 "agentCapabilities": ["email"]
 ```
 
-Known tokens are mapped to readable labels in `AGENT_CAPABILITY_LABELS` (`src/agent/capabilities.ts`). Use a custom string for novel domains; it is shown as-is. Declare tokens that match what your tools actually do — the runtime still lists every tool name in **Enabled capabilities**.
+Known tokens are mapped to readable labels in `AGENT_CAPABILITY_LABELS` (`src/agent/capabilities.ts`). Use a custom string for novel domains; it is shown as-is. Declare tokens that match what your tools actually do — the runtime still lists every tool name in the connector's **Connector context** section.
 
 ### permissions
 
@@ -218,7 +219,7 @@ module.exports = { executeTool, approveAction }
 
 **Tool results:** Always return `{ success: true, data: ... }` or `{ success: false, error: '...' }`. Keep `data` compact — large payloads bloat the agent context.
 
-**Sandbox rules:** No `require`, `import`, `process`, `fetch`, or direct filesystem access. The host enforces permissions; exceeding them throws at runtime.
+**Sandbox rules:** No `require`, `import`, `process`, `fetch`, or direct filesystem access. The host enforces permissions; exceeding them throws at runtime. Standard globals available to handlers: `console`, `setTimeout`/`clearTimeout`/`setInterval`/`clearInterval`, `URL`, and `URLSearchParams`.
 
 Full TypeScript definitions: [`src/connectors/contract/host.ts`](../src/connectors/contract/host.ts), [`handler.ts`](../src/connectors/contract/handler.ts).
 

@@ -146,6 +146,16 @@ button, input, textarea, select {
   @apply text-xs text-gray-400 mt-1;
 }
 
+.ui-chat-system-message {
+  @apply flex justify-center my-2 animate-slide-in;
+}
+
+.ui-chat-system-message span {
+  @apply text-xs px-3 py-1 rounded;
+  color: var(--color-muted-text);
+  background-color: var(--color-surface-alt);
+}
+
 .ui-chat-thinking {
   @apply pl-11 mb-2 animate-slide-in;
 }
@@ -424,6 +434,12 @@ input:focus, textarea:focus, select:focus {
   color: #b91c1c;
   border-color: #fecaca;
   background: #fef2f2;
+}
+
+.ui-badge--primary {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  border-color: var(--color-ink);
 }
 
 .ui-alert {

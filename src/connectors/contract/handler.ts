@@ -6,7 +6,7 @@ import { ToolResult } from './result'
  *
  * Only execution crosses the sandbox boundary; declarative concerns (prompt,
  * confirmations, previews, formatting) live in the manifest/prompt and are read
- * by the host directly. Host-side bookkeeping (cache, scratchpad, source memory,
+ * by the host directly. Host-side bookkeeping (cache, source memory,
  * resume) stays in the trusted core and is replayed over reported `writes`.
  */
 
@@ -24,7 +24,7 @@ export interface ApproveActionOutcome {
   message?: string
   /** Ask the core to resume the agent loop (e.g. after recoverable errors). */
   resumeAgent?: boolean
-  /** Writes executed by the handler, for core-side cache/scratchpad/source-memory replay. */
+  /** Writes executed by the handler, for core-side cache/source-memory replay. */
   writes?: ReportedWrite[]
 }
 

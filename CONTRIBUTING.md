@@ -2,12 +2,26 @@
 
 Thanks for helping improve smile:D.
 
-## Before you open a PR
+## Before you start
 
 1. Read [AGENTS.md](AGENTS.md) for architecture boundaries (connector-neutral core, no domain logic in the agent loop).
-2. Run `npm run typecheck` — it must pass.
-3. UI changes should follow [docs/ui-guidelines.md](docs/ui-guidelines.md).
-4. New connector behavior belongs in workspace packages or `bundled/connectors/`, not hard-coded in `src/agent`.
+2. Read [docs/repository-map.md](docs/repository-map.md) to find the right area for your change.
+
+## Development setup
+
+- Node.js 18+
+- npm
+
+```bash
+npm install
+npm run electron:dev
+```
+
+Run the type checker before committing:
+
+```bash
+npm run typecheck
+```
 
 ## Where to change things
 
@@ -19,9 +33,13 @@ Thanks for helping improve smile:D.
 | New connector | [docs/creating-a-connector.md](docs/creating-a-connector.md) |
 | Connector transport (OAuth/MCP) | [electron/services/README.md](electron/services/README.md) |
 
-## Commits and scope
+## Pull requests
 
-Keep PRs focused. Prefer updating the relevant folder README or `docs/` when you change a public contract.
+- Keep PRs focused and small.
+- Run `npm run typecheck` — it must pass.
+- UI changes should follow [docs/ui-guidelines.md](docs/ui-guidelines.md).
+- New connector behavior belongs in workspace packages or `bundled/connectors/`, not hard-coded in `src/agent`.
+- Prefer updating the relevant folder README or `docs/` when you change a public contract.
 
 ## Security
 

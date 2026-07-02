@@ -1,6 +1,6 @@
 # Tool result compression
 
-Framework step inspired by [TokenJuice](https://github.com/vincentkoc/tokenjuice): shrink verbose tool output **before it re-enters the model**.
+Shrink verbose tool output **before it re-enters the model**.
 
 ## What this is not
 
@@ -20,7 +20,7 @@ tool executes
 
 | Category | Behavior |
 | --- | --- |
-| `file-read`, `memory`, `scratchpad` | Skip compression |
+| `file-read`, `memory` | Skip compression |
 | `connector-read` | Cap ~8000 chars / 120 lines |
 | `connector-write`, `connector-attachment` | Cap ~1500–2000 chars |
 | `file-search`, `file-manage` | Moderate caps |

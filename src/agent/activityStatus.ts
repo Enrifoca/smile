@@ -1,7 +1,7 @@
 ﻿import { ToolEntry } from './types'
 
 export type AgentPhase =
-  | { kind: 'awaiting_model'; useReasoning: boolean; isFirstReasoningIteration?: boolean; isDeepThinkingIteration?: boolean; lastEntry?: ToolEntry | null }
+  | { kind: 'awaiting_model'; useReasoning: boolean; isFirstReasoningIteration?: boolean; lastEntry?: ToolEntry | null }
   | { kind: 'streaming_thinking' }
   | { kind: 'streaming_text' }
   | { kind: 'streaming_tool_draft'; entry: ToolEntry }
@@ -14,7 +14,6 @@ export type AgentPhase =
 export function resolveActivityLabel(phase: AgentPhase): string {
   switch (phase.kind) {
     case 'awaiting_model':
-      if (phase.isDeepThinkingIteration) return 'Deep thinking…'
       if (phase.lastEntry?.afterLabel) return phase.lastEntry.afterLabel
       if (phase.useReasoning && phase.isFirstReasoningIteration) return 'Planning next step…'
       if (phase.useReasoning) return 'Reasoning about next step…'

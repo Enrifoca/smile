@@ -67,7 +67,6 @@ Core tools: `toolEntries.ts`. Connectors: `getConnectorToolEntry()` from manifes
 | `preparing_tools` | Stream ended with tool calls | First entry's `preparingLabel`, or `Preparing N actions…` |
 | `running_tool` | Before `executeTool` | `{entry.runningLabel}` |
 | `awaiting_approval` | Write tool needs confirmation | `Waiting for your approval: {entry.label}` |
-| `awaiting_model` + deep mode | Next iteration after `deep_thinking` | `Deep thinking…` (`isDeepThinkingIteration`) |
 | `reasoning_fallback` | Reasoning model retry on chat model | `Reasoning model busy — using chat model…` |
 
 Status is cleared to `null` only at end of `processMessage` (or `abort()`).
@@ -78,7 +77,7 @@ Fallback when status is null: `Working on your request…` in `ChatActivityIndic
 
 ```text
 processMessage(userMessage)
-  toolsRunThisTurn + scratchpad → shouldNudgeIncompleteWorkflow (nudges only, NOT status)
+  toolsRunThisTurn → shouldNudgeIncompleteWorkflow (nudges only, NOT status)
   runAgentLoop:
     loop:
       callAI()
@@ -109,10 +108,9 @@ processMessage(userMessage)
 | --- | --- |
 | First loop iteration + reasoning configured | Reasoning model (light thinking prompt in Turn tier) |
 | Loop iteration 2+ | Main chat model |
-| `deep_thinking` tool | Reasoning model on the **next** loop iteration; Turn-tier **Deep thinking (ACTIVE)** section — [deepThinking.md](./deepThinking.md) |
 | History compression | Main chat model only |
 
-Reasoning orients on the first iteration; execution uses the chat model afterward. `deep_thinking` schedules one **extended reasoning iteration** with a dedicated Turn-tier section — for deep analysis or a sharper scratchpad plan. After that step, the agent continues with tools on the chat model.
+Reasoning orients on the first iteration; execution uses the chat model afterward.
 
 ## Stream progress (tool args)
 

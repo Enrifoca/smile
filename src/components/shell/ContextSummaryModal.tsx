@@ -85,24 +85,12 @@ function buildAgentContextText(snapshot: AgentContextSnapshot | null): string {
     parts.push(`# ${title}${tokenHint}\n\n${content}`)
   }
 
-  // System prompt
-  const systemTokens = snapshot.systemPrompt ? estimateTokens(snapshot.systemPrompt) : 0
-  push('System prompt', snapshot.systemPrompt, systemTokens)
-
-  // Dynamic prompt sections (capabilities, active context, connector context, etc.)
+  // Render the decomposed prompt sections in the order they were assembled.
+  // The full system prompt is already split into non-overlapping sections,
+  // so there is no duplication between "System prompt" and the other sections.
   snapshot.sections
-    .filter(s => s.present && s.name !== 'System prompt' && s.name !== 'Recent conversation history')
+    .filter(s => s.present)
     .forEach(s => push(s.name, s.content, s.tokens))
-
-  // Recent conversation history rendered as one text block with role markers
-  const recentHistory = snapshot.recentHistory
-  if (recentHistory && recentHistory.length > 0) {
-    const historyText = recentHistory
-      .map(m => `[${m.role.toUpperCase()}]\n${m.content}`)
-      .join(`\n${SECTION_DIVIDER}\n`)
-    const historyTokens = recentHistory.reduce((sum, m) => sum + estimateTokens(m.content), 0)
-    push('Recent conversation history', historyText, historyTokens)
-  }
 
   return parts.join(`\n${SECTION_DIVIDER}\n`)
 }
@@ -120,7 +108,7 @@ export function ContextSummaryModal({ activeContext, contextSnapshot, onClose }:
 
   const hasSnapshot = !!contextSnapshot
   const agentContextText = buildAgentContextText(contextSnapshot)
-  const agentContextTokens = contextSnapshot?.sections.reduce((sum, s) => sum + (s.tokens ?? 0), 0) ?? 0
+  const agentContextTokens = contextSnapshot?.totalTokens ?? 0
   const latestToolResultsTokens = contextSnapshot?.latestToolResults?.reduce(
     (sum, r) => sum + estimateTokens(r.result) + estimateTokens(JSON.stringify(r.args)),
     0,

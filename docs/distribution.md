@@ -39,8 +39,10 @@ Outputs land in `release/`.
 Generate app icons from `public/icon.svg` (white canvas, `:D` mark) before release:
 
 ```bash
-npm run icons   # writes public/icon.png, icon.ico, icon.icns + brands electron.exe on Windows
+npm run icons   # writes public/icon.png, icon.ico, icon.icns, icon-windows.ico + brands electron.exe on Windows
 ```
+
+Windows uses `public/icon-windows.ico` (larger `:D` mark and extra sizes for Start menu / .exe shell icons); macOS and Linux use `public/icon.icns` and `public/icon.ico` respectively.
 
 On Windows, **dev mode** launches `bin/smile-dev.exe` (a branded copy of Electron), not stock `electron.exe`. Run `npm run brand-electron` after `npm install` or `npm run icons` if the taskbar icon reverts. `npm run dev` runs branding automatically.
 
