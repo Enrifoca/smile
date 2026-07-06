@@ -1,6 +1,6 @@
 {
   "name": "smile",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "White-label desktop framework for building vertical AI agents",
   "license": "MIT",
   "main": "dist-electron/main.js",
