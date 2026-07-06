@@ -395,6 +395,8 @@ async function executeTool(name, args, host) {
     }
 
     case 'linear_get_teams': {
+      // Always list every team visible to the connected account, ignoring
+      // context scoping, so the user/agent can see what is available.
       const result = await linearGraphql(host, `
         query {
           teams {
@@ -407,7 +409,7 @@ async function executeTool(name, args, host) {
         }
       `)
       if (!result.success) return shapeToolResult(name, result)
-      return { success: true, data: formatTeams(result.data, allowedKeys) }
+      return { success: true, data: formatTeams(result.data, null) }
     }
 
     case 'linear_get_projects': {
