@@ -35,7 +35,7 @@
 See also the full documentation index in [README.md](../README.md#documentation).
 
 - New model/provider behavior: `electron/services/ai.ts` and relevant settings UI.
-- New connector package: `<workspace>/.smile/connectors/<id>/` — see [creating-a-connector.md](creating-a-connector.md). Shipped sources: `bundled/connectors/<id>/`.
+- New connector package: `<workspace>/.smile/connectors/<id>/` — see [creating-a-connector.md](creating-a-connector.md). Shipped sources: `bundled/connectors/<id>/`; the runtime merges additive manifest updates from bundled sources at discovery.
 - New connector tools / prompt / handler: edit `manifest.json`, `prompt.md`, `handler.js` in that folder.
 - New transport (OAuth, MCP, REST): `electron/services/` ([guide](../electron/services/README.md)) + broker registration in `main.ts`.
 - Generic agent loop behavior: `src/agent`.

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import MacWindowChrome from '../MacWindowChrome'
 import AppTitleBar from './AppTitleBar'
 import ChatHistorySidebar from './ChatHistorySidebar'
@@ -89,6 +89,17 @@ export default function AppShell({
     }
     setPinnedReportPath(path)
   }
+
+  useEffect(() => {
+    for (const tab of tabs) {
+      if (tab.kind !== 'context-detail' || !tab.contextId) continue
+      const context = contexts.find(c => c.id === tab.contextId)
+      if (!context) continue
+      if (tab.title !== context.name) {
+        updateTab(tab.id, { title: context.name })
+      }
+    }
+  }, [tabs, contexts, updateTab])
 
   return (
     <div className="flex h-full flex-col bg-white">

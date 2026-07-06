@@ -8,6 +8,7 @@ When the agent calls a write tool, it explains the action in the chat transcript
 
 - The agent speaks in chat; the bar is only for approval.
 - To iterate, the user types changes in the chat (same as before). As soon as the user starts typing, the bar is dismissed silently and the write is treated as refused.
+- Clicking **Accept** emits a visible system message in the transcript and records the approval in conversation history; the tool then runs.
 - Clicking **Refuse** emits a visible system message in the transcript and records the refusal in conversation history.
 - Button copy defaults live in `writeActionConfirmDefaults.ts`.
 - Primary label can come from the connector's `getActionConfirmation` → `approveLabel`.
@@ -55,7 +56,7 @@ When the agent calls `report_write`, a **report card** appears in chat (Manus-st
 
 Normal user and assistant bubbles are rendered by `ChatMessage.tsx`. Code fences are shown as dedicated code blocks; all other prose is passed through the shared `MarkdownRenderer` so headings, lists, tables, inline formatting, and links render correctly in the chat transcript.
 
-`role: 'system'` messages (e.g. write-tool refusal feedback) are rendered as a centered, muted notice instead of an assistant bubble so they don't look like model-generated prose. Style: `.ui-chat-system-message` in `src/styles/globals.css`.
+`role: 'system'` messages (e.g. write-tool approval/refusal feedback) are rendered as a centered, muted notice instead of an assistant bubble so they don't look like model-generated prose. Style: `.ui-chat-system-message` in `src/styles/globals.css`.
 
 ## Composer hint
 

@@ -4,7 +4,7 @@ Manus-style **report cards** in chat when the agent calls `report_write`.
 
 ## Agent tool
 
-`report_write` saves markdown to the workspace (default: `.smile/reports/<date>_<slug>.md`) and emits a chat **artifact** message.
+`report_write` saves markdown to the workspace and emits a chat **artifact** message. With an active context the default path is `.smile/contexts/<slug>/<date>_<slug>.md`; with no active context the default is `.smile/<date>_<slug>.md`.
 
 | Field | Purpose |
 | --- | --- |
@@ -44,11 +44,20 @@ Dismiss is per artifact message id, not per file path — revising the same path
 | | `report_write` | `file_write` |
 | --- | --- | --- |
 | Purpose | Chat-visible markdown reports | General workspace files |
-| Default path | `.smile/reports/<date>_<slug>.md` | Any path you pass |
-| UI | Report card + composer pill + tool result copy for the model | No report UI (unless path is under `.smile/reports/` — then card/pill still appear as a fallback) |
+| Default path | Context folder (or `.smile/` if no context) | Any path you pass |
+| UI | Report card + composer pill + tool result copy for the model | No report UI (unless path looks like a report — under `.smile/` with a date prefix or under `.smile/reports/` legacy) |
 | When revising | Same path + `title` for the card | Same path only |
 
-Prefer **`report_write`** only for explicit reports, substantial plans/specs, batch lists, or lengthy/tabular structured documents. If the model uses `file_write` under `.smile/reports/`, the UI still activates so features are not lost.
+Prefer **`report_write`** only for explicit reports, substantial plans/specs, batch lists, or lengthy/tabular structured documents. If the model uses `file_write` under the context folder or `.smile/`, the UI still activates so features are not lost.
+
+## Download / export
+
+The report viewer (`MarkdownArtifactModal`) offers a **Download** menu with two exports:
+
+- **PDF** — renders the markdown report to a PDF file.
+- **.doc** — converts the markdown report to a Word document.
+
+Both exports happen client-side from the markdown source; the agent only needs to produce the `.md` report. The system prompt tells the agent not to generate binary files when the user asks for PDF/DOC, but to point them to the download menu instead.
 
 ## Customization
 

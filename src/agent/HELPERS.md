@@ -30,7 +30,7 @@ Connector `approveAction` can set `resumeAgent: true` (see `src/connectors/types
 | `artifacts.ts` | `MarkdownArtifact`, `buildReportPath()`, `buildReportToolResult()` |
 | `../components/chat/artifacts/` | Report card, active pill, modal — [artifacts README](../components/chat/artifacts/README.md) |
 
-Agent emits `Message.type: 'artifact'` after successful `report_write` (and `file_write` under `.smile/reports/*.md` as fallback).
+Agent emits `Message.type: 'artifact'` after successful `report_write` (and `file_write` under the active context folder or `.smile/*.md` as fallback).
 
 ## Streaming
 

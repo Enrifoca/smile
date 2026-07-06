@@ -19,7 +19,7 @@ flowchart TD
 
 - `src/agent` owns the conversation loop, tool execution flow, pending action lifecycle, streaming, and result handling.
 - `src/prompts` owns core Markdown prompts and prompt assembly.
-- `src/connectors` owns the connector contract, catalog metadata, registry, and plugin loading — runtime packages live in the workspace; shipped sources in `bundled/connectors/`.
+- `src/connectors` owns the connector contract, catalog metadata, registry, and plugin loading — runtime packages live in the workspace, merged with their bundled source at discovery for additive manifest updates.
 - `src/components` owns generic UI. Connector settings use `GenericConnectorSettingsView` driven by manifest auth/MCP fields.
 - `electron` owns desktop services and IPC boundaries. The sandbox broker calls optional **transport services** under `electron/services/` when OAuth, MCP, or secure API access is required. See [electron/services/README.md](../electron/services/README.md).
 

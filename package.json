@@ -30,13 +30,9 @@
     "postinstall": "electron-builder install-app-deps && node scripts/brand-electron.mjs"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^0.0.55",
-    "@ai-sdk/openai": "^0.0.70",
-    "@anthropic-ai/sdk": "^0.30.0",
     "@mozilla/readability": "^0.6.0",
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.16",
-    "ai": "^3.4.0",
     "axios": "^1.7.0",
     "better-sqlite3": "^12.11.1",
     "electron-store": "^8.2.0",

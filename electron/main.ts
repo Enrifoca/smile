@@ -10,6 +10,8 @@ import { OCRConfig, OCRService } from './services/ocr'
 import { ModelCatalogService } from './services/model-catalog'
 import { AIConfig, ModelProvider, getDefaultModelId } from '../src/shared/modelCatalog'
 import { getAtlassianMCPService, AtlassianMCPService } from './services/atlassian-mcp'
+import { getLinearOAuthService, LinearOAuthService, LINEAR_REDIRECT_URI } from './services/linear-oauth'
+import { getGoogleOAuthService, GoogleOAuthService, GOOGLE_REDIRECT_URI } from './services/google-oauth'
 import { getJiraAttachmentService, JiraAttachmentService } from './services/jira-attachment'
 import { ConnectorsService } from './services/connectors'
 import type { ContextEnvelope, ToolResult } from '../src/connectors/contract'
@@ -34,6 +36,8 @@ let storageService: StorageService
 let fileService: FileService | null = null
 let aiService: AIService | null = null
 let mcpService: AtlassianMCPService | null = null
+let linearOAuthService: LinearOAuthService | null = null
+let googleOAuthService: GoogleOAuthService | null = null
 let jiraAttachmentService: JiraAttachmentService | null = null
 let modelCatalogService: ModelCatalogService | null = null
 let connectorsService: ConnectorsService | null = null
@@ -114,6 +118,10 @@ function getConnectorsService(): ConnectorsService {
           if (!fileService) return { success: false, error: 'Workspace not configured' }
           return fileService.readFile(relativePath) as Promise<{ success: boolean; data?: string; error?: string }>
         },
+        writeFile: async (relativePath: string, content: string) => {
+          if (!fileService) return { success: false, error: 'Workspace not configured' }
+          return fileService.writeFile(relativePath, content) as Promise<{ success: boolean; error?: string }>
+        },
         mcpCall: async (serverId: string, toolName: string, args: Record<string, unknown>) => {
           if (serverId === 'atlassian') {
             const blocked = await ensureAtlassianMcpConnected()
@@ -137,6 +145,21 @@ function getConnectorsService(): ConnectorsService {
             }
             return uploadJiraAttachmentFromWorkspace(issueKey, filePath)
           }
+          if (capability === 'linear.api') {
+            const query = String(params.query || '')
+            if (!query) return { success: false, error: 'query is required' }
+            const service = getLinearOAuthService()
+            if (!service) return { success: false, error: 'Linear OAuth service not initialized' }
+            return service.apiCall(query, params.variables as Record<string, unknown>)
+          }
+          if (capability === 'google.api') {
+            const endpoint = String(params.endpoint || '')
+            if (!endpoint) return { success: false, error: 'endpoint is required' }
+            const method = String(params.method || 'GET').toUpperCase() as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+            const service = getGoogleOAuthService()
+            if (!service) return { success: false, error: 'Google OAuth service not initialized' }
+            return service.apiCall(endpoint, method, params.body as Record<string, unknown>, params.queryParams as Record<string, string>)
+          }
           return { success: false, error: `Host capability not implemented: ${capability}` }
         },
       },
@@ -149,10 +172,16 @@ function getConnectorsService(): ConnectorsService {
 let mainWindow: BrowserWindow | null = null
 let mcpKeepAliveInterval: NodeJS.Timeout | null = null
 let mcpConnectionState: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error' = 'disconnected'
+let linearKeepAliveInterval: NodeJS.Timeout | null = null
+let linearConnectionState: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error' = 'disconnected'
+let googleKeepAliveInterval: NodeJS.Timeout | null = null
+let googleConnectionState: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error' = 'disconnected'
 let memoryService: MemoryService | null = null
 
 // Keep-alive interval in milliseconds (10 minutes)
 const MCP_KEEPALIVE_INTERVAL = 10 * 60 * 1000
+const LINEAR_KEEPALIVE_INTERVAL = 10 * 60 * 1000
+const GOOGLE_KEEPALIVE_INTERVAL = 10 * 60 * 1000
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -566,6 +595,188 @@ function stopMcpKeepAlive() {
   }
 }
 
+function attachLinearOAuthListeners(service: LinearOAuthService) {
+  service.removeAllListeners('stateChange')
+  service.on('stateChange', ({ state, error }: { state: typeof linearConnectionState; error?: string }) => {
+    sendLinearConnectionState(state, error)
+  })
+}
+
+function sendLinearConnectionState(state: typeof linearConnectionState, error?: string) {
+  linearConnectionState = state
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('linear:connectionState', { state, error })
+  }
+}
+
+async function connectLinearOAuth(options?: { forceReauth?: boolean }): Promise<{ success: boolean; error?: string }> {
+  stopLinearKeepAlive()
+  sendLinearConnectionState('connecting')
+  linearOAuthService = getLinearOAuthService(storageService)
+  if (!linearOAuthService) {
+    return { success: false, error: 'Linear OAuth service not initialized' }
+  }
+  attachLinearOAuthListeners(linearOAuthService)
+  const result = await linearOAuthService.connect(options?.forceReauth ?? false)
+  if (result.success) {
+    sendLinearConnectionState('connected')
+    startLinearKeepAlive()
+  }
+  return result
+}
+
+async function autoConnectLinearOAuthOnStartup(): Promise<void> {
+  const service = getLinearOAuthService(storageService)
+  if (!service) return
+  if (storageService.get('linearAutoConnect') === false) {
+    console.log('[LinearOAuth] User disconnected — skipping auto-connect')
+    return
+  }
+  if (!service.hasStoredAuth()) {
+    console.log('[LinearOAuth] No stored session — skipping auto-connect')
+    return
+  }
+  if (service.getConnectionStatus()) return
+
+  console.log('[LinearOAuth] Auto-connecting from stored OAuth')
+  const result = await connectLinearOAuth()
+  if (!result.success) {
+    console.warn('[LinearOAuth] Auto-connect failed:', result.error)
+    sendLinearConnectionState('disconnected')
+  }
+}
+
+function startLinearKeepAlive() {
+  if (linearKeepAliveInterval) {
+    clearInterval(linearKeepAliveInterval)
+  }
+
+  console.log('[LinearOAuth] Starting keep-alive (interval: 10 minutes)')
+
+  linearKeepAliveInterval = setInterval(async () => {
+    const service = getLinearOAuthService()
+    if (!service) {
+      console.log('[LinearOAuth] Keep-alive: No service, stopping')
+      stopLinearKeepAlive()
+      return
+    }
+
+    const isConnected = service.getConnectionStatus()
+    console.log(`[LinearOAuth] Keep-alive check: connected=${isConnected}`)
+
+    if (!isConnected) {
+      console.log('[LinearOAuth] Keep-alive: Connection lost, attempting reconnect...')
+      sendLinearConnectionState('connecting')
+      const result = await connectLinearOAuth()
+      if (result.success) {
+        console.log('[LinearOAuth] Keep-alive: Reconnected successfully')
+      } else {
+        console.log('[LinearOAuth] Keep-alive: Reconnect failed:', result.error)
+        sendLinearConnectionState('error', result.error)
+      }
+    }
+  }, LINEAR_KEEPALIVE_INTERVAL)
+}
+
+function stopLinearKeepAlive() {
+  if (linearKeepAliveInterval) {
+    clearInterval(linearKeepAliveInterval)
+    linearKeepAliveInterval = null
+    console.log('[LinearOAuth] Keep-alive stopped')
+  }
+}
+
+function attachGoogleOAuthListeners(service: GoogleOAuthService) {
+  service.removeAllListeners('stateChange')
+  service.on('stateChange', ({ state, error }: { state: typeof googleConnectionState; error?: string }) => {
+    sendGoogleConnectionState(state, error)
+  })
+}
+
+function sendGoogleConnectionState(state: typeof googleConnectionState, error?: string) {
+  googleConnectionState = state
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('google:connectionState', { state, error })
+  }
+}
+
+async function connectGoogleOAuth(options?: { forceReauth?: boolean }): Promise<{ success: boolean; error?: string }> {
+  stopGoogleKeepAlive()
+  sendGoogleConnectionState('connecting')
+  googleOAuthService = getGoogleOAuthService(storageService)
+  if (!googleOAuthService) {
+    return { success: false, error: 'Google OAuth service not initialized' }
+  }
+  attachGoogleOAuthListeners(googleOAuthService)
+  const result = await googleOAuthService.connect(options?.forceReauth ?? false)
+  if (result.success) {
+    sendGoogleConnectionState('connected')
+    startGoogleKeepAlive()
+  }
+  return result
+}
+
+async function autoConnectGoogleOAuthOnStartup(): Promise<void> {
+  const service = getGoogleOAuthService(storageService)
+  if (!service) return
+  if (storageService.get('googleAutoConnect') === false) {
+    console.log('[GoogleOAuth] User disconnected — skipping auto-connect')
+    return
+  }
+  if (!service.hasStoredAuth()) {
+    console.log('[GoogleOAuth] No stored session — skipping auto-connect')
+    return
+  }
+  if (service.getConnectionStatus()) return
+
+  console.log('[GoogleOAuth] Auto-connecting from stored OAuth')
+  const result = await connectGoogleOAuth()
+  if (!result.success) {
+    console.warn('[GoogleOAuth] Auto-connect failed:', result.error)
+    sendGoogleConnectionState('disconnected')
+  }
+}
+
+function startGoogleKeepAlive() {
+  if (googleKeepAliveInterval) {
+    clearInterval(googleKeepAliveInterval)
+  }
+
+  console.log('[GoogleOAuth] Starting keep-alive (interval: 10 minutes)')
+
+  googleKeepAliveInterval = setInterval(async () => {
+    const service = getGoogleOAuthService()
+    if (!service) {
+      console.log('[GoogleOAuth] Keep-alive: No service, stopping')
+      stopGoogleKeepAlive()
+      return
+    }
+
+    const isConnected = service.getConnectionStatus()
+    console.log(`[GoogleOAuth] Keep-alive check: connected=${isConnected}`)
+
+    if (!isConnected) {
+      console.log('[GoogleOAuth] Keep-alive: Connection lost, attempting reconnect...')
+      sendGoogleConnectionState('connecting')
+      const result = await connectGoogleOAuth()
+      if (result.success) {
+        console.log('[GoogleOAuth] Keep-alive: Reconnected successfully')
+      } else {
+        console.log('[GoogleOAuth] Keep-alive: Reconnect failed:', result.error)
+        sendGoogleConnectionState('error', result.error)
+      }
+    }
+  }, GOOGLE_KEEPALIVE_INTERVAL)
+}
+
+function stopGoogleKeepAlive() {
+  if (googleKeepAliveInterval) {
+    clearInterval(googleKeepAliveInterval)
+    googleKeepAliveInterval = null
+    console.log('[GoogleOAuth] Keep-alive stopped')
+  }
+}
+
 // IPC Handlers
 
 // Storage
@@ -932,6 +1143,90 @@ ipcMain.handle('mcp:getConnectionState', async () => {
     state: mcpConnectionState,
     connected: mcpService?.getConnectionStatus() ?? false,
   }
+})
+
+// ============================================
+// LINEAR OAUTH HANDLERS
+// ============================================
+
+ipcMain.handle('linear:connect', async (_, options?: { forceReauth?: boolean }) => {
+  try {
+    return await connectLinearOAuth(options)
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Linear OAuth failed'
+    sendLinearConnectionState('error', errorMsg)
+    return { success: false, error: errorMsg }
+  }
+})
+
+ipcMain.handle('linear:disconnect', async () => {
+  stopLinearKeepAlive()
+  storageService.set('linearAutoConnect', false)
+  sendLinearConnectionState('disconnected')
+  if (linearOAuthService) {
+    await linearOAuthService.disconnect()
+    linearOAuthService = null
+  }
+  return { success: true }
+})
+
+ipcMain.handle('linear:status', async () => {
+  return {
+    connected: linearOAuthService?.getConnectionStatus() ?? false,
+  }
+})
+
+ipcMain.handle('linear:getConnectionState', async () => {
+  return {
+    state: linearConnectionState,
+    connected: linearOAuthService?.getConnectionStatus() ?? false,
+  }
+})
+
+ipcMain.handle('linear:getRedirectUri', async () => {
+  return LINEAR_REDIRECT_URI
+})
+
+// ============================================
+// GOOGLE OAUTH HANDLERS
+// ============================================
+
+ipcMain.handle('google:connect', async (_, options?: { forceReauth?: boolean }) => {
+  try {
+    return await connectGoogleOAuth(options)
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Google OAuth failed'
+    sendGoogleConnectionState('error', errorMsg)
+    return { success: false, error: errorMsg }
+  }
+})
+
+ipcMain.handle('google:disconnect', async () => {
+  stopGoogleKeepAlive()
+  storageService.set('googleAutoConnect', false)
+  sendGoogleConnectionState('disconnected')
+  if (googleOAuthService) {
+    await googleOAuthService.disconnect()
+    googleOAuthService = null
+  }
+  return { success: true }
+})
+
+ipcMain.handle('google:status', async () => {
+  return {
+    connected: googleOAuthService?.getConnectionStatus() ?? false,
+  }
+})
+
+ipcMain.handle('google:getConnectionState', async () => {
+  return {
+    state: googleConnectionState,
+    connected: googleOAuthService?.getConnectionStatus() ?? false,
+  }
+})
+
+ipcMain.handle('google:getRedirectUri', async () => {
+  return GOOGLE_REDIRECT_URI
 })
 
 // Open external URL (for OAuth)
@@ -1519,6 +1814,8 @@ app.whenReady().then(async () => {
   try {
     await initializeServices()
     void autoConnectAtlassianMcpOnStartup()
+    void autoConnectLinearOAuthOnStartup()
+    void autoConnectGoogleOAuthOnStartup()
     createWindow()
     getUpdateService().scheduleStartupCheck()
   } catch (error) {

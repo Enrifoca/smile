@@ -5,9 +5,12 @@
  * - `<slug>.json` — metadata and connector configuration (no secrets)
  * - `<slug>.md` — textual knowledge the agent maintains via context tools
  * - `history/` — automatic backups before agent writes
+ * - `files/` — generic file outputs created while the context is active
+ * - Markdown reports created while the context is active are saved directly in this folder.
  *
  * Activate one context globally from the sidebar. When active, only enabled
- * connectors and their scoped settings apply.
+ * connectors and their scoped settings apply, and file outputs are scoped to
+ * this folder.
  */
 
 /** Sentinel context id for workspace-wide connector knowledge (no active context). */
@@ -60,3 +63,7 @@ export function getContextFolderPath(context: ProjectContext): string {
   return `.smile/contexts/${context.slug}`
 }
 
+/** Workspace-relative path to the context generic files folder. */
+export function getContextFilesPath(context: ProjectContext): string {
+  return `.smile/contexts/${context.slug}/files`
+}

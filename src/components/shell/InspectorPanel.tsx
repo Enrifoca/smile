@@ -106,21 +106,44 @@ export default function InspectorPanel({
   const { file, contexts: contextsAPI } = useElectron()
   const [tab, setTab] = useState<InspectorTabId>('context')
   const [reports, setReports] = useState<ReportRow[]>([])
+  const [reportsError, setReportsError] = useState<string | null>(null)
   const [viewingReportPath, setViewingReportPath] = useState<string | null>(null)
+
+  const isInternalPath = useCallback((reportPath: string): boolean => {
+    const normalized = reportPath.replace(/\\/g, '/')
+    // Context knowledge markdown and backups.
+    if (/\.smile\/contexts\/[^/]+\/[^/]+\.md$/.test(normalized)) return true
+    if (/\.smile\/contexts\/[^/]+\/history\//.test(normalized)) return true
+    if (/\.smile\/contexts\/[^/]+\/files\//.test(normalized)) return true
+    // Other internal smile folders.
+    if (/\.smile\/memories\//.test(normalized)) return true
+    if (/\.smile\/connectors\//.test(normalized)) return true
+    return false
+  }, [])
 
   const loadReports = useCallback(async () => {
     try {
-      const result = await file.search('*.md', '.smile/reports')
-      if (result.success && Array.isArray(result.data)) {
-        const rows = (result.data as Array<{ path: string; name: string }>)
-          .filter(row => row.path?.replace(/\\/g, '/').includes('.smile/reports'))
-          .map(row => ({ path: row.path, name: row.name }))
-        setReports(rows)
+      const result = await file.search('*.md', '')
+      if (!result.success) {
+        setReportsError(result.error ?? 'Failed to search for reports')
+        setReports([])
+        return
       }
+
+      const rows = (result.data as Array<{ path: string; name: string }>)
+        .filter(row => !isInternalPath(row.path))
+        .map(row => ({ path: row.path, name: row.name }))
+
+      // Sort by path (which starts with date for generated reports) descending.
+      rows.sort((a, b) => b.path.localeCompare(a.path))
+      setReports(rows)
+      setReportsError(null)
     } catch (error) {
       console.error('Failed to load reports:', error)
+      setReportsError(error instanceof Error ? error.message : 'Failed to load reports')
+      setReports([])
     }
-  }, [file])
+  }, [file, isInternalPath])
 
   const loadContexts = useCallback(async () => {
     try {
@@ -272,7 +295,11 @@ export default function InspectorPanel({
                 </div>
               )
             })}
-            {reports.length === 0 ? <p className="ui-inspector__empty">No reports in workspace yet</p> : null}
+            {reports.length === 0 ? (
+              <p className="ui-inspector__empty">
+                {reportsError ?? 'No reports in workspace yet'}
+              </p>
+            ) : null}
           </div>
           {viewingReportPath ? (
             <InspectorReportModal

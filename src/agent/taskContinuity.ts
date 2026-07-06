@@ -32,7 +32,11 @@ export function isWriteTool(tool: ToolRunRecord): boolean {
 
 function isReportPath(path: string): boolean {
   const normalized = path.replace(/\\/g, '/')
-  return normalized.includes('.smile/reports/') && normalized.endsWith('.md')
+  if (!normalized.endsWith('.md')) return false
+  if (normalized.includes('.smile/reports/')) return true
+  if (/^\.smile\/\d{4}-\d{2}-\d{2}_/.test(normalized)) return true
+  if (/\.smile\/contexts\/[^/]+\/\d{4}-\d{2}-\d{2}_/.test(normalized)) return true
+  return false
 }
 
 function lastReportReadPath(toolsRunThisTurn: ToolRunRecord[]): string | undefined {

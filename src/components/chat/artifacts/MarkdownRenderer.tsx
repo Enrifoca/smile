@@ -88,9 +88,12 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
         continue
       }
 
-      if (line.startsWith('- ') || line.startsWith('• ')) {
+      if (line.startsWith('- ') || line.startsWith('• ') || line.startsWith('* ')) {
         const items: string[] = []
-        while (index < lines.length && (lines[index].startsWith('- ') || lines[index].startsWith('• '))) {
+        while (
+          index < lines.length &&
+          (lines[index].startsWith('- ') || lines[index].startsWith('• ') || lines[index].startsWith('* '))
+        ) {
           items.push(lines[index].slice(2))
           index += 1
         }

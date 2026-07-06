@@ -1,0 +1,133 @@
+{
+  "apiVersion": "1.0",
+  "id": "gmail",
+  "name": "Gmail",
+  "version": "1.0.0",
+  "description": "Gmail via Google OAuth. Read, send, and label messages scoped to context labels.",
+  "handlerKind": "code",
+  "integrationType": "rest",
+  "auth": {
+    "type": "oauth",
+    "fields": [
+      { "key": "clientId", "label": "Google OAuth client ID", "secret": true },
+      { "key": "clientSecret", "label": "Google OAuth client secret", "secret": true }
+    ]
+  },
+  "permissions": {
+    "host": ["google.api"]
+  },
+  "ui": {
+    "catalogLabel": "Gmail",
+    "connectedLabel": "Google connected",
+    "scopeLabel": "Labels"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Email"
+  },
+  "contextSchema": {
+    "type": "object",
+    "properties": {
+      "labels": {
+        "type": "array",
+        "title": "Labels",
+        "description": "Gmail label names scoped to this context (comma-separated, e.g. INBOX, Work, Receipts). The connector enforces this list on read and label-management tools."
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "gmail_list_labels",
+      "description": "List all Gmail labels visible to the connected account.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "gmail_search_messages",
+      "description": "Search Gmail messages. Prefer this over fetching messages one by one. Results are filtered to the context labels when a label scope is set.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Gmail search query (e.g. 'from:alice@example.com subject:invoice')." },
+          "maxResults": { "type": "integer", "description": "Maximum results (default 20, max 100)." }
+        }
+      }
+    },
+    {
+      "name": "gmail_get_message",
+      "description": "Get the full content of one Gmail message by ID.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Gmail message ID." }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "gmail_send_message",
+      "description": "Send a new Gmail message.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "description": "Recipient email address." },
+          "subject": { "type": "string" },
+          "body": { "type": "string", "description": "Plain text body." },
+          "cc": { "type": "string", "description": "Optional CC recipients, comma-separated." },
+          "bcc": { "type": "string", "description": "Optional BCC recipients, comma-separated." }
+        },
+        "required": ["to", "subject", "body"]
+      },
+      "confirmation": {
+        "title": "Send Gmail message",
+        "summary": "Send '{{subject}}' to {{to}}"
+      },
+      "preview": "Send: {{subject}}"
+    },
+    {
+      "name": "gmail_add_label",
+      "description": "Add a label to a Gmail message. The label must be in the context scope when a scope is set.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": { "type": "string" },
+          "labelName": { "type": "string", "description": "Label name (e.g. Work, Receipts)." }
+        },
+        "required": ["messageId", "labelName"]
+      },
+      "confirmation": {
+        "title": "Add Gmail label",
+        "summary": "Add label '{{labelName}}' to message {{messageId}}"
+      },
+      "preview": "Label: {{labelName}}"
+    },
+    {
+      "name": "gmail_remove_label",
+      "description": "Remove a label from a Gmail message. The label must be in the context scope when a scope is set.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": { "type": "string" },
+          "labelName": { "type": "string", "description": "Label name (e.g. Work, Receipts)." }
+        },
+        "required": ["messageId", "labelName"]
+      },
+      "confirmation": {
+        "title": "Remove Gmail label",
+        "summary": "Remove label '{{labelName}}' from message {{messageId}}"
+      },
+      "preview": "Unlabel: {{labelName}}"
+    }
+  ]
+}

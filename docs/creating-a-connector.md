@@ -148,6 +148,11 @@ The host **denies** any capability not declared here. Declare the minimum needed
 - Values with `"secret": true` are stored encrypted (`connector:<id>:<key>`) and readable only via `host.secrets.get('apiKey')`.
 - Generic settings UI in the app renders these fields automatically; no custom React page required for simple API-key connectors.
 
+Other auth types:
+
+- `"oauth"` — renders the fields as OAuth app credentials and shows a **Connect** button that triggers the framework's OAuth flow. The connector then calls an authenticated host capability such as `host.call('linear.api', ...)` instead of direct HTTP.
+- `"oauth-with-rest-token"` — same UI as OAuth, but additionally collects optional REST API token fields (used by the Jira connector for attachments).
+
 ### ui and catalog
 
 ```json
@@ -210,10 +215,12 @@ module.exports = { executeTool, approveAction }
 | `host.http.fetch({ url, method?, headers?, body? })` | `permissions.http` | `{ ok, status, headers, text, json? }` |
 | `host.mcp.call(serverId, toolName, args)` | `permissions.mcp` | `{ success, data?, error? }` |
 | `host.file.read(relativePath)` | `file.read` | `{ success, data?, error? }` |
+| `host.file.write(relativePath, content)` | `file.write` | `{ success, error? }` |
 | `host.cli.run({ command, args?, cwd?, env? })` | `permissions.cli` | `{ success, exitCode, stdout, stderr, error? }` |
 | `host.secrets.get(key)` | `secrets` includes key | `string \| null` |
 | `host.call(capability, params)` | `permissions.host` | `{ success, data?, error? }` |
 | `host.context.get()` | active context | connector scope config or `null` |
+| `host.context.getFolderPath()` | active context | workspace-relative context folder path or `null` |
 | `host.context.saveKnowledge(markdown)` | — | caches markdown for prompt injection |
 | `host.log(level, ...args)` | — | diagnostic only |
 
@@ -309,6 +316,16 @@ When a connector needs per-project configuration (e.g. which scopes to monitor):
 3. In `handler.js`, read `await host.context.get()` during tool execution.
 4. Sync structured metadata into prompt-ready markdown with `host.context.saveKnowledge(markdown)` from a dedicated sync tool — not on every turn.
 
+### File outputs scoped to a context
+
+When a project context is active, the host passes the context folder path (e.g. `.smile/contexts/acme`) to every connector call via `host.context.getFolderPath()`. Connectors that write files should:
+
+- Use `host.file.write(path, content)` with `permissions.file.write` declared.
+- Prefer saving outputs directly under `<contextFolderPath>/` (markdown reports) or `<contextFolderPath>/files/` (other files).
+- Treat explicit relative paths starting with `.smile/` or containing `/` as user/agent intent and write them as-is.
+
+If no context is active, `host.context.getFolderPath()` returns `null` and file writes fall back to the workspace root.
+
 ---
 
 ## Installation workflow
@@ -334,6 +351,8 @@ Shipped first-party connectors live in `bundled/connectors/<id>/` (same layout a
 4. Run `npm run validate:connector -- bundled/connectors/<id>`.
 
 Install copies the folder into `<workspace>/.smile/connectors/<id>/`. SDK demos stay under `examples/connectors/example/`.
+
+> **Additive manifest updates:** after install, the runtime merges select manifest fields from the bundled source into the workspace copy. New `auth.fields`, additional `permissions.host` entries, and other additive manifest changes are picked up automatically, so users only need to re-install when `handler.js`, `prompt.md`, or breaking manifest changes require it.
 
 ---
 

@@ -93,6 +93,22 @@ export interface ElectronAPI {
     getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
   }
+  linear: {
+    connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
+    disconnect: () => Promise<{ success: boolean }>
+    status: () => Promise<{ connected: boolean }>
+    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
+    getRedirectUri: () => Promise<string>
+    onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
+  }
+  google: {
+    connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
+    disconnect: () => Promise<{ success: boolean }>
+    status: () => Promise<{ connected: boolean }>
+    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
+    getRedirectUri: () => Promise<string>
+    onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
+  }
   shell: {
     openExternal: (url: string) => Promise<{ success: boolean }>
   }

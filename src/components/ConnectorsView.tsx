@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CatalogEntry,
   getBuiltinCatalogEntries,
+  getOAuthServiceId,
   INTEGRATION_TYPE_LABELS,
   isWorkspaceConnectorConfigured,
   mergeCatalogEntries,
@@ -182,7 +183,7 @@ function ConnectorDetailView({
 }
 
 export default function ConnectorsView() {
-  const { connectors, mcp, storage } = useElectron()
+  const { connectors, mcp, storage, linear, google } = useElectron()
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [loadingCatalog, setLoadingCatalog] = useState(true)
@@ -214,15 +215,36 @@ export default function ConnectorsView() {
     )
   }, [catalog, search])
 
+  const isOAuthConnected = useCallback(async (manifest: ConnectorManifest): Promise<boolean> => {
+    const serviceId = getOAuthServiceId(manifest)
+    if (serviceId === 'google') {
+      const status = await google.status()
+      return status.connected
+    }
+    if (serviceId === 'linear') {
+      const status = await linear.status()
+      return status.connected
+    }
+    return false
+  }, [google, linear])
+
   const refreshConnectedState = useCallback(async (entries: CatalogEntry[], mcpIsConnected: boolean) => {
     const next = new Set<string>()
     for (const entry of entries) {
-      if (entry.manifest && await isWorkspaceConnectorConfigured(entry.manifest, storage.getSecure, mcpIsConnected)) {
+      if (!entry.manifest) continue
+      const configured = await isWorkspaceConnectorConfigured(entry.manifest, storage.getSecure, mcpIsConnected)
+      if (!configured) continue
+
+      const isOAuth = entry.manifest.auth?.type === 'oauth'
+      if (isOAuth) {
+        const connected = await isOAuthConnected(entry.manifest)
+        if (connected) next.add(entry.id)
+      } else {
         next.add(entry.id)
       }
     }
     setConnectedIds(next)
-  }, [storage.getSecure])
+  }, [storage.getSecure, isOAuthConnected])
 
   const loadCatalog = useCallback(async () => {
     setLoadingCatalog(true)

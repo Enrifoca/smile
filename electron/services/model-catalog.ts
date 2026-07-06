@@ -106,6 +106,14 @@ export class ModelCatalogService {
           return this.modelsToCatalog(provider, await fetchOpenAICompatibleModels('https://api.moonshot.ai/v1/models', apiKey), requestedRoles)
         case 'deepseek':
           return this.modelsToCatalog(provider, await fetchDeepSeekModels(apiKey), requestedRoles)
+        case 'openrouter':
+          return this.modelsToCatalog(provider, await fetchOpenAICompatibleModels('https://openrouter.ai/api/v1/models', apiKey), requestedRoles)
+        case 'xai':
+          return this.modelsToCatalog(provider, await fetchOpenAICompatibleModels('https://api.x.ai/v1/models', apiKey), requestedRoles)
+        case 'minimax':
+          return this.modelsToCatalog(provider, await fetchOpenAICompatibleModels('https://api.minimaxi.chat/v1/models', apiKey), requestedRoles)
+        case 'qwen':
+          return this.modelsToCatalog(provider, await fetchOpenAICompatibleModels('https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models', apiKey), requestedRoles)
         default:
           return {}
       }
@@ -244,6 +252,30 @@ function classifyModel(provider: ModelProvider, model: RawModel): ModelRole[] {
     return Array.from(roles)
   }
 
+  if (provider === 'openrouter') {
+    roles.add('chat')
+    if (isReasoningModelId(provider, id)) roles.add('reasoning')
+    return Array.from(roles)
+  }
+
+  if (provider === 'xai') {
+    roles.add('chat')
+    if (isReasoningModelId(provider, id)) roles.add('reasoning')
+    return Array.from(roles)
+  }
+
+  if (provider === 'minimax') {
+    roles.add('chat')
+    if (isReasoningModelId(provider, id)) roles.add('reasoning')
+    return Array.from(roles)
+  }
+
+  if (provider === 'qwen') {
+    roles.add('chat')
+    if (isReasoningModelId(provider, id)) roles.add('reasoning')
+    return Array.from(roles)
+  }
+
   return Array.from(roles)
 }
 
@@ -259,6 +291,18 @@ function shouldIgnoreModel(provider: ModelProvider, id: string): boolean {
   }
   if (provider === 'groq') {
     return m.includes('whisper') || m.includes('tts') || m.includes('embedding')
+  }
+  if (provider === 'openrouter') {
+    return m.includes('embedding') || m.includes('tts') || m.includes('whisper') || m.includes('moderation')
+  }
+  if (provider === 'xai') {
+    return m.includes('embedding')
+  }
+  if (provider === 'minimax') {
+    return m.includes('embedding') || m.includes('tts')
+  }
+  if (provider === 'qwen') {
+    return m.includes('embedding') || m.includes('tts') || m.includes('whisper')
   }
   return false
 }

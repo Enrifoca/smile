@@ -7,6 +7,7 @@
 - Use `jira_create_issue` only for exactly one issue.
 - Write tools are approved by the UI. Call the write tool directly when arguments are ready.
 - For priority, pass a plain name string (e.g. `"Low"`). The connector converts it to Jira's object format.
+- `jira_update_issue` cannot set Epic Link. Epic Link is a site-specific custom field that the Atlassian MCP edit screen does not expose. Ask the user to set it manually in Jira.
 - If exactly one project is scoped to the active context, use it when the user does not name a project.
 - If multiple projects are scoped, ask one focused project question before creating issues.
 - Prefer fields that are visible in connector metadata instead of asking the user to list options the connector already knows.
