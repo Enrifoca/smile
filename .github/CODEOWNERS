@@ -1,0 +1,14 @@
+# Default owners for everything in the repo
+* @Enrifoca
+
+# Connector changes should be reviewed by the maintainer
+/bundled/connectors/ @Enrifoca
+/src/connectors/ @Enrifoca
+
+# Desktop services and security-sensitive code
+/electron/services/ @Enrifoca
+/electron/main.ts @Enrifoca
+/electron/preload.ts @Enrifoca
+
+# Release workflow
+/.github/workflows/ @Enrifoca
