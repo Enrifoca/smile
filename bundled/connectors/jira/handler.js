@@ -217,6 +217,25 @@ async function createIssue(host, args, allowedKeys) {
   return mcp(host, 'createJiraIssue', mcpArgs)
 }
 
+async function updateIssue(host, args, allowedKeys) {
+  const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
+  if (!issueIdOrKey) return { success: false, error: 'Issue key is required.' }
+  const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
+  if (issueScopeError) return { success: false, error: issueScopeError }
+
+  const lowerRest = Object.keys(args).map(k => k.toLowerCase())
+  if (lowerRest.includes('epiclink') || lowerRest.includes('epic_link') || lowerRest.includes('parent')) {
+    return {
+      success: false,
+      error: 'Epic Link / parent cannot be updated through this tool. Set it manually in Jira.',
+    }
+  }
+
+  const { issueKey, issueIdOrKey: _iok, ...rest } = args
+  const normalized = normalizeAdditionalFields(rest)
+  return mcp(host, 'editJiraIssue', { issueIdOrKey, ...normalized })
+}
+
 async function executeTool(name, args, host) {
   const scope = await loadProjectScope(host)
   if (scope.error) return { success: false, error: scope.error }
@@ -266,23 +285,8 @@ async function executeTool(name, args, host) {
     }
     case 'jira_create_issue':
       return shapeToolResult(name, await createIssue(host, args, allowedKeys))
-    case 'jira_update_issue': {
-      const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
-      if (!issueIdOrKey) return { success: false, error: 'Issue key is required.' }
-      const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
-      if (issueScopeError) return { success: false, error: issueScopeError }
-      // Epic Link is a site-specific custom field and the Atlassian MCP edit screen
-      // does not expose it. Setting it here would silently fail.
-      const lowerRest = Object.keys(args).map(k => k.toLowerCase())
-      if (lowerRest.includes('epiclink') || lowerRest.includes('epic_link') || lowerRest.includes('parent')) {
-        return {
-          success: false,
-          error: 'Epic Link cannot be updated through jira_update_issue. Set it manually in Jira.',
-        }
-      }
-      const { issueKey: _ik, issueIdOrKey: _iok, ...rest } = args
-      return shapeToolResult(name, await mcp(host, 'editJiraIssue', { issueIdOrKey, ...rest }))
-    }
+    case 'jira_update_issue':
+      return shapeToolResult(name, await updateIssue(host, args, allowedKeys))
     case 'jira_add_comment': {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)
       const commentBody = str(args.body || args.comment || args.commentBody)
@@ -314,45 +318,82 @@ async function executeTool(name, args, host) {
 }
 
 async function approveAction(actionType, data, host) {
-  if (actionType !== 'jira_batch_create_issues') return { handled: false }
-
   const scope = await loadProjectScope(host)
   if (scope.error) {
     return { handled: true, message: scope.error, resumeAgent: false, writes: [] }
   }
 
-  const issues = data.issues || []
-  const writes = []
-  const created = []
-  const failed = []
+  if (actionType === 'jira_batch_create_issues') {
+    const issues = data.issues || []
+    const writes = []
+    const created = []
+    const failed = []
 
-  for (const issue of issues) {
-    const raw = await createIssue(host, issue, scope.allowedKeys)
-    const shaped = shapeToolResult('jira_create_issue', raw)
-    writes.push({ name: 'jira_create_issue', args: issue, result: shaped })
+    for (const issue of issues) {
+      const raw = await createIssue(host, issue, scope.allowedKeys)
+      const shaped = shapeToolResult('jira_create_issue', raw)
+      writes.push({ name: 'jira_create_issue', args: issue, result: shaped })
 
-    if (!shaped.success) {
-      failed.push(`${issue.summary}: ${shaped.error}`)
-      if (isSystemicFailure(shaped.error || '')) break
-      continue
+      if (!shaped.success) {
+        failed.push(`${issue.summary}: ${shaped.error}`)
+        if (isSystemicFailure(shaped.error || '')) break
+        continue
+      }
+
+      const key = extractIssueKey(shaped.data) || shaped.data
+      created.push(key)
     }
 
-    const key = extractIssueKey(shaped.data) || shaped.data
-    created.push(key)
+    const summary = created.length > 0 ? `Created ${created.length} issue(s): ${created.join(', ')}.` : ''
+    const errors = failed.length > 0
+      ? ` ${created.length > 0 ? 'Stopped after an error' : 'Action blocked'}: ${failed[0]}${failed.length > 1 ? ` (${failed.length} total failures)` : ''}.`
+      : ''
+    const recoverable = failed.length > 0 && !isSystemicFailure(failed[0])
+
+    return {
+      handled: true,
+      message: (summary + errors).trim() || 'No issues were created.',
+      resumeAgent: recoverable,
+      writes,
+    }
   }
 
-  const summary = created.length > 0 ? `Created ${created.length} issue(s): ${created.join(', ')}.` : ''
-  const errors = failed.length > 0
-    ? ` ${created.length > 0 ? 'Stopped after an error' : 'Action blocked'}: ${failed[0]}${failed.length > 1 ? ` (${failed.length} total failures)` : ''}.`
-    : ''
-  const recoverable = failed.length > 0 && !isSystemicFailure(failed[0])
+  if (actionType === 'jira_batch_update_issues') {
+    const updates = data.updates || []
+    const writes = []
+    const updated = []
+    const failed = []
 
-  return {
-    handled: true,
-    message: (summary + errors).trim() || 'No issues were created.',
-    resumeAgent: recoverable,
-    writes,
+    for (const update of updates) {
+      const raw = await updateIssue(host, update, scope.allowedKeys)
+      const shaped = shapeToolResult('jira_update_issue', raw)
+      const issueKey = update.issueIdOrKey || update.issueKey
+      writes.push({ name: 'jira_update_issue', args: update, result: shaped })
+
+      if (!shaped.success) {
+        failed.push(`${issueKey}: ${shaped.error}`)
+        if (isSystemicFailure(shaped.error || '')) break
+        continue
+      }
+
+      updated.push(issueKey)
+    }
+
+    const summary = updated.length > 0 ? `Updated ${updated.length} issue(s): ${updated.join(', ')}.` : ''
+    const errors = failed.length > 0
+      ? ` ${updated.length > 0 ? 'Stopped after an error' : 'Action blocked'}: ${failed[0]}${failed.length > 1 ? ` (${failed.length} total failures)` : ''}.`
+      : ''
+    const recoverable = failed.length > 0 && !isSystemicFailure(failed[0])
+
+    return {
+      handled: true,
+      message: (summary + errors).trim() || 'No issues were updated.',
+      resumeAgent: recoverable,
+      writes,
+    }
   }
+
+  return { handled: false }
 }
 
 module.exports = { executeTool, approveAction }

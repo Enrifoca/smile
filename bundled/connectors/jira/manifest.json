@@ -173,7 +173,7 @@
     },
     {
       "name": "jira_update_issue",
-      "description": "Update fields on an existing Jira issue.",
+      "description": "Update fields on an existing Jira issue. Supports summary, description, priority, assignee, labels, components, fixVersions, versions and any custom field understood by Jira.",
       "category": "connector-write",
       "requiresConfirmation": true,
       "inputSchema": {
@@ -181,15 +181,59 @@
         "properties": {
           "issueIdOrKey": { "type": "string" },
           "summary": { "type": "string" },
-          "description": { "type": "string" }
+          "description": { "type": "string" },
+          "priority": { "type": "string", "description": "Priority name, e.g. High" },
+          "assignee": { "type": "string", "description": "Account ID, email, or display name" },
+          "labels": { "type": "array", "items": { "type": "string" } },
+          "components": { "type": "array", "items": { "type": "string" } },
+          "fixVersions": { "type": "array", "items": { "type": "string" } },
+          "versions": { "type": "array", "items": { "type": "string" } }
         },
-        "required": ["issueIdOrKey"]
+        "required": ["issueIdOrKey"],
+        "additionalProperties": true
       },
       "confirmation": {
         "title": "Update Jira issue",
         "summary": "Update {{issueIdOrKey}}"
       },
       "preview": "Update: {{issueIdOrKey}}"
+    },
+    {
+      "name": "jira_batch_update_issues",
+      "description": "Update multiple Jira issues in one batch with a single approval. Each item can update any editable field; use this instead of repeated jira_update_issue calls.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "updates": {
+            "type": "array",
+            "description": "Issues to update",
+            "items": {
+              "type": "object",
+              "properties": {
+                "issueIdOrKey": { "type": "string" },
+                "summary": { "type": "string" },
+                "description": { "type": "string" },
+                "priority": { "type": "string" },
+                "assignee": { "type": "string" },
+                "labels": { "type": "array", "items": { "type": "string" } },
+                "components": { "type": "array", "items": { "type": "string" } },
+                "fixVersions": { "type": "array", "items": { "type": "string" } },
+                "versions": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["issueIdOrKey"],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": ["updates"]
+      },
+      "confirmation": {
+        "title": "Update multiple Jira issues",
+        "summary": "Review the batch before issues are updated."
+      },
+      "preview": "Update batch of Jira issues"
     },
     {
       "name": "jira_add_comment",
