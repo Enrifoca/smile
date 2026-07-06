@@ -200,7 +200,7 @@
     },
     {
       "name": "jira_batch_update_issues",
-      "description": "Update multiple Jira issues in one batch with a single approval. Each item can update any editable field; use this instead of repeated jira_update_issue calls.",
+      "description": "Update multiple Jira issues in one batch with a single approval. Required when updating 2 or more issues. Each item can update any editable field; never call jira_update_issue in a loop.",
       "category": "connector-write",
       "requiresConfirmation": true,
       "inputSchema": {

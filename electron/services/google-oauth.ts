@@ -354,7 +354,13 @@ export class GoogleOAuthService extends EventEmitter {
     }
     if (client.clientSecret) params.client_secret = client.clientSecret
 
-    return await this.fetchToken(params)
+    const refreshed = await this.fetchToken(params)
+    // Google does not return a new refresh_token on refresh; keep the existing one.
+    if (!refreshed.refresh_token) {
+      const existing = this.loadTokens()
+      refreshed.refresh_token = existing?.refresh_token
+    }
+    return refreshed
   }
 
   async getAccessToken(): Promise<string | null> {

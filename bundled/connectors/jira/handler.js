@@ -233,7 +233,9 @@ async function updateIssue(host, args, allowedKeys) {
 
   const { issueKey, issueIdOrKey: _iok, ...rest } = args
   const normalized = normalizeAdditionalFields(rest)
-  return mcp(host, 'editJiraIssue', { issueIdOrKey, ...normalized })
+  // The Atlassian MCP editJiraIssue tool expects the editable fields nested
+  // under a `fields` object, not spread at the top level.
+  return mcp(host, 'editJiraIssue', { issueIdOrKey, fields: normalized })
 }
 
 async function executeTool(name, args, host) {

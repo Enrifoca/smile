@@ -48,6 +48,7 @@ Write tools with `requiresConfirmation: true` pause the loop and surface a `Pend
 
 - `approveAction(actionId)` records the approval as a visible `role: 'system'` message (`User approved the <tool> write tool call.`) and then runs the tool.
 - `rejectAction(actionId, { silent?: boolean })` cancels the pending action. A non-silent refusal emits a `role: 'system'` message (`User refused the <tool> write tool call.`) so the model and the user both see the outcome. A silent refusal is used when the user starts typing a new message instead, which implicitly means they want to respond rather than approve.
+- System approval/refusal notices are displayed as centered, muted labels in the UI, but they are converted to `role: 'user'` messages when the conversation is sent to the model. Some providers ignore system messages that appear after the first system prompt, so the user-message mapping ensures the model actually sees that consent was given or denied.
 
 ## Context inspector snapshot
 
