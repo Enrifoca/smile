@@ -84,6 +84,10 @@ Chat, reasoning, and OCR models can be configured independently.
 | **Groq** | ✅ | ✅ | — | Mixture of hosted open-weight and reasoning models |
 | **Moonshot / Kimi** | ✅ | ✅ | — | Kimi K2 family, including thinking variants |
 | **DeepSeek** | — | ✅ | ✅ | `deepseek-reasoner`, DeepSeek OCR |
+| **OpenRouter** | ✅ | ✅ | — | Aggregator; access many models with one key |
+| **Grok / xAI** | ✅ | ✅ | — | Grok family via xAI API |
+| **MiniMax** | ✅ | ✅ | — | `MiniMax-Text-01` and chat models |
+| **Qwen / Alibaba** | ✅ | ✅ | — | `qwen-plus`, `qwq-32b`, Qwen3 reasoning |
 
 ## Framework Pillars
 

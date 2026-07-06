@@ -179,6 +179,38 @@ export class AIService {
           messages,
           tools
         )
+      case 'openrouter':
+        return this.callOpenAICompat(
+          'https://openrouter.ai/api/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('openrouter', 'chat'),
+          messages,
+          tools,
+        )
+      case 'xai':
+        return this.callOpenAICompat(
+          'https://api.x.ai/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('xai', 'chat'),
+          messages,
+          tools,
+        )
+      case 'minimax':
+        return this.callOpenAICompat(
+          'https://api.minimaxi.chat/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('minimax', 'chat'),
+          messages,
+          tools,
+        )
+      case 'qwen':
+        return this.callOpenAICompat(
+          'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('qwen', 'chat'),
+          messages,
+          tools,
+        )
       default:
         throw new Error(`Unsupported AI provider: ${provider}`)
     }
@@ -238,6 +270,46 @@ export class AIService {
         )
       case 'anthropic':
         return this.streamAnthropic(apiKey, model || getDefaultModelId('anthropic', 'chat'), messages, tools, onToken, onProgress)
+      case 'openrouter':
+        return this.streamOpenAICompat(
+          'https://openrouter.ai/api/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('openrouter', 'chat'),
+          messages,
+          tools,
+          onToken,
+          onProgress,
+        )
+      case 'xai':
+        return this.streamOpenAICompat(
+          'https://api.x.ai/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('xai', 'chat'),
+          messages,
+          tools,
+          onToken,
+          onProgress,
+        )
+      case 'minimax':
+        return this.streamOpenAICompat(
+          'https://api.minimaxi.chat/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('minimax', 'chat'),
+          messages,
+          tools,
+          onToken,
+          onProgress,
+        )
+      case 'qwen':
+        return this.streamOpenAICompat(
+          'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
+          apiKey,
+          model || getDefaultModelId('qwen', 'chat'),
+          messages,
+          tools,
+          onToken,
+          onProgress,
+        )
       default:
         throw new Error(`Unsupported AI provider: ${provider}`)
     }

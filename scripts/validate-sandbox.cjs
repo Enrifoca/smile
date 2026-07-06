@@ -14,6 +14,18 @@
 const path = require('path')
 const { app, utilityProcess } = require('electron')
 
+// If ELECTRON_RUN_AS_NODE is set, the Electron binary runs in Node mode and
+// `app` is undefined. Relaunch the same script with the variable removed so
+// utilityProcess and the app event loop are available.
+if (!app) {
+  console.log('[validate-sandbox] Detected ELECTRON_RUN_AS_NODE, relaunching as Electron app...')
+  const { spawnSync } = require('child_process')
+  const env = { ...process.env }
+  delete env.ELECTRON_RUN_AS_NODE
+  const result = spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit', env })
+  process.exit(result.status ?? 1)
+}
+
 const SANDBOX = path.join(__dirname, '..', 'dist-electron', 'connector-sandbox.js')
 
 const PROBE_HANDLER = `

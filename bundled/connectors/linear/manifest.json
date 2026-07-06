@@ -1,0 +1,160 @@
+{
+  "apiVersion": "1.0",
+  "id": "linear",
+  "name": "Linear",
+  "version": "1.0.0",
+  "description": "Linear issue tracking via GraphQL. OAuth for reads/writes; team-scoped contexts.",
+  "handlerKind": "code",
+  "integrationType": "graphql",
+  "auth": {
+    "type": "oauth",
+    "fields": [
+      { "key": "clientId", "label": "Linear OAuth client ID", "secret": false },
+      { "key": "clientSecret", "label": "Linear OAuth client secret", "secret": true }
+    ]
+  },
+  "permissions": {
+    "host": ["linear.api"]
+  },
+  "ui": {
+    "catalogLabel": "Linear",
+    "connectedLabel": "Linear connected",
+    "scopeLabel": "Teams"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Issues & teams"
+  },
+  "contextSchema": {
+    "type": "object",
+    "properties": {
+      "teamKeys": {
+        "type": "array",
+        "title": "Teams",
+        "description": "Linear team keys scoped to this context (comma-separated, e.g. ENG, DES). The connector enforces this list on every tool call."
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "linear_search_issues",
+      "description": "Search Linear issues. Prefer this over reading issues one by one.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Text to search in issue titles" },
+          "state": { "type": "string", "description": "Optional workflow state name to filter by" },
+          "maxResults": { "type": "integer", "description": "Maximum results (default 20, max 100)" }
+        }
+      }
+    },
+    {
+      "name": "linear_get_issue",
+      "description": "Get detailed information about one Linear issue.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": { "type": "string", "description": "Issue identifier (e.g. ENG-123) or issue ID" }
+        },
+        "required": ["identifier"]
+      }
+    },
+    {
+      "name": "linear_get_teams",
+      "description": "List Linear teams visible to the connected account.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "linear_get_projects",
+      "description": "List Linear projects visible to the connected account.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "linear_get_states",
+      "description": "Get available workflow states for a team.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "teamKey": { "type": "string", "description": "Team key (e.g. ENG)" }
+        },
+        "required": ["teamKey"]
+      }
+    },
+    {
+      "name": "linear_create_issue",
+      "description": "Create a single Linear issue.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "teamKey": { "type": "string", "description": "Team key (e.g. ENG)" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "state": { "type": "string", "description": "Workflow state name" },
+          "priority": { "type": "integer", "description": "Priority 0-4 (0 = no priority, 1 = urgent, 4 = low)" },
+          "project": { "type": "string", "description": "Project name" },
+          "assignee": { "type": "string", "description": "User email or name" }
+        },
+        "required": ["teamKey", "title"]
+      },
+      "confirmation": {
+        "title": "Create Linear issue",
+        "summary": "Create {{title}} in {{teamKey}}"
+      },
+      "preview": "Create: {{title}}"
+    },
+    {
+      "name": "linear_update_issue",
+      "description": "Update fields on an existing Linear issue.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": { "type": "string", "description": "Issue identifier (e.g. ENG-123) or issue ID" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "state": { "type": "string", "description": "Workflow state name" },
+          "priority": { "type": "integer", "description": "Priority 0-4" },
+          "assignee": { "type": "string", "description": "User email or name, or empty string to unassign" }
+        },
+        "required": ["identifier"]
+      },
+      "confirmation": {
+        "title": "Update Linear issue",
+        "summary": "Update {{identifier}}"
+      },
+      "preview": "Update: {{identifier}}"
+    },
+    {
+      "name": "linear_add_comment",
+      "description": "Add a comment to a Linear issue.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": { "type": "string", "description": "Issue identifier (e.g. ENG-123) or issue ID" },
+          "body": { "type": "string" }
+        },
+        "required": ["identifier", "body"]
+      },
+      "confirmation": {
+        "title": "Add Linear comment",
+        "summary": "Comment on {{identifier}}"
+      },
+      "preview": "Comment on: {{identifier}}"
+    }
+  ]
+}

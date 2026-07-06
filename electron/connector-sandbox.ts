@@ -55,13 +55,17 @@ function makeHost(callId: string): HostBridge {
   return {
     http: { fetch: request => callCapability('http.fetch', [request]) as ReturnType<HostBridge['http']['fetch']> },
     mcp: { call: (serverId, toolName, args) => callCapability('mcp.call', [serverId, toolName, args]) as Promise<ToolResult> },
-    file: { read: path => callCapability('file.read', [path]) as Promise<ToolResult<string>> },
+    file: {
+      read: path => callCapability('file.read', [path]) as Promise<ToolResult<string>>,
+      write: (path, content) => callCapability('file.write', [path, content]) as Promise<ToolResult>,
+    },
     cli: { run: request => callCapability('cli.run', [request]) as Promise<HostCliResponse> },
     secrets: { get: key => callCapability('secrets.get', [key]) as Promise<string | null> },
     call: (capability, params) => callCapability('host.call', [capability, params]) as Promise<ToolResult>,
     context: {
       get: () => callCapability('context.get', []) as Promise<Record<string, unknown> | null>,
       saveKnowledge: markdown => callCapability('context.saveKnowledge', [markdown]) as Promise<void>,
+      getFolderPath: () => callCapability('context.getFolderPath', []) as Promise<string | null>,
     },
     log: (level, ...args) => post({ type: 'log', callId, level, args }),
   }

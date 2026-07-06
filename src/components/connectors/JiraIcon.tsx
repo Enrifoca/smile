@@ -3,7 +3,7 @@ import { joinClasses } from '../ui/classNames'
 export function JiraIcon({ className }: { className?: string }) {
   return (
     <svg
-      className={joinClasses('connector-card-icon connector-card-icon--jira', className)}
+      className={joinClasses('connector-card-icon', className)}
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
       role="img"

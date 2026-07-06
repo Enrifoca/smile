@@ -176,14 +176,17 @@ Two tabs: **Reports** and **Context**.
 
 ### Reports
 
-- Lists `.md` files under `.smile/reports/` (recursive). Refreshes when the tab is shown or the window regains focus.
+- Lists `.md` files across the whole workspace, excluding internal smile files (context knowledge, history, generic `files/`, memories, connectors). Refreshes when the tab is shown or the window regains focus.
+- Markdown reports created by the agent are saved directly in the active context folder (`.smile/contexts/<slug>/`) or, when no context is active, in `.smile/`.
+- Uses a recursive `*.md` search and surfaces read/validation errors in place of the empty state.
 - **Click row** → opens `MarkdownArtifactModal` (full report reader).
 - **Toggle** → pins report in chat composer (`ActiveReportPill`); black dot + bold title when pinned.
 - Tab label shows black dot when any report is pinned.
 
 ### Context
 
-- Read-only list of workspace contexts; activation toggles live on **Context** page (`ContextHomeView`).
+- Read-only list of workspace contexts in the inspector; activation toggles live on **Context** page (`ContextHomeView`).
+- Context names can be renamed from the context detail view (the on-disk folder slug stays the same).
 - Black dot + bold name when that context is the active one.
 - Tab label shows black dot when a valid active context exists.
 
@@ -266,6 +269,7 @@ Range sliders (`RangeSlider` in Communication preferences): **mouse wheel scroll
 ## Connector and catalog UI
 
 - Catalog tiles: `connector-card` — `1px` border, `--radius-control`, base typography; hover `--color-hover-surface`.
+- Catalog connector icons must be the correct brand SVG in its brand colors (not generic letter placeholders); register the icon component in `src/connectors/catalog.ts` as `CatalogGraphic`.
 - Green dot top-right when configured (`connector-card-active-dot`).
 - Integration type labels (REST, MCP, etc.) are **white chips with a black border and black label** (`Badge tone="primary"`).
 - Detail/settings: `ui-page-frame` + `Panel variant="soft"` (sharp corners via `--radius-control`).

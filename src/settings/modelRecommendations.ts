@@ -6,11 +6,11 @@ export const MODEL_RECOMMENDATIONS = {
   reasoning: {
     lead: 'Best picks:',
     body:
-      'Kimi K2.6 for reasoning tasks. Pair with a strong general model below for everyday chat.',
+      'Kimi K2.6, OpenRouter (Claude 3.7 thinking / o4-mini), or Qwen qwq-32b for reasoning tasks. Pair with a strong general model below for everyday chat.',
   },
   general: {
-    lead: 'Best pick:',
-    body: 'OpenAI OSS 120B via Groq for general chat — strong cost/performance balance.',
+    lead: 'Best picks:',
+    body: 'OpenAI OSS 120B via Groq, GPT-4o via OpenRouter, Grok via xAI, or Qwen Plus — strong cost/performance balance.',
   },
   ocr: {
     lead: 'Best pick:',

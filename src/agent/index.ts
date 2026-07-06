@@ -15,7 +15,12 @@ import { toolDefinitions } from './tools'
 import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
 import type { ContextEnvelope } from '../connectors/contract'
 import type { ProjectContext } from '../context/types'
-import { getConnectorScopeConfig, getEnabledConnectorIds, getContextFolderPath } from '../context/types'
+import {
+  getConnectorScopeConfig,
+  getEnabledConnectorIds,
+  getContextFolderPath,
+  getContextFilesPath,
+} from '../context/types'
 import type { ContextPromptBody } from '../context/promptInjection'
 import { zodToJsonSchema } from './jsonSchema'
 import { getCoreToolEntry, ensureToolEntryActivity } from './toolEntries'
@@ -74,6 +79,10 @@ export class Agent {
   // The original user message for the current turn, stored separately because
   // runtime nudges are also pushed with role: 'user'.
   private currentUserMessage = ''
+  // Tracks the assistant message currently being streamed so we can force-finalize
+  // it if the loop moves to a non-streaming phase (e.g. tool execution/approval).
+  private streamingMessageId: string | null = null
+  private streamingMessageContent = ''
 
   private setAgentStatus(status: string | null): void {
     this.config.onAgentStatus?.(status)
@@ -109,6 +118,17 @@ export class Agent {
 
   private setActivityPhase(phase: AgentPhase): void {
     this.setAgentStatus(resolveActivityLabel(phase))
+
+    const streamingKinds = new Set<AgentPhase['kind']>([
+      'streaming_text',
+      'streaming_thinking',
+      'streaming_tool_draft',
+    ])
+    if (!streamingKinds.has(phase.kind) && this.streamingMessageId && this.config.onUpdateMessage) {
+      this.config.onUpdateMessage(this.streamingMessageId, this.streamingMessageContent, false)
+      this.streamingMessageId = null
+      this.streamingMessageContent = ''
+    }
   }
 
   private emitActivityMessage(id: string, activity: AgentActivity): void {
@@ -211,7 +231,7 @@ export class Agent {
       const connectorId = connector.definition.id
       const config = context ? getConnectorScopeConfig(context, connectorId) : null
       const envelope = context && config !== null
-        ? { contextId: context.id, config }
+        ? { contextId: context.id, config, contextFolderPath: getContextFolderPath(context) }
         : null
       void connector.setActiveContext?.(envelope)
     }
@@ -224,7 +244,11 @@ export class Agent {
     if (!context) return undefined
     const config = getConnectorScopeConfig(context, connectorId)
     if (config === null) return undefined
-    return { contextId: context.id, config }
+    return {
+      contextId: context.id,
+      config,
+      contextFolderPath: getContextFolderPath(context),
+    }
   }
 
   /** Reload active context from storage so connector scope config is never stale. */
@@ -268,6 +292,8 @@ export class Agent {
     const lines = [`\n\n## Active Context: ${context.name}`]
     lines.push(`The user scoped this conversation to the "${context.name}" project. Only connectors enabled for this context are available; their tools and instructions are listed in the Connector context section.`)
     lines.push(`Context folder: \`${getContextFolderPath(context)}\` (portable - share this folder with teammates).`)
+    lines.push(`When creating outputs, prefer this context folder: save reports directly in \`${getContextFolderPath(context)}\` and other files to \`${getContextFilesPath(context)}\`.`)
+    lines.push(`When reading files, look in the context folder first, then fall back to the wider workspace.`)
 
     if (body?.injectFull && body.markdown) {
       lines.push(`\n### Context knowledge (full)\n${body.markdown}`)
@@ -726,6 +752,8 @@ export class Agent {
     responseContent: string,
   ): { response: null; wasStreamed: boolean; aborted: true } {
     this.abortFlag = false
+    this.streamingMessageId = null
+    this.streamingMessageContent = ''
     if (responseStarted && this.config.onUpdateMessage) {
       const finalContent = responseContent.trim()
       if (finalContent) {
@@ -938,10 +966,12 @@ export class Agent {
       const flushToResponse = (chunk: string) => {
         if (!chunk) return
         responseContent += chunk
+        this.streamingMessageContent = responseContent
         const snapshot = responseContent
         if (!responseStarted) {
           this.setActivityPhase({ kind: 'streaming_text' })
           responseStarted = true
+          this.streamingMessageId = responseMsgId
           this.config.onMessage({
             id: responseMsgId,
             role: 'assistant',
@@ -955,6 +985,8 @@ export class Agent {
       }
 
       const finalizeStreamedResponse = (content: string) => {
+        this.streamingMessageId = null
+        this.streamingMessageContent = ''
         if (!responseStarted || !this.config.onUpdateMessage) return
         const finalContent = content.trim()
         if (finalContent) {
@@ -1386,6 +1418,18 @@ export class Agent {
       throw new Error('Action not found')
     }
     this.pendingActions.delete(actionId)
+
+    // Record the user's explicit approval in the transcript so the model
+    // cannot mistake a successful write for an unsanctioned action.
+    const approvalMsg: Message = {
+      id: uuidv4(),
+      role: 'system',
+      content: `User approved the ${action.type} write tool call.`,
+      timestamp: new Date().toISOString(),
+    }
+    this.conversationHistory.push(approvalMsg)
+    this.config.onMessage(approvalMsg)
+
     const activityMessageId = this.activityMessageIdForToolCall(actionId)
     const toolEntry = this.getToolEntry(action.type, action.data)
     const activityStartedAt = new Date().toISOString()

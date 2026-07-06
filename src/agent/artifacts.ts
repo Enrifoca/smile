@@ -1,3 +1,5 @@
+import { getContextFolderPath, type ProjectContext } from '../context/types'
+
 /** Chat artifact attached when the agent writes a markdown report. */
 export interface MarkdownArtifact {
   path: string
@@ -39,15 +41,27 @@ export function titleFromReportPath(reportPath: string): string {
 
 export function isReportArtifactPath(path: string): boolean {
   const normalized = path.replace(/\\/g, '/')
-  return normalized.includes('.smile/reports/') && normalized.endsWith('.md')
+  if (!normalized.endsWith('.md')) return false
+  // Legacy workspace reports folder.
+  if (normalized.includes('.smile/reports/')) return true
+  // Reports saved directly in the workspace metadata root.
+  if (/^\.smile\/\d{4}-\d{2}-\d{2}_/.test(normalized)) return true
+  // Reports saved directly inside a context folder (not in files/ or history/).
+  if (/\.smile\/contexts\/[^/]+\/\d{4}-\d{2}-\d{2}_/.test(normalized)) return true
+  return false
 }
 
-export function buildReportPath(title: string, explicitPath?: string): string {
+export function buildReportPath(
+  title: string,
+  explicitPath?: string,
+  context?: ProjectContext | null,
+): string {
   const trimmed = explicitPath?.trim()
   if (trimmed) return trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`
 
   const stamp = new Date().toISOString().slice(0, 10)
-  return `.smile/reports/${stamp}_${slugifyReportTitle(title)}.md`
+  const baseDir = context ? getContextFolderPath(context) : '.smile'
+  return `${baseDir}/${stamp}_${slugifyReportTitle(title)}.md`
 }
 
 export function buildReportToolResult(path: string, title: string): string {

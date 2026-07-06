@@ -1,6 +1,6 @@
 export type ModelRole = 'chat' | 'reasoning' | 'ocr'
 
-export type AIProvider = 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek'
+export type AIProvider = 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek' | 'openrouter' | 'xai' | 'minimax' | 'qwen'
 export type OCRProvider = 'mistral' | 'deepseek'
 export type ModelProvider = AIProvider | OCRProvider
 
@@ -40,6 +40,10 @@ export const AI_PROVIDER_LABELS: Record<AIProvider, string> = {
   groq: 'Groq',
   moonshot: 'Kimi / Moonshot',
   deepseek: 'DeepSeek',
+  openrouter: 'OpenRouter',
+  xai: 'Grok / xAI',
+  minimax: 'MiniMax',
+  qwen: 'Qwen / Alibaba',
 }
 
 export const OCR_PROVIDER_LABELS: Record<OCRProvider, string> = {
@@ -47,8 +51,8 @@ export const OCR_PROVIDER_LABELS: Record<OCRProvider, string> = {
   deepseek: 'DeepSeek OCR',
 }
 
-export const CHAT_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'mistral', 'groq', 'moonshot']
-export const REASONING_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'mistral', 'moonshot', 'deepseek', 'groq']
+export const CHAT_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'mistral', 'groq', 'moonshot', 'openrouter', 'xai', 'minimax', 'qwen']
+export const REASONING_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'mistral', 'moonshot', 'deepseek', 'groq', 'openrouter', 'xai', 'minimax', 'qwen']
 export const OCR_PROVIDERS: OCRProvider[] = ['mistral', 'deepseek']
 
 export const DEFAULT_MODEL_IDS: Record<ModelRole, Partial<Record<ModelProvider, string>>> = {
@@ -58,6 +62,10 @@ export const DEFAULT_MODEL_IDS: Record<ModelRole, Partial<Record<ModelProvider, 
     mistral: 'mistral-large-latest',
     groq: 'llama-3.1-70b-versatile',
     moonshot: 'kimi-k2.5',
+    openrouter: 'openai/gpt-4o',
+    xai: 'grok-2-1212',
+    minimax: 'MiniMax-Text-01',
+    qwen: 'qwen-plus',
   },
   reasoning: {
     openai: 'o4-mini',
@@ -66,6 +74,10 @@ export const DEFAULT_MODEL_IDS: Record<ModelRole, Partial<Record<ModelProvider, 
     moonshot: 'kimi-k2-thinking',
     deepseek: 'deepseek-reasoner',
     groq: 'deepseek-r1-distill-llama-70b',
+    openrouter: 'openai/o4-mini',
+    xai: 'grok-3',
+    minimax: 'MiniMax-Text-01',
+    qwen: 'qwq-32b',
   },
   ocr: {
     mistral: 'mistral-ocr-latest',
@@ -175,6 +187,60 @@ export const BUNDLED_MODEL_CATALOG: ModelCatalog = {
       'deepseek-ai/DeepSeek-OCR',
     ]),
   },
+  openrouter: {
+    chat: bundled('openrouter', 'chat', [
+      'openai/gpt-4o',
+      'openai/gpt-4o-mini',
+      'anthropic/claude-3-5-sonnet',
+      'anthropic/claude-3-7-sonnet',
+      'google/gemini-2.0-flash-001',
+      'meta-llama/llama-3.3-70b-instruct',
+    ]),
+    reasoning: bundled('openrouter', 'reasoning', [
+      'openai/o4-mini',
+      'openai/o3-mini',
+      'anthropic/claude-3-7-sonnet:thinking',
+      'deepseek/deepseek-r1',
+      'qwen/qwq-32b',
+    ]),
+  },
+  xai: {
+    chat: bundled('xai', 'chat', [
+      'grok-3',
+      'grok-3-mini',
+      'grok-2-1212',
+      'grok-2-vision-1212',
+      'grok-beta',
+    ]),
+    reasoning: bundled('xai', 'reasoning', [
+      'grok-3',
+      'grok-3-mini',
+      'grok-2-1212',
+    ]),
+  },
+  minimax: {
+    chat: bundled('minimax', 'chat', [
+      'MiniMax-Text-01',
+      'abab6.5s-chat',
+      'abab6-chat',
+    ]),
+    reasoning: bundled('minimax', 'reasoning', [
+      'MiniMax-Text-01',
+    ]),
+  },
+  qwen: {
+    chat: bundled('qwen', 'chat', [
+      'qwen-plus',
+      'qwen-turbo',
+      'qwen-max',
+      'qwen-coder-plus',
+    ]),
+    reasoning: bundled('qwen', 'reasoning', [
+      'qwq-32b',
+      'qwen3-32b',
+      'qwen-max',
+    ]),
+  },
 }
 
 export function getBundledProviderRole(provider: ModelProvider, role: ModelRole): ProviderRoleCatalog {
@@ -185,8 +251,31 @@ export function getDefaultModelId(provider: ModelProvider, role: ModelRole): str
   return DEFAULT_MODEL_IDS[role][provider] || getBundledProviderRole(provider, role).models[0]?.id || ''
 }
 
+function isReasoningLikeModelId(model: string): boolean {
+  const m = model.toLowerCase()
+  if (m.startsWith('o1') || m.startsWith('o3') || m.startsWith('o4')) return true
+  if (m.includes('claude-3-7') || m.includes('claude-4') || m.includes('claude-opus-4')) return true
+  if (m.includes('magistral') || m.includes('reason')) return true
+  if (m.includes('thinking')) return true
+  if (m.includes('k2.5') || m.includes('k2.6')) return true
+  if (m.includes('deepseek-r1') || m.includes('qwq') || m.includes('qwen3')) return true
+  if (m.includes('reasoner') || m.includes('r1') || m.includes('v4')) return true
+  return false
+}
+
 export function isReasoningModelId(provider: ModelProvider, model: string): boolean {
   const m = model.toLowerCase()
+
+  if (provider === 'openrouter') {
+    const slashIndex = m.indexOf('/')
+    const suffix = slashIndex >= 0 ? m.slice(slashIndex + 1) : m
+    return isReasoningLikeModelId(suffix)
+  }
+
+  if (provider === 'xai') return m.includes('grok-3') || m.includes('reason')
+  if (provider === 'minimax') return m.includes('reason')
+  if (provider === 'qwen') return m.includes('qwq') || m.includes('qwen3') || m.includes('reason')
+
   if (provider === 'openai') return m.startsWith('o1') || m.startsWith('o3') || m.startsWith('o4')
   if (provider === 'anthropic') return m.includes('claude-3-7') || m.includes('claude-4') || m.includes('claude-opus-4')
   if (provider === 'groq') return m.includes('deepseek-r1') || m.includes('qwq') || m.includes('qwen3') || m.includes('kimi')

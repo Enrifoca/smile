@@ -46,7 +46,7 @@ Each executed tool batch also emits a UI-only `tool_summary` message (grouped ic
 
 Write tools with `requiresConfirmation: true` pause the loop and surface a `PendingAction`. The UI renders an Accept / Refuse bar.
 
-- `approveAction(actionId)` runs the tool and continues the loop.
+- `approveAction(actionId)` records the approval as a visible `role: 'system'` message (`User approved the <tool> write tool call.`) and then runs the tool.
 - `rejectAction(actionId, { silent?: boolean })` cancels the pending action. A non-silent refusal emits a `role: 'system'` message (`User refused the <tool> write tool call.`) so the model and the user both see the outcome. A silent refusal is used when the user starts typing a new message instead, which implicitly means they want to respond rather than approve.
 
 ## Context inspector snapshot

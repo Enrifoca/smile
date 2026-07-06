@@ -5,7 +5,7 @@ import { useActionFeedback } from '../../hooks/useActionFeedback'
 import { ConnectorAuthField, ConnectorManifest, ConnectorPermissions } from '../../connectors/contract'
 import { INTEGRATION_TYPE_LABELS } from '../../connectors/catalog'
 import { Alert, Button, ConfirmModal, Field, Input, Panel, SectionHeader } from '../ui'
-import { ApiConnectionModule, McpConnectionModule } from './ConnectorSettingsModules'
+import { ApiConnectionModule, McpConnectionModule, OAuthConnectionModule } from './ConnectorSettingsModules'
 import { ConnectorPageHeader } from './ConnectorPageHeader'
 
 interface GenericConnectorSettingsViewProps {
@@ -31,21 +31,44 @@ function connectorSecretKey(connectorId: string, fieldKey: string): string {
   return `connector:${connectorId}:${fieldKey}`
 }
 
+function oauthClientKey(serviceId: string): string {
+  return `connector:${serviceId}:client`
+}
+
+interface OAuthClientCredentials {
+  clientId?: string
+  clientSecret?: string
+}
+
+type OAuthServiceApi = {
+  connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
+  disconnect: () => Promise<unknown>
+  status: () => Promise<{ connected: boolean }>
+  getConnectionState: () => Promise<{ state: string; connected: boolean }>
+  getRedirectUri: () => Promise<string>
+  onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => (() => void)
+}
+
 export function GenericConnectorSettingsView({
   manifest,
   onBack,
   onConnectionChange,
 }: GenericConnectorSettingsViewProps) {
-  const { storage, mcp, connectors } = useElectron()
+  const { storage, mcp, linear, google, connectors } = useElectron()
   const saveFeedback = useActionFeedback()
   const authFields = manifest.auth?.fields ?? []
   const secretFields = authFields.filter(field => field.secret !== false)
+  const requiredFields = authFields.filter(field => !field.optional)
 
   const [form, setForm] = useState<Record<string, string>>({})
   const [configured, setConfigured] = useState(false)
   const [mcpConnected, setMcpConnected] = useState(false)
   const [mcpConnecting, setMcpConnecting] = useState(false)
   const [mcpError, setMcpError] = useState<string | null>(null)
+  const [oauthConnected, setOauthConnected] = useState(false)
+  const [oauthConnecting, setOauthConnecting] = useState(false)
+  const [oauthError, setOauthError] = useState<string | null>(null)
+  const [oauthRedirectUri, setOauthRedirectUri] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [showRemoveModal, setShowRemoveModal] = useState(false)
@@ -55,15 +78,51 @@ export function GenericConnectorSettingsView({
     : null
 
   const needsMcp = (manifest.permissions?.mcp?.length ?? 0) > 0
+  const isOAuth = manifest.auth?.type === 'oauth'
   const optionalSecrets = manifest.auth?.type === 'oauth-with-rest-token'
-  const restApiTitle = optionalSecrets ? `${manifest.name} REST API` : 'Connection'
+  const restApiTitle = optionalSecrets ? `${manifest.name} REST API` : isOAuth ? 'OAuth app credentials' : 'Connection'
+
+  const oauthServiceId = useMemo(() => {
+    const host = manifest.permissions?.host?.find(h => h.endsWith('.api'))
+    return host ? host.split('.')[0] : null
+  }, [manifest.permissions?.host])
+
+  const oauth: OAuthServiceApi | null = useMemo(() => {
+    if (oauthServiceId === 'google') return google
+    if (oauthServiceId === 'linear') return linear
+    return null
+  }, [oauthServiceId, google, linear])
+
+  useEffect(() => {
+    if (!oauth) {
+      setOauthRedirectUri(null)
+      return
+    }
+    let active = true
+    oauth.getRedirectUri().then(uri => {
+      if (active) setOauthRedirectUri(uri)
+    })
+    return () => {
+      active = false
+    }
+  }, [oauth])
 
   const refreshConfigured = async () => {
     try {
       const nextForm: Record<string, string> = {}
-      for (const field of authFields) {
-        const stored = await storage.getSecure(connectorSecretKey(manifest.id, field.key))
-        nextForm[field.key] = field.secret !== false && stored ? '••••••••' : (stored || '')
+
+      if (isOAuth && oauthServiceId) {
+        const clientRaw = await storage.getSecure(oauthClientKey(oauthServiceId))
+        const client = clientRaw ? (JSON.parse(clientRaw) as OAuthClientCredentials) : {}
+        for (const field of authFields) {
+          const value = client[field.key as keyof OAuthClientCredentials] || ''
+          nextForm[field.key] = field.secret !== false && value ? '••••••••' : value
+        }
+      } else {
+        for (const field of authFields) {
+          const stored = await storage.getSecure(connectorSecretKey(manifest.id, field.key))
+          nextForm[field.key] = field.secret !== false && stored ? '••••••••' : (stored || '')
+        }
       }
       if (authFields.length > 0) {
         setForm(nextForm)
@@ -78,8 +137,16 @@ export function GenericConnectorSettingsView({
         return
       }
 
-      if (secretFields.length > 0 && !optionalSecrets) {
-        const allSet = secretFields.every(field => {
+      if (isOAuth && oauth) {
+        const status = await oauth.status()
+        setOauthConnected(status.connected)
+        setConfigured(status.connected)
+        onConnectionChange?.(status.connected)
+        return
+      }
+
+      if (requiredFields.length > 0 && !optionalSecrets) {
+        const allSet = requiredFields.every(field => {
           const value = nextForm[field.key]
           return !!value?.trim() && value !== '••••••••'
         })
@@ -97,8 +164,10 @@ export function GenericConnectorSettingsView({
 
   useEffect(() => {
     void refreshConfigured()
+  }, [manifest.id])
 
-    const cleanup = mcp.onConnectionStateChange(state => {
+  useEffect(() => {
+    const cleanupMcp = mcp.onConnectionStateChange(state => {
       const connected = state.state === 'connected'
       setMcpConnected(connected)
       if (needsMcp) {
@@ -107,8 +176,20 @@ export function GenericConnectorSettingsView({
       }
     })
 
-    return cleanup
-  }, [manifest.id])
+    const cleanupOauth = oauth?.onConnectionStateChange(state => {
+      const connected = state.state === 'connected'
+      setOauthConnected(connected)
+      if (isOAuth) {
+        setConfigured(connected)
+        onConnectionChange?.(connected)
+      }
+    })
+
+    return () => {
+      cleanupMcp()
+      cleanupOauth?.()
+    }
+  }, [oauth, isOAuth, needsMcp, onConnectionChange])
 
   const restCredentialsSaved = useMemo(
     () => authFields.some(field => !!form[field.key]?.trim()),
@@ -118,18 +199,50 @@ export function GenericConnectorSettingsView({
   const saveDisabled = useMemo(() => {
     if (authFields.length === 0) return true
     if (optionalSecrets) return false
-    return secretFields.some(field => !form[field.key]?.trim() || form[field.key] === '••••••••')
-  }, [authFields.length, form, optionalSecrets, secretFields])
+    return requiredFields.some(field => !form[field.key]?.trim() || form[field.key] === '••••••••')
+  }, [authFields.length, form, optionalSecrets, requiredFields])
+
+  const oAuthCredentialsSaved = useMemo(
+    () => authFields.some(field => field.key === 'clientId' && !!form[field.key]?.trim()),
+    [authFields, form],
+  )
 
   async function handleSave() {
     await saveFeedback.run(async () => {
-      for (const field of authFields) {
-        const value = form[field.key]?.trim()
-        if (!value || value === '••••••••') {
-          if (optionalSecrets) continue
-          throw new Error('Missing credential')
+      if (isOAuth && oauthServiceId) {
+        const existingRaw = await storage.getSecure(oauthClientKey(oauthServiceId))
+        const existing = existingRaw ? (JSON.parse(existingRaw) as OAuthClientCredentials) : {}
+        const client: OAuthClientCredentials = { ...existing }
+        for (const field of authFields) {
+          const value = form[field.key]?.trim()
+          if (!value) {
+            if (field.optional) {
+              delete client[field.key as keyof OAuthClientCredentials]
+              continue
+            }
+            throw new Error('Missing credential')
+          }
+          if (value === '••••••••') {
+            if (!field.optional && !existing[field.key as keyof OAuthClientCredentials]?.trim()) {
+              throw new Error('Missing credential')
+            }
+            continue
+          }
+          client[field.key as keyof OAuthClientCredentials] = value
         }
-        await storage.setSecure(connectorSecretKey(manifest.id, field.key), value)
+        await storage.setSecure(oauthClientKey(oauthServiceId), JSON.stringify(client))
+      } else {
+        for (const field of authFields) {
+          const value = form[field.key]?.trim()
+          if (!value) {
+            if (optionalSecrets || field.optional) continue
+            throw new Error('Missing credential')
+          }
+          if (value === '••••••••') {
+            continue
+          }
+          await storage.setSecure(connectorSecretKey(manifest.id, field.key), value)
+        }
       }
       await refreshConfigured()
     })
@@ -166,11 +279,51 @@ export function GenericConnectorSettingsView({
     }
   }
 
+  async function handleOAuthConnect(forceReauth = false) {
+    if (!oauth) return
+    setOauthConnecting(true)
+    setOauthError(null)
+    try {
+      const result = await oauth.connect(forceReauth ? { forceReauth: true } : undefined)
+      if (!result.success) throw new Error(result.error || `${manifest.name} OAuth failed`)
+      await refreshConfigured()
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : `${manifest.name} OAuth failed`)
+    } finally {
+      setOauthConnecting(false)
+    }
+  }
+
+  async function handleOAuthDisconnect() {
+    if (!oauth) return
+    setOauthConnecting(true)
+    setOauthError(null)
+    try {
+      await oauth.disconnect()
+      setOauthConnected(false)
+      if (isOAuth) {
+        setConfigured(false)
+        onConnectionChange?.(false)
+      }
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : `Failed to disconnect ${manifest.name}`)
+    } finally {
+      setOauthConnecting(false)
+    }
+  }
+
   async function handleRemove() {
-    for (const field of authFields) {
-      await storage.setSecure(connectorSecretKey(manifest.id, field.key), '')
+    if (isOAuth && oauthServiceId) {
+      await storage.setSecure(oauthClientKey(oauthServiceId), '')
+    } else {
+      for (const field of authFields) {
+        await storage.setSecure(connectorSecretKey(manifest.id, field.key), '')
+      }
     }
     setForm(Object.fromEntries(authFields.map(field => [field.key, ''])))
+    if (isOAuth) {
+      await handleOAuthDisconnect()
+    }
     if (!needsMcp) {
       setConfigured(false)
       onConnectionChange?.(false)
@@ -195,6 +348,8 @@ export function GenericConnectorSettingsView({
   function updateField(field: ConnectorAuthField, value: string) {
     setForm(prev => ({ ...prev, [field.key]: value }))
   }
+
+  const oAuthRedirectUri = oauthRedirectUri || ''
 
   return (
     <div className="ui-page-frame">
@@ -231,15 +386,17 @@ export function GenericConnectorSettingsView({
             description={
               optionalSecrets
                 ? `Optional REST credentials for ${manifest.name} attachments. MCP handles reads and writes.`
-                : `Credentials for ${manifest.name}. Stored encrypted on this device.`
+                : isOAuth
+                  ? `Client credentials from your ${manifest.name} OAuth app. Redirect URI must be ${oAuthRedirectUri}.`
+                  : `Credentials for ${manifest.name}. Stored encrypted on this device.`
             }
-            configured={optionalSecrets ? restCredentialsSaved : configured}
+            configured={optionalSecrets ? restCredentialsSaved : isOAuth ? oAuthCredentialsSaved : configured}
             saving={saveFeedback.busy}
             saveDisabled={saveDisabled}
             saveStatus={saveFeedback.status}
             onSave={() => void handleSave()}
             onRemove={
-              (optionalSecrets ? restCredentialsSaved : configured)
+              (optionalSecrets ? restCredentialsSaved : isOAuth ? oAuthCredentialsSaved : configured)
                 ? () => void handleRemove()
                 : undefined
             }
@@ -255,6 +412,20 @@ export function GenericConnectorSettingsView({
               </Field>
             ))}
           </ApiConnectionModule>
+        )}
+
+        {isOAuth && oauth && (
+          <OAuthConnectionModule
+            title={`${manifest.name} OAuth`}
+            description={`Authorize smile:D to access your ${manifest.name} account.`}
+            connected={oauthConnected}
+            connecting={oauthConnecting}
+            onConnect={() => void handleOAuthConnect(oauthConnected)}
+            onDisconnect={oauthConnected ? () => void handleOAuthDisconnect() : undefined}
+            connectLabel={`Connect ${manifest.name}`}
+            reconnectLabel={`Reconnect ${manifest.name}`}
+            error={oauthError}
+          />
         )}
 
         <Panel variant="soft">

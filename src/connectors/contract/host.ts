@@ -57,6 +57,12 @@ export interface HostBridge {
   file: {
     /** Read a workspace file (requires permissions.file.read). */
     read(path: string): Promise<ToolResult<string>>
+    /**
+     * Write a workspace file (requires permissions.file.write).
+     * When an active context exists, simple filenames are scoped to the
+     * context folder; explicit relative paths are respected as-is.
+     */
+    write(path: string, content: string): Promise<ToolResult>
   }
   cli: {
     /** Run an allowlisted command (requires permissions.cli). */
@@ -85,6 +91,12 @@ export interface HostBridge {
      * Typically called from a `*_sync` tool, not on every turn.
      */
     saveKnowledge(markdown: string): Promise<void>
+    /**
+     * Workspace-relative path to the active context folder
+     * (e.g. `.smile/contexts/acme`), or null when no context is active.
+     * Connectors can use this to save file outputs inside the context scope.
+     */
+    getFolderPath(): Promise<string | null>
   }
   /** Diagnostic logging (optional; host may forward to devtools or discard). */
   log(level: HostLogLevel, ...args: unknown[]): void

@@ -64,6 +64,99 @@ function resolveBundledConnectorsRoot(): string {
   return candidates[0]
 }
 
+function loadBundledManifest(connectorId: string): ConnectorManifest | null {
+  try {
+    const manifestPath = path.join(resolveBundledConnectorsRoot(), connectorId, 'manifest.json')
+    if (!fs.existsSync(manifestPath)) return null
+    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+    const validation = validateManifest(raw)
+    return validation.ok ? validation.manifest : null
+  } catch {
+    return null
+  }
+}
+
+function mergeManifestFields(bundled: ConnectorManifest, workspace: ConnectorManifest): ConnectorManifest {
+  // Start from the bundled (authoritative) manifest and overlay the workspace copy.
+  // This lets installed connectors receive additive updates (new auth fields,
+  // additional permissions.host entries, new agent capabilities) without forcing
+  // users to re-install when the bundled source is updated.
+  const merged: ConnectorManifest = { ...bundled }
+
+  // Top-level scalar / object fields: workspace wins when explicitly provided.
+  const topKeys: (keyof ConnectorManifest)[] = [
+    'apiVersion',
+    'id',
+    'name',
+    'version',
+    'description',
+    'handlerKind',
+    'integrationType',
+    'contextSchema',
+    'catalog',
+    'ui',
+    'tools',
+  ]
+  for (const key of topKeys) {
+    if (workspace[key] !== undefined) {
+      // @ts-expect-error merging typed manifest objects
+      merged[key] = workspace[key]
+    }
+  }
+
+  // Array fields are unioned so bundled additions are preserved.
+  if (bundled.agentCapabilities || workspace.agentCapabilities) {
+    merged.agentCapabilities = Array.from(
+      new Set([
+        ...(bundled.agentCapabilities ?? []),
+        ...(workspace.agentCapabilities ?? []),
+      ])
+    )
+  }
+
+  // Auth: bundled fields are authoritative; workspace may override field metadata
+  // for keys that already exist (e.g. labels), but new bundled fields appear automatically.
+  if (workspace.auth !== undefined) {
+    const bundledAuthFields = bundled.auth?.fields
+    const workspaceAuthFields = workspace.auth.fields
+    if (bundledAuthFields && workspaceAuthFields) {
+      const workspaceFieldMap = new Map(workspaceAuthFields.map(field => [field.key, field]))
+      merged.auth = {
+        ...bundled.auth,
+        ...workspace.auth,
+        fields: bundledAuthFields.map(field => workspaceFieldMap.get(field.key) ?? field),
+      }
+    } else {
+      merged.auth = { ...bundled.auth, ...workspace.auth }
+      if (!workspace.auth.fields && bundledAuthFields) {
+        merged.auth.fields = bundledAuthFields
+      }
+    }
+  }
+
+  // Permissions: union allowlists so a stale workspace copy does not lose new
+  // bundled capabilities (e.g. a new `permissions.host` entry).
+  if (workspace.permissions !== undefined) {
+    const bp = bundled.permissions ?? {}
+    const wp = workspace.permissions
+    merged.permissions = {
+      file: wp.file ?? bp.file,
+      http: unionArrays(bp.http, wp.http),
+      mcp: unionArrays(bp.mcp, wp.mcp),
+      secrets: unionArrays(bp.secrets, wp.secrets),
+      host: unionArrays(bp.host, wp.host),
+      cli: unionArrays(bp.cli, wp.cli),
+    }
+  }
+
+  return merged
+}
+
+function unionArrays<T>(a: T[] | undefined, b: T[] | undefined): T[] | undefined {
+  if (!a?.length && !b?.length) return undefined
+  return Array.from(new Set([...(a ?? []), ...(b ?? [])]))
+}
+
 export interface LoadedConnector {
   manifest: ConnectorManifest
   dir: string
@@ -76,6 +169,8 @@ export interface LoadedConnector {
 export interface ConnectorCapabilityDeps {
   /** Read a workspace file. */
   readFile: (relativePath: string) => Promise<ToolResult<string>>
+  /** Write a workspace file. */
+  writeFile: (relativePath: string, content: string) => Promise<ToolResult>
   /** Call a tool on a connected MCP server. Result is already normalized to {@link ToolResult}. */
   mcpCall: (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<ToolResult>
   /** Read a connector-scoped secret. */
@@ -160,8 +255,12 @@ export class ConnectorsService {
       if (handlerKind === 'code' && !fs.existsSync(handlerPath)) continue
 
       const promptPath = path.join(dir, 'prompt.md')
+      const bundledManifest = loadBundledManifest(validation.manifest.id)
+      const manifest = bundledManifest
+        ? mergeManifestFields(bundledManifest, validation.manifest)
+        : validation.manifest
       connectors.push({
-        manifest: validation.manifest,
+        manifest,
         dir,
         handlerSource: handlerKind === 'code' ? fs.readFileSync(handlerPath, 'utf-8') : undefined,
         promptMarkdown: fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf-8') : '',
@@ -458,6 +557,8 @@ export class ConnectorsService {
     switch (method) {
       case 'context.get':
         return context?.config ?? null
+      case 'context.getFolderPath':
+        return context?.contextFolderPath ?? null
       case 'context.saveKnowledge': {
         if (!context) throw new Error('No active context to save knowledge for')
         this.deps.saveKnowledge(context.contextId, manifest.id, params[0] as string)
@@ -477,6 +578,12 @@ export class ConnectorsService {
       case 'file.read': {
         if (!permissions.file?.read) throw new Error('file.read not permitted')
         return this.deps.readFile(params[0] as string)
+      }
+      case 'file.write': {
+        if (!permissions.file?.write) throw new Error('file.write not permitted')
+        const [writePath, content] = params as [string, string]
+        const resolvedPath = this.resolveContextScopedPath(writePath, context)
+        return this.deps.writeFile(resolvedPath, content)
       }
       case 'cli.run': {
         if (!(permissions.cli || []).length) throw new Error('cli.run not permitted')
@@ -500,6 +607,17 @@ export class ConnectorsService {
       default:
         throw new Error(`Unknown capability: ${method}`)
     }
+  }
+
+  private resolveContextScopedPath(
+    inputPath: string,
+    context: ContextEnvelope | null,
+  ): string {
+    const trimmed = inputPath.trim()
+    if (!trimmed || !context?.contextFolderPath) return trimmed
+    const normalized = trimmed.replace(/\\/g, '/')
+    if (normalized.startsWith('.smile/') || normalized.includes('/')) return trimmed
+    return `${context.contextFolderPath}/files/${trimmed}`
   }
 
   private async brokerHttpFetch(request: HostHttpRequest): Promise<HostHttpResponse> {

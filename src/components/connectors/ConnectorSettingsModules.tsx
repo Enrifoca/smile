@@ -121,6 +121,61 @@ export function CustomSettingsModule({
   )
 }
 
+interface OAuthConnectionModuleProps {
+  title: string
+  description: string
+  connected: boolean
+  connecting: boolean
+  onConnect: () => void
+  onDisconnect?: () => void
+  connectLabel?: string
+  reconnectLabel?: string
+  disconnectLabel?: string
+  error?: string | null
+  connectingLabel?: string
+}
+
+export function OAuthConnectionModule({
+  title,
+  description,
+  connected,
+  connecting,
+  onConnect,
+  onDisconnect,
+  connectLabel = 'Connect',
+  reconnectLabel = 'Reconnect',
+  disconnectLabel = 'Disconnect',
+  error = null,
+  connectingLabel = 'Connecting...',
+}: OAuthConnectionModuleProps) {
+  return (
+    <Panel variant="soft">
+      <SectionHeader
+        title={title}
+        description={description}
+        aside={connected ? <Badge tone="success">Connected</Badge> : undefined}
+      />
+      <div className="ui-action-row">
+        <Button
+          variant="primary"
+          size="sm"
+          loading={connecting}
+          loadingLabel={connectingLabel}
+          onClick={onConnect}
+        >
+          {connected ? reconnectLabel : connectLabel}
+        </Button>
+        {connected && onDisconnect && (
+          <Button variant="secondary" size="sm" onClick={onDisconnect}>
+            {disconnectLabel}
+          </Button>
+        )}
+      </div>
+      {error && <Alert className="mt-4">{error}</Alert>}
+    </Panel>
+  )
+}
+
 interface McpConnectionModuleProps {
   title: string
   description: string

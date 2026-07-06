@@ -18,6 +18,8 @@ export interface ConnectorAuthField {
   label: string
   /** When true, the value is stored as an encrypted secret and never logged. */
   secret?: boolean
+  /** When true, the field may be left empty. */
+  optional?: boolean
 }
 
 export interface ConnectorAuth {

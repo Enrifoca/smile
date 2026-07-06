@@ -109,6 +109,42 @@ export function useElectron() {
     [mcpConnect, mcpDisconnect, mcpStatus, mcpGetConnectionState, mcpOnConnectionStateChange],
   )
 
+  const linearConnect = useCallback(async (options?: { forceReauth?: boolean }) => api.linear.connect(options), [])
+  const linearDisconnect = useCallback(async () => api.linear.disconnect(), [])
+  const linearStatus = useCallback(async () => api.linear.status(), [])
+  const linearGetConnectionState = useCallback(async () => api.linear.getConnectionState(), [])
+  const linearGetRedirectUri = useCallback(async () => api.linear.getRedirectUri(), [])
+  const linearOnConnectionStateChange = useCallback((callback: (state: { state: string; error?: string }) => void) => api.linear.onConnectionStateChange(callback), [])
+  const linear = useMemo(
+    () => ({
+      connect: linearConnect,
+      disconnect: linearDisconnect,
+      status: linearStatus,
+      getConnectionState: linearGetConnectionState,
+      getRedirectUri: linearGetRedirectUri,
+      onConnectionStateChange: linearOnConnectionStateChange,
+    }),
+    [linearConnect, linearDisconnect, linearStatus, linearGetConnectionState, linearGetRedirectUri, linearOnConnectionStateChange],
+  )
+
+  const googleConnect = useCallback(async (options?: { forceReauth?: boolean }) => api.google.connect(options), [])
+  const googleDisconnect = useCallback(async () => api.google.disconnect(), [])
+  const googleStatus = useCallback(async () => api.google.status(), [])
+  const googleGetConnectionState = useCallback(async () => api.google.getConnectionState(), [])
+  const googleGetRedirectUri = useCallback(async () => api.google.getRedirectUri(), [])
+  const googleOnConnectionStateChange = useCallback((callback: (state: { state: string; error?: string }) => void) => api.google.onConnectionStateChange(callback), [])
+  const google = useMemo(
+    () => ({
+      connect: googleConnect,
+      disconnect: googleDisconnect,
+      status: googleStatus,
+      getConnectionState: googleGetConnectionState,
+      getRedirectUri: googleGetRedirectUri,
+      onConnectionStateChange: googleOnConnectionStateChange,
+    }),
+    [googleConnect, googleDisconnect, googleStatus, googleGetConnectionState, googleGetRedirectUri, googleOnConnectionStateChange],
+  )
+
   const aiConfigure = useCallback(async (config: AIConfig) => api.ai.configure(config), [])
   const aiConfigureReasoning = useCallback(async (config: AIConfig) => api.ai.configureReasoning(config), [])
   const aiConfigureReview = useCallback(async (config: AIConfig) => api.ai.configureReview(config), [])
@@ -302,6 +338,8 @@ export function useElectron() {
     chat,
     ai,
     mcp,
+    linear,
+    google,
     shell,
     connectors,
     contexts,

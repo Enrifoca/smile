@@ -109,7 +109,7 @@ Keep normalization in the service or connector handler, not in `src/agent`.
 | File | Role |
 | --- | --- |
 | `atlassian-mcp.ts` | Atlassian Rovo MCP: OAuth via `mcp-remote`, proxy process, raw tool calls — registered as MCP server id `atlassian` |
-| `connectors.ts` | Discovers workspace packages, forks sandbox, brokers `host.*` |
+| `connectors.ts` | Discovers workspace packages, forks sandbox, brokers `host.*`. At discovery it merges each workspace manifest with its bundled source so installed connectors pick up additive manifest updates (new auth fields, extra `permissions.host` entries, etc.) without requiring re-install. |
 | `ai.ts` | LLM providers (streaming, tools, retries) | Core agent |
 | `files.ts` | Workspace read/write/search | Core file tools |
 | `memory.ts` | `.smile/memories` persistence | Core memory tools |

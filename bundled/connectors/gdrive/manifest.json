@@ -1,0 +1,153 @@
+{
+  "apiVersion": "1.0",
+  "id": "gdrive",
+  "name": "Google Drive",
+  "version": "1.0.0",
+  "description": "Google Drive via Google OAuth. List, search, download, and upload files scoped to context folders.",
+  "handlerKind": "code",
+  "integrationType": "rest",
+  "auth": {
+    "type": "oauth",
+    "fields": [
+      { "key": "clientId", "label": "Google OAuth client ID", "secret": true },
+      { "key": "clientSecret", "label": "Google OAuth client secret", "secret": true }
+    ]
+  },
+  "permissions": {
+    "host": ["google.api"]
+  },
+  "ui": {
+    "catalogLabel": "Google Drive",
+    "connectedLabel": "Google connected",
+    "scopeLabel": "Folders"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Files"
+  },
+  "contextSchema": {
+    "type": "object",
+    "properties": {
+      "folderIds": {
+        "type": "array",
+        "title": "Folders",
+        "description": "Google Drive folder IDs scoped to this context (comma-separated). The connector enforces this list on list, search, and upload tools."
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "gdrive_list_files",
+      "description": "List files inside a folder. When a context scope is set, defaults to the scoped folders.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "folderId": { "type": "string", "description": "Optional folder ID. Required when no scope is set or when multiple folders are scoped." },
+          "pageSize": { "type": "integer", "description": "Maximum results (default 20, max 100)." }
+        }
+      }
+    },
+    {
+      "name": "gdrive_search_files",
+      "description": "Search Google Drive files by name. Results are limited to scoped folders when a scope is set.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "File name or substring to search for." },
+          "pageSize": { "type": "integer", "description": "Maximum results (default 20, max 100)." }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "gdrive_get_file",
+      "description": "Get metadata for a file by ID.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fileId": { "type": "string" }
+        },
+        "required": ["fileId"]
+      }
+    },
+    {
+      "name": "gdrive_download_text",
+      "description": "Download a file's content as text. Works for plain text, Google Docs exported as text, and CSV sheets exported as CSV.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fileId": { "type": "string" },
+          "mimeType": { "type": "string", "description": "Optional export MIME type for Google Workspace files (e.g. text/plain, text/csv)." }
+        },
+        "required": ["fileId"]
+      }
+    },
+    {
+      "name": "gdrive_create_folder",
+      "description": "Create a new folder. The parent must be in the context scope when a scope is set.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "parentId": { "type": "string", "description": "Optional parent folder ID. Defaults to scoped folder if exactly one is set." }
+        },
+        "required": ["name"]
+      },
+      "confirmation": {
+        "title": "Create Drive folder",
+        "summary": "Create folder '{{name}}'"
+      },
+      "preview": "Create folder: {{name}}"
+    },
+    {
+      "name": "gdrive_upload_file",
+      "description": "Upload a simple text file. The destination folder must be in the context scope.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "content": { "type": "string", "description": "File content as plain text." },
+          "mimeType": { "type": "string", "description": "MIME type (default text/plain)." },
+          "folderId": { "type": "string", "description": "Destination folder ID. Defaults to scoped folder if exactly one is set." }
+        },
+        "required": ["name", "content"]
+      },
+      "confirmation": {
+        "title": "Upload Drive file",
+        "summary": "Upload '{{name}}'"
+      },
+      "preview": "Upload: {{name}}"
+    },
+    {
+      "name": "gdrive_move_file",
+      "description": "Move a file into a folder. The destination folder must be in the context scope.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fileId": { "type": "string" },
+          "folderId": { "type": "string", "description": "Destination folder ID. Defaults to scoped folder if exactly one is set." }
+        },
+        "required": ["fileId"]
+      },
+      "confirmation": {
+        "title": "Move Drive file",
+        "summary": "Move file {{fileId}}"
+      },
+      "preview": "Move file: {{fileId}}"
+    }
+  ]
+}

@@ -70,7 +70,6 @@ export class FileService {
   async ensureWorkspaceFolders(): Promise<void> {
     console.log('[FileService] Ensuring workspace folders for:', this.workspacePath)
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'contexts'), { recursive: true })
-    await fs.mkdir(path.join(this.workspacePath, '.smile', 'reports'), { recursive: true })
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'connectors'), { recursive: true })
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'memories'), { recursive: true })
     console.log('[FileService] Workspace folders ensured')
@@ -412,45 +411,40 @@ export class FileService {
       const regex = new RegExp(`^${regexPattern}$`, 'i')
       
       const searchDir = async (dirPath: string) => {
-        try {
-          const fullPath = this.validatePath(dirPath)
-          const entries = await fs.readdir(fullPath, { withFileTypes: true })
-          
-          for (const entry of entries) {
-            // Skip hidden files/folders but allow the framework workspace folder.
-            if (entry.name.startsWith('.') && entry.name !== '.smile') continue
-            
-            const entryRelPath = path.join(dirPath, entry.name)
-            const entryFullPath = path.join(fullPath, entry.name)
-            
-            if (regex.test(entry.name) && !entry.isDirectory()) {
-              const stats = await fs.stat(entryFullPath)
-              results.push({
-                name: entry.name,
-                path: entryRelPath,
-                isDirectory: entry.isDirectory(),
-                size: stats.size,
-                modified: stats.mtime.toISOString(),
-                mimeType: getMimeType(entry.name) || undefined
-              })
-            }
-            
-            // Always search subdirectories (recursive search)
-            if (entry.isDirectory() && results.length < 500) {
-              await searchDir(entryRelPath)
-            }
+        const fullPath = this.validatePath(dirPath)
+        const entries = await fs.readdir(fullPath, { withFileTypes: true })
+
+        for (const entry of entries) {
+          // Skip hidden files/folders but allow the framework workspace folder.
+          if (entry.name.startsWith('.') && entry.name !== '.smile') continue
+
+          const entryRelPath = path.join(dirPath, entry.name)
+          const entryFullPath = path.join(fullPath, entry.name)
+
+          if (regex.test(entry.name) && !entry.isDirectory()) {
+            const stats = await fs.stat(entryFullPath)
+            results.push({
+              name: entry.name,
+              path: entryRelPath,
+              isDirectory: entry.isDirectory(),
+              size: stats.size,
+              modified: stats.mtime.toISOString(),
+              mimeType: getMimeType(entry.name) || undefined
+            })
           }
-        } catch (err) {
-          // Skip directories we can't read
-          console.warn(`[FileService] Skipping unreadable directory: ${dirPath}`)
+
+          // Always search subdirectories (recursive search)
+          if (entry.isDirectory() && results.length < 500) {
+            await searchDir(entryRelPath)
+          }
         }
       }
-      
+
       await searchDir(relativePath)
-      
+
       // Sort by modification date (newest first)
       results.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
-      
+
       return { success: true, data: results }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to search files'

@@ -271,6 +271,15 @@ async function executeTool(name, args, host) {
       if (!issueIdOrKey) return { success: false, error: 'Issue key is required.' }
       const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
       if (issueScopeError) return { success: false, error: issueScopeError }
+      // Epic Link is a site-specific custom field and the Atlassian MCP edit screen
+      // does not expose it. Setting it here would silently fail.
+      const lowerRest = Object.keys(args).map(k => k.toLowerCase())
+      if (lowerRest.includes('epiclink') || lowerRest.includes('epic_link') || lowerRest.includes('parent')) {
+        return {
+          success: false,
+          error: 'Epic Link cannot be updated through jira_update_issue. Set it manually in Jira.',
+        }
+      }
       const { issueKey: _ik, issueIdOrKey: _iok, ...rest } = args
       return shapeToolResult(name, await mcp(host, 'editJiraIssue', { issueIdOrKey, ...rest }))
     }

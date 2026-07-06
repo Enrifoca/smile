@@ -142,6 +142,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Linear OAuth connection
+  linear: {
+    connect: (options?: { forceReauth?: boolean }) => ipcRenderer.invoke('linear:connect', options),
+    disconnect: () => ipcRenderer.invoke('linear:disconnect'),
+    status: () => ipcRenderer.invoke('linear:status'),
+    getConnectionState: () => ipcRenderer.invoke('linear:getConnectionState'),
+    getRedirectUri: () => ipcRenderer.invoke('linear:getRedirectUri'),
+    onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => {
+      ipcRenderer.on('linear:connectionState', (_, data) => callback(data))
+      return () => ipcRenderer.removeAllListeners('linear:connectionState')
+    },
+  },
+
+  // Google OAuth connection
+  google: {
+    connect: (options?: { forceReauth?: boolean }) => ipcRenderer.invoke('google:connect', options),
+    disconnect: () => ipcRenderer.invoke('google:disconnect'),
+    status: () => ipcRenderer.invoke('google:status'),
+    getConnectionState: () => ipcRenderer.invoke('google:getConnectionState'),
+    getRedirectUri: () => ipcRenderer.invoke('google:getRedirectUri'),
+    onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => {
+      ipcRenderer.on('google:connectionState', (_, data) => callback(data))
+      return () => ipcRenderer.removeAllListeners('google:connectionState')
+    },
+  },
+
   // Shell
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
@@ -318,6 +344,20 @@ export interface ElectronAPI {
     }>
   }
   mcp: {
+    connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
+    disconnect: () => Promise<{ success: boolean }>
+    status: () => Promise<{ connected: boolean }>
+    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
+    onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
+  }
+  linear: {
+    connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
+    disconnect: () => Promise<{ success: boolean }>
+    status: () => Promise<{ connected: boolean }>
+    getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
+    onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
+  }
+  google: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
     disconnect: () => Promise<{ success: boolean }>
     status: () => Promise<{ connected: boolean }>

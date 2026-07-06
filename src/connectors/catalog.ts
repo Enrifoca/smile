@@ -2,7 +2,11 @@ import type { ComponentType } from 'react'
 
 import { createWorkspaceIconComponent } from '../components/connectors/GenericConnectorIcon'
 import { BraveIcon } from '../components/connectors/BraveIcon'
+import { GmailIcon } from '../components/connectors/GmailIcon'
+import { GcalIcon } from '../components/connectors/GcalIcon'
+import { GdriveIcon } from '../components/connectors/GdriveIcon'
 import { JiraIcon } from '../components/connectors/JiraIcon'
+import { LinearIcon } from '../components/connectors/LinearIcon'
 import type { ConnectorIntegrationType, ConnectorManifest } from './contract'
 
 /**
@@ -56,6 +60,42 @@ const BUNDLED_CATALOG: Array<Omit<CatalogEntry, 'Icon'>> = [
     tagline: 'Issues & projects',
     CatalogGraphic: JiraIcon,
   },
+  {
+    id: 'linear',
+    name: 'Linear',
+    description: 'Linear issue tracking via GraphQL. API key for reads/writes; team-scoped contexts.',
+    origin: 'bundled',
+    integrationType: 'graphql',
+    tagline: 'Issues & teams',
+    CatalogGraphic: LinearIcon,
+  },
+  {
+    id: 'gmail',
+    name: 'Gmail',
+    description: 'Gmail via Google OAuth. Read, send, and label messages scoped to context labels.',
+    origin: 'bundled',
+    integrationType: 'rest',
+    tagline: 'Email',
+    CatalogGraphic: GmailIcon,
+  },
+  {
+    id: 'gcal',
+    name: 'Google Calendar',
+    description: 'Google Calendar via Google OAuth. Read and manage events scoped to context calendars.',
+    origin: 'bundled',
+    integrationType: 'rest',
+    tagline: 'Calendar',
+    CatalogGraphic: GcalIcon,
+  },
+  {
+    id: 'gdrive',
+    name: 'Google Drive',
+    description: 'Google Drive via Google OAuth. List, search, download, and upload files scoped to context folders.',
+    origin: 'bundled',
+    integrationType: 'rest',
+    tagline: 'Files',
+    CatalogGraphic: GdriveIcon,
+  },
 ]
 
 export function inferIntegrationType(manifest: ConnectorManifest): ConnectorIntegrationType | undefined {
@@ -108,6 +148,31 @@ export function mergeCatalogEntries(
   return Array.from(byId.values())
 }
 
+export function getOAuthServiceId(manifest: ConnectorManifest): string | null {
+  const host = manifest.permissions?.host?.find(h => h.endsWith('.api'))
+  return host ? host.split('.')[0] : null
+}
+
+export async function isOAuthClientConfigured(
+  manifest: ConnectorManifest,
+  getSecure: (key: string) => Promise<string | null>,
+): Promise<boolean> {
+  const serviceId = getOAuthServiceId(manifest)
+  if (!serviceId) return false
+  const raw = await getSecure(`connector:${serviceId}:client`)
+  if (!raw?.trim()) return false
+  try {
+    const client = JSON.parse(raw) as Record<string, string>
+    const fields = manifest.auth?.fields ?? []
+    return fields.every(field => {
+      if (field.optional) return true
+      return !!client[field.key]?.trim()
+    })
+  } catch {
+    return false
+  }
+}
+
 export async function isWorkspaceConnectorConfigured(
   manifest: ConnectorManifest,
   getSecure: (key: string) => Promise<string | null>,
@@ -116,6 +181,11 @@ export async function isWorkspaceConnectorConfigured(
   const secretFields = (manifest.auth?.fields ?? []).filter(field => field.secret !== false)
   const needsMcp = (manifest.permissions?.mcp?.length ?? 0) > 0
   const optionalSecrets = manifest.auth?.type === 'oauth-with-rest-token'
+  const isOAuth = manifest.auth?.type === 'oauth'
+
+  if (isOAuth) {
+    return isOAuthClientConfigured(manifest, getSecure)
+  }
 
   if (secretFields.length > 0 && !optionalSecrets) {
     for (const field of secretFields) {

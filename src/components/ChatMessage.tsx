@@ -200,7 +200,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
     return null
   }
 
-  // System notices (e.g. user refused a write tool call). Rendered as a
+  // System notices (e.g. user approved/refused a write tool call). Rendered as a
   // centered, muted line so they don't look like assistant prose.
   if (message.role === 'system') {
     return (

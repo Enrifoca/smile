@@ -7,9 +7,13 @@ import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
 
-import { buildReportPath, buildReportToolResult, getActiveReportFromMessages, titleFromReportPath } from '../agent/artifacts'
+import { buildReportPath, buildReportToolResult, getActiveReportFromMessages, titleFromReportPath, type MarkdownArtifact } from '../agent/artifacts'
+import {
+  getContextFilesPath,
+  getContextFolderPath,
+  type ProjectContext,
+} from '../context/types'
 import { loadEnabledConnectors, ConnectorScope } from '../connectors/registry'
-import type { ProjectContext } from '../context/types'
 import type { ContextPromptBody } from '../context/promptInjection'
 import ChatMessage from './ChatMessage'
 import { Button } from './ui/Button'
@@ -601,19 +605,47 @@ export default function ChatView({
   const clearStreamingFlags = (msgs: Message[]): Message[] =>
     msgs.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
 
-  const restoreToolEntries = (msgs: Message[]): Message[] =>
-    msgs.map(m => {
-      if (m.type === 'tool_summary' && !m.toolEntries) {
-        const metadata = (m as Message & { metadata?: { toolEntries?: ToolEntry[] } | null }).metadata
-        if (metadata?.toolEntries) {
-          return { ...m, toolEntries: metadata.toolEntries }
+  const extractArtifactFromToolResult = (content: string): MarkdownArtifact | null => {
+    const pathMatch = content.match(/Report saved:\s*(.+)/i)
+    const titleMatch = content.match(/Title:\s*(.+)/i)
+    if (!pathMatch?.[1] || !titleMatch?.[1]) return null
+    return {
+      path: pathMatch[1].trim(),
+      title: titleMatch[1].trim(),
+    }
+  }
+
+  const restoreMetadata = (msgs: Message[]): Message[] =>
+    msgs.map((m, index) => {
+      const metadata = (m as Message & {
+        metadata?: {
+          toolEntries?: ToolEntry[]
+          artifact?: MarkdownArtifact
+        } | null
+      }).metadata
+      if (m.type === 'tool_summary' && !m.toolEntries && metadata?.toolEntries) {
+        return { ...m, toolEntries: metadata.toolEntries }
+      }
+      if (m.type === 'artifact' && !m.artifact) {
+        if (metadata?.artifact) {
+          return { ...m, artifact: metadata.artifact }
+        }
+        // Backfill older chats whose artifact payload was not persisted by
+        // parsing the report details from the preceding tool_result message.
+        for (let i = index - 1; i >= 0; i--) {
+          const candidate = msgs[i]
+          if (candidate.type !== 'tool_result') continue
+          const artifact = extractArtifactFromToolResult(candidate.content)
+          if (artifact) {
+            return { ...m, artifact }
+          }
         }
       }
       return m
     })
 
   const normalizeLoadedMessages = (msgs: Message[]): Message[] =>
-    restoreToolEntries(clearStreamingFlags(msgs))
+    restoreMetadata(clearStreamingFlags(msgs))
 
   const applyCachedChat = (id: string, loadAgentHistory: boolean): boolean => {
     const cached = chatHistoryRef.current.find(c => c.id === id)
@@ -691,7 +723,11 @@ export default function ChatView({
             content: message.content,
             timestamp: message.timestamp,
             type: message.type,
-            metadata: message.toolEntries ? { toolEntries: message.toolEntries } : undefined,
+            metadata: message.toolEntries
+              ? { toolEntries: message.toolEntries }
+              : message.type === 'artifact' && message.artifact
+                ? { artifact: message.artifact }
+                : undefined,
           }),
         )
       }
@@ -929,17 +965,64 @@ export default function ChatView({
     onPendingAction: handlePendingAction,
   }
 
+  const isScopedPath = (inputPath: string): boolean => {
+    const normalized = inputPath.replace(/\\/g, '/')
+    return normalized.startsWith('.smile/') || normalized.includes('/')
+  }
+
+  const resolveWritePath = (inputPath: string, context: ProjectContext | null): string => {
+    const trimmed = inputPath.trim()
+    if (!trimmed) return ''
+    if (context && !isScopedPath(trimmed)) {
+      return `${getContextFilesPath(context)}/${trimmed}`
+    }
+    return trimmed
+  }
+
+  const resolveReadPath = async (
+    inputPath: string,
+    context: ProjectContext | null,
+  ): Promise<{ success: boolean; data?: string; error?: string }> => {
+    const trimmed = inputPath.trim()
+    if (!trimmed) return { success: false, error: 'No path provided' }
+
+    const direct = await file.read(trimmed)
+    if (direct.success) return direct
+    if (!context) return direct
+
+    // Fallback: look inside the active context folder.
+    const contextPath = `${getContextFolderPath(context)}/${trimmed}`
+    return await file.read(contextPath)
+  }
+
   const executeFileTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
       switch (name) {
-        case 'file_list':   return await file.list(args.path as string)
-        case 'file_read':   return await file.read(args.path as string)
-        case 'file_read_ocr': return await file.readOcr(args.path as string)
-        case 'file_write':  return await file.write(args.path as string, args.content as string)
+        case 'file_list': {
+          const inputPath = (args.path as string) || ''
+          if (!inputPath && activeContext) {
+            return await file.list(getContextFilesPath(activeContext))
+          }
+          return await file.list(inputPath)
+        }
+        case 'file_read': {
+          const inputPath = args.path as string
+          return await resolveReadPath(inputPath, activeContext)
+        }
+        case 'file_read_ocr': {
+          const inputPath = args.path as string
+          const direct = await file.readOcr(inputPath)
+          if (direct.success || !activeContext) return direct
+          return await file.readOcr(`${getContextFilesPath(activeContext)}/${inputPath}`)
+        }
+        case 'file_write': {
+          const writePath = resolveWritePath(args.path as string, activeContext)
+          return await file.write(writePath, args.content as string)
+        }
         case 'report_write': {
           const title = String(args.title || 'Report')
           const content = String(args.content || '')
-          const path = buildReportPath(title, args.path as string | undefined)
+          const path = buildReportPath(title, args.path as string | undefined, activeContext)
           const writeResult = await file.write(path, content)
           if (!writeResult.success) return writeResult
           return {
@@ -949,8 +1032,21 @@ export default function ChatView({
             data: buildReportToolResult(path, title),
           }
         }
-        case 'file_mkdir':  return await file.mkdir(args.path as string)
-        case 'file_search': return await file.search(args.pattern as string, args.directory as string | undefined)
+        case 'file_mkdir': {
+          const mkdirPath = resolveWritePath(args.path as string, activeContext)
+          return await file.mkdir(mkdirPath)
+        }
+        case 'file_search': {
+          const pattern = args.pattern as string
+          const directory = args.directory as string | undefined
+          if (!directory && activeContext) {
+            const contextResult = await file.search(pattern, getContextFolderPath(activeContext))
+            if (contextResult.success && Array.isArray(contextResult.data) && contextResult.data.length > 0) {
+              return contextResult
+            }
+          }
+          return await file.search(pattern, directory)
+        }
         case 'file_search_content':
           return await file.searchContent(
             args.query as string,

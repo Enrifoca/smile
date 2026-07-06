@@ -1,0 +1,144 @@
+{
+  "apiVersion": "1.0",
+  "id": "gcal",
+  "name": "Google Calendar",
+  "version": "1.0.0",
+  "description": "Google Calendar via Google OAuth. Read and manage events scoped to context calendars.",
+  "handlerKind": "code",
+  "integrationType": "rest",
+  "auth": {
+    "type": "oauth",
+    "fields": [
+      { "key": "clientId", "label": "Google OAuth client ID", "secret": true },
+      { "key": "clientSecret", "label": "Google OAuth client secret", "secret": true }
+    ]
+  },
+  "permissions": {
+    "host": ["google.api"]
+  },
+  "ui": {
+    "catalogLabel": "Google Calendar",
+    "connectedLabel": "Google connected",
+    "scopeLabel": "Calendars"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Calendar"
+  },
+  "contextSchema": {
+    "type": "object",
+    "properties": {
+      "calendarIds": {
+        "type": "array",
+        "title": "Calendars",
+        "description": "Google Calendar IDs scoped to this context (comma-separated). Use 'primary' for the main calendar. The connector enforces this list on read and write tools."
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "gcal_list_calendars",
+      "description": "List all Google calendars visible to the connected account.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "gcal_list_events",
+      "description": "List upcoming events. When a context scope is set, results are limited to the scoped calendars.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calendarId": { "type": "string", "description": "Optional calendar ID. Required when no scope is set or when multiple calendars are scoped." },
+          "timeMin": { "type": "string", "description": "ISO 8601 start time (default now)." },
+          "timeMax": { "type": "string", "description": "Optional ISO 8601 end time." },
+          "maxResults": { "type": "integer", "description": "Maximum results per calendar (default 20, max 100)." },
+          "query": { "type": "string", "description": "Optional free-text search query." }
+        }
+      }
+    },
+    {
+      "name": "gcal_get_event",
+      "description": "Get one event by calendar ID and event ID.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calendarId": { "type": "string", "description": "Calendar ID. Defaults to scoped calendar if exactly one is set." },
+          "eventId": { "type": "string", "description": "Event ID." }
+        },
+        "required": ["eventId"]
+      }
+    },
+    {
+      "name": "gcal_create_event",
+      "description": "Create a new calendar event.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calendarId": { "type": "string", "description": "Calendar ID. Defaults to scoped calendar if exactly one is set." },
+          "summary": { "type": "string" },
+          "description": { "type": "string" },
+          "location": { "type": "string" },
+          "start": { "type": "string", "description": "ISO 8601 start time." },
+          "end": { "type": "string", "description": "ISO 8601 end time." },
+          "attendees": { "type": "string", "description": "Comma-separated email addresses." }
+        },
+        "required": ["summary", "start", "end"]
+      },
+      "confirmation": {
+        "title": "Create calendar event",
+        "summary": "Create '{{summary}}'"
+      },
+      "preview": "Create event: {{summary}}"
+    },
+    {
+      "name": "gcal_update_event",
+      "description": "Update an existing calendar event. Only provided fields are changed.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calendarId": { "type": "string", "description": "Calendar ID. Defaults to scoped calendar if exactly one is set." },
+          "eventId": { "type": "string" },
+          "summary": { "type": "string" },
+          "description": { "type": "string" },
+          "location": { "type": "string" },
+          "start": { "type": "string", "description": "ISO 8601 start time." },
+          "end": { "type": "string", "description": "ISO 8601 end time." }
+        },
+        "required": ["eventId"]
+      },
+      "confirmation": {
+        "title": "Update calendar event",
+        "summary": "Update {{eventId}}"
+      },
+      "preview": "Update event: {{eventId}}"
+    },
+    {
+      "name": "gcal_delete_event",
+      "description": "Delete a calendar event.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calendarId": { "type": "string", "description": "Calendar ID. Defaults to scoped calendar if exactly one is set." },
+          "eventId": { "type": "string" }
+        },
+        "required": ["eventId"]
+      },
+      "confirmation": {
+        "title": "Delete calendar event",
+        "summary": "Delete event {{eventId}}"
+      },
+      "preview": "Delete event: {{eventId}}"
+    }
+  ]
+}
