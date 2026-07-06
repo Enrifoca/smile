@@ -116,7 +116,7 @@
     },
     {
       "name": "linear_create_issues",
-      "description": "Create multiple Linear issues in one batch. Use this when migrating or importing many tasks at once.",
+      "description": "Create multiple Linear issues in one batch with a single confirmation. Use this instead of linear_create_issue whenever you need to create more than one issue.",
       "category": "connector-write",
       "requiresConfirmation": true,
       "inputSchema": {
