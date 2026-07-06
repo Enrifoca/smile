@@ -115,6 +115,40 @@
       "preview": "Create: {{title}}"
     },
     {
+      "name": "linear_create_issues",
+      "description": "Create multiple Linear issues in one batch. Use this when migrating or importing many tasks at once.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issues": {
+            "type": "array",
+            "description": "Issues to create",
+            "items": {
+              "type": "object",
+              "properties": {
+                "teamKey": { "type": "string", "description": "Team key (e.g. ENG)" },
+                "title": { "type": "string" },
+                "description": { "type": "string" },
+                "state": { "type": "string", "description": "Workflow state name" },
+                "priority": { "type": "integer", "description": "Priority 0-4 (0 = no priority, 1 = urgent, 4 = low)" },
+                "project": { "type": "string", "description": "Project name" },
+                "assignee": { "type": "string", "description": "User email or name" }
+              },
+              "required": ["teamKey", "title"]
+            }
+          }
+        },
+        "required": ["issues"]
+      },
+      "confirmation": {
+        "title": "Create Linear issues",
+        "summary": "Create multiple Linear issues"
+      },
+      "preview": "Create multiple Linear issues"
+    },
+    {
       "name": "linear_update_issue",
       "description": "Update fields on an existing Linear issue.",
       "category": "connector-write",
