@@ -6,6 +6,7 @@
 - Use `jira_batch_create_issues` for 2+ issue creations; use `jira_create_issue` only for exactly one issue.
 - Use `jira_batch_update_issues` for 2+ issue updates; use `jira_update_issue` only for exactly one issue.
 - `jira_update_issue` and `jira_batch_update_issues` support summary, description, priority, assignee, labels, components, fixVersions, versions and custom fields understood by Jira.
+- If an update fails, do not retry the same issue in a loop. Report the error and ask the user how to proceed.
 - Write tools are approved by the UI. Call the write tool directly when arguments are ready.
 - For priority, pass a plain name string (e.g. `"Low"`). The connector converts it to Jira's object format.
 - For assignee, pass the account ID, email, or display name.

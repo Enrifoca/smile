@@ -898,7 +898,13 @@ export class Agent {
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
-      ...relevantHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      // Render system notices (approval/refusal feedback, etc.) as user messages
+      // to the model so they are not dropped by providers that only honor a
+      // single system message or ignore interleaved system roles.
+      ...relevantHistory.map(m => ({
+        role: m.role === 'system' ? 'user' : (m.role as 'user' | 'assistant'),
+        content: m.content,
+      })),
     ]
 
     this.emitContextSnapshot({
