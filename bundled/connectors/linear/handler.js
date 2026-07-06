@@ -219,6 +219,45 @@ async function buildIssueCreateInput(host, issue, allowedKeys) {
   return { success: true, data: { teamId, input } }
 }
 
+async function buildIssueUpdateInput(host, update, allowedKeys) {
+  const identifier = str(update.identifier || update.issueIdOrKey)
+  if (!identifier) return { success: false, error: 'Issue identifier is required for each update.' }
+  const scopeError = validateIssueScope(identifier, allowedKeys)
+  if (scopeError) return { success: false, error: scopeError }
+
+  const issueResult = await fetchIssueByIdentifier(host, identifier)
+  if (!issueResult.success) return issueResult
+  const issueId = issueResult.data.issue?.id
+  if (!issueId) return { success: false, error: `Issue ${identifier} not found.` }
+
+  const input = {}
+  if (update.title !== undefined) input.title = str(update.title)
+  if (update.description !== undefined) input.description = str(update.description)
+
+  const priority = normalizePriority(update.priority)
+  if (priority !== undefined) input.priority = priority
+
+  if (update.state) {
+    const teamId = issueResult.data.issue?.team?.id
+    if (!teamId) return { success: false, error: 'Cannot resolve workflow state without team.' }
+    const stateResult = await resolveStateId(host, teamId, update.state)
+    if (!stateResult.success) return stateResult
+    input.stateId = stateResult.data
+  }
+
+  if (update.assignee !== undefined) {
+    const userResult = await resolveUserId(host, update.assignee)
+    if (!userResult.success) return userResult
+    input.assigneeId = userResult.data
+  }
+
+  if (Object.keys(input).length === 0) {
+    return { success: false, error: `No fields provided to update for ${identifier}.` }
+  }
+
+  return { success: true, data: { issueId, input } }
+}
+
 async function fetchIssueByIdentifier(host, identifier) {
   const isIdLookup = isUuid(identifier)
   const result = await linearGraphql(host, `
@@ -555,41 +594,8 @@ async function executeTool(name, args, host) {
     }
 
     case 'linear_update_issue': {
-      const identifier = str(args.identifier || args.issueIdOrKey)
-      if (!identifier) return { success: false, error: 'Issue identifier is required.' }
-      const scopeError = validateIssueScope(identifier, allowedKeys)
-      if (scopeError) return { success: false, error: scopeError }
-
-      const issueResult = await fetchIssueByIdentifier(host, identifier)
-      if (!issueResult.success) return issueResult
-      const issueId = issueResult.data.issue?.id
-      if (!issueId) return { success: false, error: `Issue ${identifier} not found.` }
-
-      const input = {}
-      if (args.title !== undefined) input.title = str(args.title)
-      if (args.description !== undefined) input.description = str(args.description)
-
-      const priority = normalizePriority(args.priority)
-      if (priority !== undefined) input.priority = priority
-
-      if (args.state) {
-        const teamId = issueResult.data.issue?.team?.id
-        if (!teamId) return { success: false, error: 'Cannot resolve workflow state without team.' }
-        const stateResult = await resolveStateId(host, teamId, args.state)
-        if (!stateResult.success) return stateResult
-        input.stateId = stateResult.data
-      }
-
-      if (args.assignee !== undefined) {
-        const userResult = await resolveUserId(host, args.assignee)
-        if (!userResult.success) return userResult
-        input.assigneeId = userResult.data
-      }
-
-      if (Object.keys(input).length === 0) {
-        return { success: false, error: 'No fields provided to update.' }
-      }
-
+      const built = await buildIssueUpdateInput(host, args, allowedKeys)
+      if (!built.success) return built
       return shapeToolResult(name, await linearGraphql(host, `
         mutation($id: ID!, $input: IssueUpdateInput!) {
           issueUpdate(id: $id, input: $input) {
@@ -601,7 +607,58 @@ async function executeTool(name, args, host) {
             }
           }
         }
-      `, { id: issueId, input }))
+      `, { id: built.data.issueId, input: built.data.input }))
+    }
+
+    case 'linear_update_issues': {
+      const updates = args.updates
+      if (!Array.isArray(updates) || updates.length === 0) {
+        return { success: false, error: 'An array of updates is required.' }
+      }
+
+      const built = []
+      for (const update of updates) {
+        const result = await buildIssueUpdateInput(host, update, allowedKeys)
+        if (!result.success) return result
+        built.push(result.data)
+      }
+
+      const varNames = []
+      const mutationFields = []
+      const variables = {}
+      for (let i = 0; i < built.length; i++) {
+        const idVar = `id${i}`
+        const inputVar = `input${i}`
+        varNames.push(`$${idVar}: ID!, $${inputVar}: IssueUpdateInput!`)
+        mutationFields.push(`update${i}: issueUpdate(id: $${idVar}, input: $${inputVar}) { success issue { id identifier title } }`)
+        variables[idVar] = built[i].issueId
+        variables[inputVar] = built[i].input
+      }
+
+      const query = `mutation(${varNames.join(', ')}) { ${mutationFields.join(' ')} }`
+      const result = await linearGraphql(host, query, variables)
+      if (!result.success) return shapeToolResult(name, result)
+
+      const updated = []
+      const failed = []
+      for (let i = 0; i < built.length; i++) {
+        const entry = result.data[`update${i}`]
+        if (entry?.success && entry.issue) {
+          updated.push(entry.issue)
+        } else {
+          failed.push({ index: i, identifier: entry?.issue?.identifier || built[i].input.title || `item ${i + 1}` })
+        }
+      }
+
+      const lines = []
+      if (updated.length) lines.push(`Updated ${updated.length} issue(s):`)
+      for (const issue of updated) {
+        lines.push(`- ${issue.identifier}: ${issue.title}`)
+      }
+      if (failed.length) {
+        lines.push(`Failed to update ${failed.length} issue(s).`)
+      }
+      return { success: true, data: lines.join('\n') }
     }
 
     case 'linear_add_comment': {

@@ -172,6 +172,39 @@
       "preview": "Update: {{identifier}}"
     },
     {
+      "name": "linear_update_issues",
+      "description": "Update multiple Linear issues in one batch with a single confirmation. Use this instead of linear_update_issue whenever you need to update more than one issue.",
+      "category": "connector-write",
+      "requiresConfirmation": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "updates": {
+            "type": "array",
+            "description": "Issues to update",
+            "items": {
+              "type": "object",
+              "properties": {
+                "identifier": { "type": "string", "description": "Issue identifier (e.g. ENG-123) or issue ID" },
+                "title": { "type": "string" },
+                "description": { "type": "string" },
+                "state": { "type": "string", "description": "Workflow state name" },
+                "priority": { "type": "integer", "description": "Priority 0-4" },
+                "assignee": { "type": "string", "description": "User email or name, or empty string to unassign" }
+              },
+              "required": ["identifier"]
+            }
+          }
+        },
+        "required": ["updates"]
+      },
+      "confirmation": {
+        "title": "Update Linear issues",
+        "summary": "Update multiple Linear issues"
+      },
+      "preview": "Update multiple Linear issues"
+    },
+    {
       "name": "linear_add_comment",
       "description": "Add a comment to a Linear issue.",
       "category": "connector-write",
