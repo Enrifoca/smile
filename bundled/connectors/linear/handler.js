@@ -179,6 +179,46 @@ async function resolveUserId(host, userNameOrEmail) {
   return { success: true, data: users[0].id }
 }
 
+async function buildIssueCreateInput(host, issue, allowedKeys) {
+  let teamKey = str(issue.teamKey)
+  if (!teamKey && allowedKeys?.length === 1) teamKey = allowedKeys[0]
+  const title = str(issue.title)
+  if (!teamKey || !title) return { success: false, error: 'Team key and title are required for each issue.' }
+  const scopeError = validateIssueScope(`${teamKey}-1`, allowedKeys)
+  if (scopeError) return { success: false, error: scopeError }
+
+  const teamIdResult = await resolveTeamIdByKey(host, teamKey)
+  if (!teamIdResult.success) return teamIdResult
+  const teamId = teamIdResult.data
+
+  const input = { teamId, title }
+  const description = str(issue.description)
+  if (description) input.description = description
+
+  const priority = normalizePriority(issue.priority)
+  if (priority !== undefined) input.priority = priority
+
+  if (issue.state) {
+    const stateResult = await resolveStateId(host, teamId, issue.state)
+    if (!stateResult.success) return stateResult
+    input.stateId = stateResult.data
+  }
+
+  if (issue.project) {
+    const projectResult = await resolveProjectId(host, issue.project)
+    if (!projectResult.success) return projectResult
+    input.projectId = projectResult.data
+  }
+
+  if (issue.assignee) {
+    const userResult = await resolveUserId(host, issue.assignee)
+    if (!userResult.success) return userResult
+    input.assigneeId = userResult.data
+  }
+
+  return { success: true, data: { teamId, input } }
+}
+
 async function fetchIssueByIdentifier(host, identifier) {
   const isIdLookup = isUuid(identifier)
   const result = await linearGraphql(host, `
@@ -446,41 +486,8 @@ async function executeTool(name, args, host) {
     }
 
     case 'linear_create_issue': {
-      const teamKey = str(args.teamKey)
-      const title = str(args.title)
-      if (!teamKey || !title) return { success: false, error: 'Team key and title are required.' }
-      const scopeError = validateIssueScope(`${teamKey}-1`, allowedKeys)
-      if (scopeError) return { success: false, error: scopeError }
-
-      const teamIdResult = await resolveTeamIdByKey(host, teamKey)
-      if (!teamIdResult.success) return teamIdResult
-      const teamId = teamIdResult.data
-
-      const input = { teamId, title }
-      const description = str(args.description)
-      if (description) input.description = description
-
-      const priority = normalizePriority(args.priority)
-      if (priority !== undefined) input.priority = priority
-
-      if (args.state) {
-        const stateResult = await resolveStateId(host, teamId, args.state)
-        if (!stateResult.success) return stateResult
-        input.stateId = stateResult.data
-      }
-
-      if (args.project) {
-        const projectResult = await resolveProjectId(host, args.project)
-        if (!projectResult.success) return projectResult
-        input.projectId = projectResult.data
-      }
-
-      if (args.assignee) {
-        const userResult = await resolveUserId(host, args.assignee)
-        if (!userResult.success) return userResult
-        input.assigneeId = userResult.data
-      }
-
+      const built = await buildIssueCreateInput(host, args, allowedKeys)
+      if (!built.success) return built
       return shapeToolResult(name, await linearGraphql(host, `
         mutation($input: IssueCreateInput!) {
           issueCreate(input: $input) {
@@ -492,7 +499,59 @@ async function executeTool(name, args, host) {
             }
           }
         }
-      `, { input }))
+      `, { input: built.data.input }))
+    }
+
+    case 'linear_create_issues': {
+      const issues = args.issues
+      if (!Array.isArray(issues) || issues.length === 0) {
+        return { success: false, error: 'An array of issues is required.' }
+      }
+
+      const built = []
+      for (const issue of issues) {
+        const result = await buildIssueCreateInput(host, issue, allowedKeys)
+        if (!result.success) return result
+        built.push(result.data)
+      }
+
+      const varNames = []
+      const mutationFields = []
+      const variables = {}
+      for (let i = 0; i < built.length; i++) {
+        const varName = `input${i}`
+        varNames.push(`$${varName}: IssueCreateInput!`)
+        mutationFields.push(`issue${i}: issueCreate(input: $${varName}) { success issue { id identifier title } }`)
+        variables[varName] = built[i].input
+      }
+
+      const query = `mutation(${varNames.join(', ')}) { ${mutationFields.join(' ')} }`
+      const result = await linearGraphql(host, query, variables)
+      if (!result.success) return shapeToolResult(name, result)
+
+      const created = []
+      const failed = []
+      for (let i = 0; i < built.length; i++) {
+        const entry = result.data[`issue${i}`]
+        if (entry?.success && entry.issue) {
+          created.push(entry.issue)
+        } else {
+          failed.push({ index: i, title: built[i].input.title })
+        }
+      }
+
+      const lines = []
+      if (created.length) lines.push(`Created ${created.length} issue(s):`)
+      for (const issue of created) {
+        lines.push(`- ${issue.identifier}: ${issue.title}`)
+      }
+      if (failed.length) {
+        lines.push(`Failed to create ${failed.length} issue(s):`)
+        for (const f of failed) {
+          lines.push(`- ${f.title}`)
+        }
+      }
+      return { success: true, data: lines.join('\n') }
     }
 
     case 'linear_update_issue': {
