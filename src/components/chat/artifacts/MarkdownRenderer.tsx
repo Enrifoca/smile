@@ -1,5 +1,7 @@
-import { useMemo, type ReactElement } from 'react'
-import { linkifyUrls } from '../../../shared/linkify'
+import { useMemo } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import type { Components } from 'react-markdown'
 import { joinClasses } from '../../ui/classNames'
 
 export interface MarkdownRendererProps {
@@ -7,153 +9,72 @@ export interface MarkdownRendererProps {
   className?: string
 }
 
-function renderInline(text: string): string {
-  const withLinks = text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="ui-md-code">$1</code>')
-    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" class="ui-md-link" target="_blank" rel="noreferrer">$1</a>')
-  return linkifyUrls(withLinks, 'ui-md-link')
+const CODE_BLOCK_CLASS = /language-(\w+)/
+
+const openExternalLink = (href: string) => {
+  if (!href) return
+  if (href.startsWith('http://') || href.startsWith('https://')) {
+    window.electronAPI?.shell?.openExternal(href).catch((err: Error) => {
+      console.error('Failed to open external URL:', err)
+    })
+  }
 }
 
-function isTableRow(line: string): boolean {
-  return line.trim().startsWith('|') && line.trim().endsWith('|')
-}
-
-function isTableDivider(line: string): boolean {
-  return /^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line.trim())
+const components: Components = {
+  h1: ({ children }) => <h1 className="ui-md-h1">{children}</h1>,
+  h2: ({ children }) => <h2 className="ui-md-h2">{children}</h2>,
+  h3: ({ children }) => <h3 className="ui-md-h3">{children}</h3>,
+  p: ({ children }) => <p className="ui-md-p">{children}</p>,
+  ul: ({ children }) => <ul className="ui-md-list">{children}</ul>,
+  ol: ({ children }) => <ol className="ui-md-list ui-md-list--ordered">{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      className="ui-md-link"
+      onClick={event => {
+        event.preventDefault()
+        openExternalLink(href ?? '')
+      }}
+    >
+      {children}
+    </a>
+  ),
+  code(props) {
+    const { className, children } = props
+    const inline = (props as { inline?: boolean }).inline
+    const language = className?.match(CODE_BLOCK_CLASS)?.[1] ?? ''
+    if (inline) {
+      return <code className="ui-md-code">{children}</code>
+    }
+    return (
+      <pre className="ui-md-pre" data-language={language || undefined}>
+        <code className={joinClasses('ui-md-code', className)}>{children}</code>
+      </pre>
+    )
+  },
+  table: ({ children }) => (
+    <div className="ui-md-table-wrap">
+      <table className="ui-md-table">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead>{children}</thead>,
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => <tr>{children}</tr>,
+  th: ({ children }) => <th>{children}</th>,
+  td: ({ children }) => <td>{children}</td>,
+  blockquote: ({ children }) => <blockquote className="ui-md-blockquote">{children}</blockquote>,
+  hr: () => <hr className="ui-md-hr" />,
 }
 
 export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
-  const blocks = useMemo(() => {
-    const lines = content.replace(/\r\n/g, '\n').split('\n')
-    const elements: ReactElement[] = []
-    let index = 0
+  const normalized = useMemo(() => content.replace(/\r\n/g, '\n'), [content])
 
-    while (index < lines.length) {
-      const line = lines[index]
-
-      if (isTableRow(line) && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
-        const headerCells = line.trim().slice(1, -1).split('|').map(cell => cell.trim())
-        index += 2
-        const bodyRows: string[][] = []
-        while (index < lines.length && isTableRow(lines[index])) {
-          bodyRows.push(lines[index].trim().slice(1, -1).split('|').map(cell => cell.trim()))
-          index += 1
-        }
-        elements.push(
-          <div key={`table-${index}`} className="ui-md-table-wrap">
-            <table className="ui-md-table">
-              <thead>
-                <tr>
-                  {headerCells.map(cell => (
-                    <th key={cell} dangerouslySetInnerHTML={{ __html: renderInline(cell) }} />
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {bodyRows.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} dangerouslySetInnerHTML={{ __html: renderInline(cell) }} />
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>,
-        )
-        continue
-      }
-
-      if (line.startsWith('### ')) {
-        elements.push(
-          <h3 key={`h3-${index}`} className="ui-md-h3" dangerouslySetInnerHTML={{ __html: renderInline(line.slice(4)) }} />,
-        )
-        index += 1
-        continue
-      }
-      if (line.startsWith('## ')) {
-        elements.push(
-          <h2 key={`h2-${index}`} className="ui-md-h2" dangerouslySetInnerHTML={{ __html: renderInline(line.slice(3)) }} />,
-        )
-        index += 1
-        continue
-      }
-      if (line.startsWith('# ')) {
-        elements.push(
-          <h1 key={`h1-${index}`} className="ui-md-h1" dangerouslySetInnerHTML={{ __html: renderInline(line.slice(2)) }} />,
-        )
-        index += 1
-        continue
-      }
-
-      if (line.startsWith('- ') || line.startsWith('• ') || line.startsWith('* ')) {
-        const items: string[] = []
-        while (
-          index < lines.length &&
-          (lines[index].startsWith('- ') || lines[index].startsWith('• ') || lines[index].startsWith('* '))
-        ) {
-          items.push(lines[index].slice(2))
-          index += 1
-        }
-        elements.push(
-          <ul key={`ul-${index}`} className="ui-md-list">
-            {items.map((item, itemIndex) => (
-              <li key={itemIndex} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
-            ))}
-          </ul>,
-        )
-        continue
-      }
-
-      const numberedMatch = line.match(/^(\d+)\.\s+(.*)/)
-      if (numberedMatch) {
-        const items: string[] = []
-        while (index < lines.length) {
-          const numbered = lines[index].match(/^(\d+)\.\s+(.*)/)
-          if (!numbered) break
-          items.push(numbered[2])
-          index += 1
-        }
-        elements.push(
-          <ol key={`ol-${index}`} className="ui-md-list ui-md-list--ordered">
-            {items.map((item, itemIndex) => (
-              <li key={itemIndex} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
-            ))}
-          </ol>,
-        )
-        continue
-      }
-
-      if (!line.trim()) {
-        index += 1
-        continue
-      }
-
-      elements.push(
-        <p key={`p-${index}`} className="ui-md-p" dangerouslySetInnerHTML={{ __html: renderInline(line) }} />,
-      )
-      index += 1
-    }
-
-    return elements
-  }, [content])
-
-  const handleLinkClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement
-    const anchor = target.closest('a') as HTMLAnchorElement | null
-    if (!anchor) return
-    const href = anchor.getAttribute('href')
-    if (!href) return
-    if (href.startsWith('http://') || href.startsWith('https://')) {
-      event.preventDefault()
-      event.stopPropagation()
-      window.electronAPI?.shell?.openExternal(href).catch((err: Error) => {
-        console.error('Failed to open external URL:', err)
-      })
-    }
-  }
-
-  return <div className={joinClasses('ui-md', className)} onClick={handleLinkClick}>{blocks}</div>
+  return (
+    <div className={joinClasses('ui-md', className)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {normalized}
+      </ReactMarkdown>
+    </div>
+  )
 }

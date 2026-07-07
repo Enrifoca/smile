@@ -21,7 +21,7 @@ The tool result tells the model the path — use `file_read` on that path when t
 | `MarkdownArtifactCard` | Inline preview in the transcript; click to open |
 | `MarkdownArtifactModal` | Full-screen reader |
 | `ActiveReportPill` | Composer chip for the latest report — open or dismiss |
-| `MarkdownRenderer` | Shared markdown → HTML (headings, lists, tables) |
+| `MarkdownRenderer` | Shared markdown → HTML via `react-markdown` + `remark-gfm` (headings, lists, tables, code blocks, blockquotes, task lists) |
 
 Styles: `.ui-artifact-*`, `.ui-md-*`, `.ui-chat-report-pill*` in `src/styles/globals.css`.
 
@@ -54,14 +54,16 @@ Prefer **`report_write`** only for explicit reports, substantial plans/specs, ba
 
 The report viewer (`MarkdownArtifactModal`) offers a **Download** menu with two exports:
 
-- **PDF** — renders the markdown report to a PDF file.
-- **.doc** — converts the markdown report to a Word document.
+- **PDF** — renders the Markdown report to a multi-page PDF via `html2canvas` + `jsPDF`. Formatting (headings, lists, tables, code, blockquotes) is preserved and long reports no longer get cut off.
+- **.docx** — converts the Markdown report to a real Word document via `docx` and `marked`.
 
-Both exports happen client-side from the markdown source; the agent only needs to produce the `.md` report. The system prompt tells the agent not to generate binary files when the user asks for PDF/DOC, but to point them to the download menu instead.
+Both exports happen client-side from the markdown source; the agent only needs to produce the `.md` report. The system prompt tells the agent not to generate binary files when the user asks for PDF/DOCX, but to point them to the download menu instead.
+
+Implementation: `src/utils/exportReport.ts` and `src/utils/markdownToDocx.ts`.
 
 ## Customization
 
-- Edit rendering: `MarkdownRenderer.tsx`
+- Edit rendering: `MarkdownRenderer.tsx` (uses `react-markdown` + `remark-gfm`)
 - Edit card/modal layout: `MarkdownArtifactCard.tsx`, `MarkdownArtifactModal.tsx`
 - Change default folder: `buildReportPath()` in `src/agent/artifacts.ts`
 - Prompt guidance: `src/prompts/core/system.md` (Reports section)

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { MarkdownArtifact } from '../../../agent/types'
-import { exportReportAsDoc, exportReportAsPdf } from '../../../utils/exportReport'
+import { exportReportAsDocx, exportReportAsPdf } from '../../../utils/exportReport'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { Button } from '../../ui/Button'
 
@@ -79,7 +79,7 @@ export function MarkdownArtifactModal({
                       className="ui-download-popover-item"
                       role="menuitem"
                       onClick={() => {
-                        exportReportAsPdf(content || '', artifact.title, artifact.path)
+                        void exportReportAsPdf(content || '', artifact.title, artifact.path)
                         setDownloadOpen(false)
                       }}
                     >
@@ -90,11 +90,11 @@ export function MarkdownArtifactModal({
                       className="ui-download-popover-item"
                       role="menuitem"
                       onClick={() => {
-                        exportReportAsDoc(content || '', artifact.title, artifact.path)
+                        void exportReportAsDocx(content || '', artifact.title, artifact.path)
                         setDownloadOpen(false)
                       }}
                     >
-                      .doc
+                      .docx
                     </button>
                   </div>
                 ) : null}

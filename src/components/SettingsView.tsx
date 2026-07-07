@@ -437,7 +437,10 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
   const getCatalogStatus = (provider: ModelProvider, role: ModelRole) => {
     const roleCatalog = modelCatalog?.[provider]?.[role]
     if (!roleCatalog) return 'Using bundled defaults'
-    if (roleCatalog.error) return 'Refresh failed, using cached/default models'
+    if (roleCatalog.error) {
+      const error = roleCatalog.error.length > 80 ? `${roleCatalog.error.slice(0, 80)}…` : roleCatalog.error
+      return `Refresh failed: ${error}`
+    }
     if (roleCatalog.lastFetchedAt) return `Updated ${new Date(roleCatalog.lastFetchedAt).toLocaleString()}`
     return 'Using bundled defaults'
   }

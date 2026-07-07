@@ -28,14 +28,21 @@ export class ModelCatalogService {
 
   async refreshAll(): Promise<ModelCatalog> {
     const configs = this.getConfiguredProviders()
-    let catalog = this.getCatalog()
 
     const tasks = configs.map(async ({ provider, apiKey, roles }) => {
       const updates = await this.refreshProvider(provider, apiKey, roles)
-      catalog = mergeCatalogs(catalog, updates)
+      return { provider, updates }
     })
 
-    await Promise.allSettled(tasks)
+    let catalog = this.getCatalog()
+    const results = await Promise.allSettled(tasks)
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        catalog = mergeCatalogs(catalog, result.value.updates)
+      }
+    }
+
     this.storage.setModelCatalog(catalog)
     return this.getCatalog()
   }
