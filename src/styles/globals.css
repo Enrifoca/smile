@@ -1497,6 +1497,22 @@ input:focus, textarea:focus, select:focus {
   @apply bg-gray-50 font-semibold text-gray-900;
 }
 
+.ui-md-pre {
+  @apply bg-gray-100 rounded p-3 my-3 overflow-x-auto;
+}
+
+.ui-md-pre .ui-md-code {
+  @apply bg-transparent p-0 rounded-none text-[0.9em];
+}
+
+.ui-md-blockquote {
+  @apply border-l-4 border-gray-300 pl-4 italic text-gray-600 my-3;
+}
+
+.ui-md-hr {
+  @apply border-gray-200 my-4;
+}
+
 .ui-write-action-bar {
   @apply flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-left;
 }
