@@ -96,6 +96,7 @@
     "asarUnpack": [
       "**/*.node"
     ],
+    "afterSign": "scripts/afterSign.cjs",
     "extraResources": [
       {
         "from": "public/icon.png",
@@ -126,11 +127,9 @@
       ],
       "icon": "public/icon.icns",
       "category": "public.app-category.productivity",
-      "identity": "-",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "nsis": {
       "oneClick": false,
