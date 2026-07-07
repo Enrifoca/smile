@@ -1,6 +1,6 @@
 {
   "name": "smile",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "White-label desktop framework for building vertical AI agents",
   "license": "MIT",
   "main": "dist-electron/main.js",
@@ -90,6 +90,20 @@
     },
     "asarUnpack": [
       "**/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "public/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "public/icon-windows.ico",
+        "to": "icon.ico"
+      },
+      {
+        "from": "public/icon.icns",
+        "to": "icon.icns"
+      }
     ],
     "files": [
       "dist/**/*",
