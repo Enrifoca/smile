@@ -303,7 +303,7 @@ async function executeTool(name, args, host) {
       if (!issueIdOrKey || !transitionId) return { success: false, error: 'Issue key and transition ID are required.' }
       const issueScopeError = validateIssueKeyScope(issueIdOrKey, allowedKeys)
       if (issueScopeError) return { success: false, error: issueScopeError }
-      return shapeToolResult(name, await mcp(host, 'transitionJiraIssue', { issueIdOrKey, transitionId }))
+      return shapeToolResult(name, await mcp(host, 'transitionJiraIssue', { issueIdOrKey, transition: { id: transitionId } }))
     }
     case 'jira_upload_attachment': {
       const issueIdOrKey = str(args.issueIdOrKey || args.issueKey)

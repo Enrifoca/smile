@@ -33,7 +33,7 @@ Download the latest installer for your platform from [GitHub Releases](https://g
 | macOS Apple Silicon | `.dmg` / `.zip` |
 | Windows | `.exe` (NSIS installer) |
 
-> Unsigned installers will show platform warnings. On macOS, see [docs/macos-install.md](docs/macos-install.md) for step-by-step workarounds. On Windows you may see SmartScreen / Defender warnings; click "More info" → "Run anyway".
+> Unsigned installers will show platform warnings. On macOS, see [docs/macos-install.md](docs/macos-install.md) for step-by-step workarounds. **macOS 26 (Tahoe) users:** the unsigned Mac build may still show “app is damaged” or crash on launch even after the workarounds — we’re working on Apple notarization to resolve this. On Windows you may see SmartScreen / Defender warnings; click "More info" → "Run anyway".
 
 ### Developers
 

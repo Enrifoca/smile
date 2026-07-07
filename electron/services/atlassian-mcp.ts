@@ -1725,7 +1725,7 @@ export class AtlassianMCPService extends EventEmitter {
 
   /**
    * Transition an issue to a new status
-   * 
+   *
    * MCP Tool: transitionJiraIssue
    * Required params: cloudId, issueIdOrKey, transitionId
    */
@@ -1740,19 +1740,19 @@ export class AtlassianMCPService extends EventEmitter {
         return { success: false, error: 'Cloud ID not available. Please reconnect to Atlassian.' }
       }
 
-      const args: Record<string, unknown> = { 
+      const args: Record<string, unknown> = {
         cloudId,
-        issueIdOrKey, 
-        transitionId 
+        issueIdOrKey,
+        transition: { id: transitionId },
       }
-      
+
       this.debugLog(`transitionIssue args: ${JSON.stringify(args)}`)
       const result = await this.callTool('transitionJiraIssue', args)
       return { success: true, data: result }
     } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Failed to transition issue' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to transition issue',
       }
     }
   }
