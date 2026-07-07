@@ -61,7 +61,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/jsdom": "^21.1.0",
     "@types/mime-types": "^3.0.1",
-    "@types/node": "^20.14.0",
+    "@types/node": "^26.1.0",
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
