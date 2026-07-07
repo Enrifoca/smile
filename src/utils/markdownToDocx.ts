@@ -139,7 +139,7 @@ function processList(list: Tokens.List, level = 0): Paragraph[] {
 }
 
 export async function markdownToDocxBlob(content: string, title: string): Promise<Blob> {
-  const tokens = marked.lexer(content || '(empty report)')
+  const tokens = marked.lexer(content || '(empty report)', { gfm: true })
   const children: (Paragraph | Table)[] = []
 
   for (const token of tokens) {
