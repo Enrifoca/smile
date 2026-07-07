@@ -126,9 +126,11 @@
       ],
       "icon": "public/icon.icns",
       "category": "public.app-category.productivity",
-      "identity": null,
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false
+      "identity": "-",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "nsis": {
       "oneClick": false,
