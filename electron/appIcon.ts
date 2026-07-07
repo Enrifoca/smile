@@ -20,7 +20,10 @@ function iconSearchDirs(): string[] {
     path.join(__dirname, '..', 'public'),
   ]
   if (app.isPackaged) {
+    // Packaged assets live inside app.asar; also check the top-level Resources
+    // directory where extraResources / electron-builder embeds the app icon.
     dirs.unshift(path.join(root, 'dist'))
+    dirs.unshift(process.resourcesPath)
   }
   return [...new Set(dirs)]
 }
