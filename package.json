@@ -51,6 +51,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@electron/rebuild": "^4.0.6",
     "@smile/connector-sdk": "file:packages/connector-sdk",
     "@types/better-sqlite3": "^7.6.13",
@@ -91,6 +92,7 @@
     "asarUnpack": [
       "**/*.node"
     ],
+    "afterSign": "scripts/afterSign.cjs",
     "extraResources": [
       {
         "from": "public/icon.png",
