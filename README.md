@@ -33,7 +33,7 @@ Download the latest installer for your platform from [GitHub Releases](https://g
 | macOS Apple Silicon | `.dmg` / `.zip` |
 | Windows | `.exe` (NSIS installer) |
 
-> Unsigned installers will show platform warnings (macOS “unidentified developer”, Windows SmartScreen / Defender). You can allow them in system security settings.
+> Unsigned installers will show platform warnings. On macOS, see [docs/macos-install.md](docs/macos-install.md) for step-by-step workarounds. On Windows you may see SmartScreen / Defender warnings; click "More info" → "Run anyway".
 
 ### Developers
 
@@ -150,6 +150,8 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | [docs/prompts.md](docs/prompts.md) | Core vs connector prompts, assembly rules |
 | [docs/memory.md](docs/memory.md) | User memory, learned notes, source memory, admission |
 | [docs/ui-guidelines.md](docs/ui-guidelines.md) | **UI design rules** — colors, chips, snippets, content boxes, CTAs |
+| [docs/distribution.md](docs/distribution.md) | Release builds, installers, and auto-updater |
+| [docs/macos-install.md](docs/macos-install.md) | Installing the unsigned macOS `.dmg`/`.zip` release |
 
 ### Electron (desktop shell)
 
@@ -200,6 +202,17 @@ All framework docs live in the repo as Markdown. Use this map to find the right 
 | Doc | Purpose |
 | --- | --- |
 | [src/memory/README.md](src/memory/README.md) | Memory layers, learned-note budget (framework code) |
+
+### Project governance
+
+| Doc | Purpose |
+| --- | --- |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute code, report issues, and open pull requests |
+| [SECURITY.md](SECURITY.md) | Reporting security vulnerabilities and supported versions |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards and expected behavior |
+| [.github/CODEOWNERS](.github/CODEOWNERS) | Default reviewers for each area of the codebase |
+| [.github/dependabot.yml](.github/dependabot.yml) | Automated dependency update configuration |
+| [.github/rulesets/main.json](.github/rulesets/main.json) | `main` branch protection ruleset |
 
 ### Quick paths by task
 
