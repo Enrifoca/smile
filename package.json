@@ -1,6 +1,6 @@
 {
   "name": "smile",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "White-label desktop framework for building vertical AI agents",
   "license": "MIT",
   "main": "dist-electron/main.js",
@@ -64,7 +64,7 @@
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.19",
     "concurrently": "^8.2.2",
-    "electron": "^31.0.0",
+    "electron": "32.2.5",
     "electron-builder": "^24.13.0",
     "png2icons": "^2.0.1",
     "postcss": "^8.4.38",
@@ -91,7 +91,6 @@
     "asarUnpack": [
       "**/*.node"
     ],
-    "afterSign": "scripts/afterSign.cjs",
     "extraResources": [
       {
         "from": "public/icon.png",
@@ -121,7 +120,10 @@
         "zip"
       ],
       "icon": "public/icon.icns",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "nsis": {
       "oneClick": false,
