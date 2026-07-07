@@ -99,10 +99,6 @@
       {
         "from": "public/icon-windows.ico",
         "to": "icon.ico"
-      },
-      {
-        "from": "public/icon.icns",
-        "to": "icon.icns"
       }
     ],
     "files": [
