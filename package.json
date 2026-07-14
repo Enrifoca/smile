@@ -98,6 +98,7 @@
     "asarUnpack": [
       "**/*.node"
     ],
+    "afterPack": "scripts/afterPack.cjs",
     "afterSign": "scripts/afterSign.cjs",
     "extraResources": [
       {
@@ -135,11 +136,13 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
       "icon": "build/icons",
       "category": "Office",
       "executableName": "smiled",
+      "maintainer": "Enrico Focaccia <enrifoca@gmail.com>",
       "synopsis": "Desktop framework for building vertical AI agents"
     },
     "nsis": {
