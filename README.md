@@ -32,6 +32,9 @@ Download the latest installer for your platform from [GitHub Releases](https://g
 | --- | --- |
 | macOS Apple Silicon | `.dmg` / `.zip` |
 | Windows | `.exe` (NSIS installer) |
+| Linux | `.AppImage` |
+
+> On Linux, make the download executable before the first launch: `chmod +x smileD-*.AppImage`. The AppImage requires FUSE; on Ubuntu 24.04 and derivatives install it with `sudo apt install libfuse2t64`.
 
 > Unsigned installers will show platform warnings. On macOS, see [docs/macos-install.md](docs/macos-install.md) for step-by-step workarounds. **macOS 26 (Tahoe) users:** the unsigned Mac build may still show “app is damaged” or crash on launch even after the workarounds — we’re working on Apple notarization to resolve this. On Windows you may see SmartScreen / Defender warnings; click "More info" → "Run anyway".
 
@@ -59,6 +62,9 @@ npm run build:win
 
 # Build for macOS
 npm run build:mac
+
+# Build for Linux
+npm run build:linux
 ```
 
 Published releases (installers + auto-update): see [docs/distribution.md](docs/distribution.md).
