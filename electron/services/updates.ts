@@ -2,6 +2,15 @@ import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateState } from '../../src/shared/updates'
 
+/**
+ * electron-updater can only update an AppImage on Linux, and detects one via the
+ * APPIMAGE env var the AppImage runtime injects. Anywhere else on Linux a check
+ * would fail and surface a raw error, so it is skipped entirely.
+ */
+function isUnsupportedLinuxBuild(): boolean {
+  return process.platform === 'linux' && !process.env.APPIMAGE
+}
+
 /** Poll GitHub Releases (via electron-builder publish config) and auto-download updates. */
 export class UpdateService {
   private window: BrowserWindow | null = null
@@ -63,6 +72,7 @@ export class UpdateService {
   /** Start background checks once the app shell is ready. */
   scheduleStartupCheck(delayMs = 8000): void {
     if (!app.isPackaged) return
+    if (isUnsupportedLinuxBuild()) return
     setTimeout(() => {
       void this.checkForUpdates()
     }, delayMs)
@@ -74,6 +84,16 @@ export class UpdateService {
         status: 'dev-skipped',
         currentVersion: app.getVersion(),
         message: 'Updates are checked in installed releases only.',
+      }
+      this.pushState(state)
+      return state
+    }
+
+    if (isUnsupportedLinuxBuild()) {
+      const state: UpdateState = {
+        status: 'idle',
+        currentVersion: app.getVersion(),
+        message: 'Automatic updates are available in the AppImage build only.',
       }
       this.pushState(state)
       return state

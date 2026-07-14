@@ -51,6 +51,22 @@ function resolveWorkspaceSubpath(workspacePath: string, relative?: string): stri
   return resolved
 }
 
+// In a packaged build the bundled connectors live inside app.asar. Electron's asar
+// layer patches readdir/stat/readFile, but not fs.cp/cpSync — copying a directory out
+// of the archive with it fails with ENOTDIR, so the copy is done by hand.
+function copyDirSync(sourceDir: string, destDir: string): void {
+  fs.mkdirSync(destDir, { recursive: true })
+  for (const entry of fs.readdirSync(sourceDir)) {
+    const source = path.join(sourceDir, entry)
+    const dest = path.join(destDir, entry)
+    if (fs.statSync(source).isDirectory()) {
+      copyDirSync(source, dest)
+    } else {
+      fs.writeFileSync(dest, fs.readFileSync(source))
+    }
+  }
+}
+
 function resolveBundledConnectorsRoot(): string {
   const candidates = [
     path.join(app.getAppPath(), 'bundled', 'connectors'),
@@ -331,11 +347,22 @@ export class ConnectorsService {
 
     const destDir = path.join(root, connectorId)
     if (fs.existsSync(destDir)) {
-      throw new Error(`Connector already installed: ${connectorId}`)
+      // A directory without a manifest is the debris of an interrupted install, not an
+      // installed connector: discover() skips it, so leaving it there would make the
+      // connector permanently un-installable.
+      if (fs.existsSync(path.join(destDir, 'manifest.json'))) {
+        throw new Error(`Connector already installed: ${connectorId}`)
+      }
+      fs.rmSync(destDir, { recursive: true, force: true })
     }
 
     fs.mkdirSync(root, { recursive: true })
-    fs.cpSync(sourceDir, destDir, { recursive: true })
+    try {
+      copyDirSync(sourceDir, destDir)
+    } catch (error) {
+      fs.rmSync(destDir, { recursive: true, force: true })
+      throw error
+    }
     return validation.manifest
   }
 

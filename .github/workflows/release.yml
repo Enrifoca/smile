@@ -18,6 +18,8 @@ jobs:
             script: release:win
           - os: macos-latest
             script: release:mac
+          - os: ubuntu-latest
+            script: release:linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

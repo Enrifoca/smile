@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(__dirname, '..')
 const svgPath = path.join(root, 'public', 'icon.svg')
 const publicDir = path.join(root, 'public')
+const linuxIconDir = path.join(root, 'build', 'icons')
 const CANVAS = 512
 const CENTER = CANVAS / 2
 
@@ -103,7 +104,21 @@ async function main() {
   if (!icns) throw new Error('Failed to generate icon.icns')
   fs.writeFileSync(path.join(publicDir, 'icon.icns'), icns)
 
-  console.log('Updated icon.svg transform and generated icon.png, icon.ico, icon.icns')
+  // Linux: electron-builder reads each icon's size from its filename to place it
+  // under hicolor/<size>/, so the set must be NxN.png — a plain icon.png lands in
+  // hicolor/0x0/ and the desktop entry never resolves.
+  fs.mkdirSync(linuxIconDir, { recursive: true })
+  const linuxSizes = [16, 32, 48, 64, 128, 256, 512]
+  await Promise.all(
+    linuxSizes.map(size =>
+      sharp(Buffer.from(svg))
+        .resize(size, size)
+        .png()
+        .toFile(path.join(linuxIconDir, `${size}x${size}.png`)),
+    ),
+  )
+
+  console.log('Updated icon.svg transform and generated icon.png, icon.ico, icon.icns, build/icons/')
 }
 
 main().catch(error => {

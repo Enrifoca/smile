@@ -14,9 +14,11 @@
     "build": "tsc && vite build && electron-builder",
     "build:win": "tsc && vite build && electron-builder --win",
     "build:mac": "tsc && vite build && electron-builder --mac",
+    "build:linux": "tsc && vite build && electron-builder --linux",
     "release": "tsc && vite build && electron-builder --publish always",
     "release:win": "tsc && vite build && electron-builder --win --publish always",
     "release:mac": "tsc && vite build && electron-builder --mac --publish always",
+    "release:linux": "tsc && vite build && electron-builder --linux --publish always",
     "preview": "vite preview",
     "electron:dev": "node scripts/brand-electron.mjs && node scripts/dev-electron.mjs",
     "typecheck": "tsc --noEmit",
@@ -96,6 +98,7 @@
     "asarUnpack": [
       "**/*.node"
     ],
+    "afterPack": "scripts/afterPack.cjs",
     "afterSign": "scripts/afterSign.cjs",
     "extraResources": [
       {
@@ -130,6 +133,17 @@
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icons",
+      "category": "Office",
+      "executableName": "smiled",
+      "maintainer": "Enrico Focaccia <enrifoca@gmail.com>",
+      "synopsis": "Desktop framework for building vertical AI agents"
     },
     "nsis": {
       "oneClick": false,
