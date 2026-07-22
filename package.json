@@ -35,7 +35,7 @@
     "@mozilla/readability": "^0.6.0",
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.16",
-    "axios": "^1.7.0",
+    "axios": "^1.18.1",
     "better-sqlite3": "^12.11.1",
     "docx": "^9.7.1",
     "electron-store": "^8.2.0",
