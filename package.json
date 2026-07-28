@@ -72,7 +72,7 @@
     "autoprefixer": "^10.4.19",
     "concurrently": "^8.2.2",
     "electron": "^34.5.8",
-    "electron-builder": "^24.13.0",
+    "electron-builder": "^26.15.3",
     "png2icons": "^2.0.1",
     "postcss": "^8.4.38",
     "rcedit": "^5.0.2",
