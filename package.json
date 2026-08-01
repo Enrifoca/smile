@@ -74,7 +74,7 @@
     "electron": "^34.5.8",
     "electron-builder": "^24.13.0",
     "png2icons": "^2.0.1",
-    "postcss": "^8.4.38",
+    "postcss": "^8.5.25",
     "rcedit": "^5.0.2",
     "sharp": "^0.35.1",
     "tailwindcss": "^3.4.4",
