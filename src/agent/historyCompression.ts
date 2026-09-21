@@ -1,17 +1,23 @@
 import type { Message } from './types'
 import type { AIResponse } from './config'
+import { estimateTokens, type HistoryMessage } from './contextEngine'
 
-const CHARS_PER_TOKEN = 4
+export { estimateTokens }
+
 const DEFAULT_CONTEXT_WINDOW = 128_000
 const COMPRESS_THRESHOLD_RATIO = 0.5
 const RAW_TURNS_KEEP = 14
 const CHUNK_SIZE = 10
 
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN)
-}
+const CHUNK_SUMMARY_PROMPT = `Summarize the following conversation excerpt for the AI agent continuing the work.
+Preserve: user goals, file paths, key decisions, tool outcomes, errors, and facts needed for pending tasks.
+Omit: pleasantries, repeated tool output, thinking blocks.
+Use concise bullet points. Max 400 words.`
 
-type HistoryMessage = { role: 'user' | 'assistant' | 'system'; content: string }
+const MASTER_SUMMARY_PROMPT = `Condense the following conversation summaries into one dense master summary for the AI agent.
+Preserve: user goals, file paths, key decisions, tool outcomes, errors, and pending tasks.
+Omit: pleasantries and redundant details.
+Use concise bullet points. Max 600 words.`
 
 /**
  * Messages visible to the model during summarization.
@@ -32,16 +38,6 @@ export function filterModelHistory(messages: Message[]): HistoryMessage[] {
     .map(m => ({ role: m.role as HistoryMessage['role'], content: m.content }))
 }
 
-const CHUNK_SUMMARY_PROMPT = `Summarize the following conversation excerpt for the AI agent continuing the work.
-Preserve: user goals, file paths, key decisions, tool outcomes, errors, and facts needed for pending tasks.
-Omit: pleasantries, repeated tool output, thinking blocks.
-Use concise bullet points. Max 400 words.`
-
-const MASTER_SUMMARY_PROMPT = `Condense the following conversation summaries into one dense master summary for the AI agent.
-Preserve: user goals, file paths, key decisions, tool outcomes, errors, and pending tasks.
-Omit: pleasantries and redundant details.
-Use concise bullet points. Max 600 words.`
-
 function createSummaryMessage(content: string): Message {
   return {
     id: `compression-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -52,6 +48,14 @@ function createSummaryMessage(content: string): Message {
   }
 }
 
+/**
+ * Periodic background compression of stored conversation history.
+ *
+ * Unlike the per-call smart compressor in {@link contextEngine.ts}, this mutates
+ * `conversationHistory` to keep long-running chats from growing without bound.
+ * It only runs when the visible history crosses 50% of the configured context
+ * window and keeps the most recent RAW_TURNS_KEEP turns untouched.
+ */
 export async function maybeCompressConversationHistory(options: {
   conversationHistory: Message[]
   systemPrompt: string

@@ -32,6 +32,7 @@ export interface AgentConfig {
   /** Snapshot of the full context given to the model on its latest call, for the UI context inspector. */
   onContextSnapshot?: (snapshot: AgentContextSnapshot) => void
   executeFileTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
+  executeVisualTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeMemoryTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   executeContextTool: (name: string, args: Record<string, unknown>) => Promise<unknown>
   /** Load context markdown for prompt injection (full file or tool-only gate). */

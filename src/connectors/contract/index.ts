@@ -26,6 +26,8 @@ export type {
   ConnectorIntegrationType,
   ConnectorCatalogMeta,
   PluginToolCategory,
+  McpServerConfig,
+  McpServerTransport,
 } from './manifest'
 
 export type { ToolResult } from './result'

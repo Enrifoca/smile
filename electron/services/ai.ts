@@ -5,6 +5,28 @@ import { getRetryWaitMs, isRetryableAIError } from '../../src/shared/aiErrors'
 
 type StreamProgressCallback = (event: AIStreamProgressEvent) => void
 
+const AI_FETCH_TIMEOUT_MS = 120_000
+
+function combineAbortSignals(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any(signals)
+  }
+  const controller = new AbortController()
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort()
+      break
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  return controller.signal
+}
+
+function fetchTimeoutSignal(userSignal?: AbortSignal): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
+  return userSignal ? combineAbortSignals([userSignal, timeoutSignal]) : timeoutSignal
+}
+
 /**
  * Robustly parse tool call arguments from a model response.
  * LLMs (especially Groq/LLaMA) sometimes return slightly malformed JSON —
@@ -217,6 +239,61 @@ export class AIService {
   }
 
   /**
+   * Generate an image from a text prompt using the active provider's image API.
+   * Falls back through OpenAI-compatible endpoints for providers that support them.
+   */
+  async generateImage(
+    prompt: string,
+    options: { size?: string; style?: string; model?: string } = {},
+  ): Promise<{ success: boolean; data?: { base64?: string; url?: string }; error?: string }> {
+    const { provider, apiKey, model } = this.config
+
+    const endpoint = provider === 'openai'
+      ? 'https://api.openai.com/v1/images/generations'
+      : provider === 'moonshot'
+        ? 'https://api.moonshot.ai/v1/images/generations'
+        : null
+
+    if (!endpoint) {
+      return { success: false, error: `Image generation is not supported for provider: ${provider}` }
+    }
+
+    try {
+      const defaultModel = provider === 'openai' ? 'dall-e-3' : 'kimi-image'
+      const body: Record<string, unknown> = {
+        model: options.model || model || defaultModel,
+        prompt,
+        response_format: 'b64_json',
+      }
+      if (options.size) body.size = options.size
+      if (options.style) body.style = options.style
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: fetchTimeoutSignal(),
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error((error as { error?: { message?: string } }).error?.message || `${provider} image API error: ${response.status}`)
+      }
+
+      const data = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> }
+      const image = data.data?.[0]
+      if (!image) {
+        return { success: false, error: 'No image returned from generation API' }
+      }
+
+      return { success: true, data: { base64: image.b64_json, url: image.url } }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Image generation failed'
+      return { success: false, error: message }
+    }
+  }
+
+  /**
    * Streaming version of chat.
    * Calls onToken for each text delta as it arrives, then resolves with the full AIResponse.
    * Tool calls are accumulated from stream deltas and returned at the end.
@@ -340,7 +417,7 @@ export class AIService {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-          signal,
+          signal: fetchTimeoutSignal(signal),
         })
 
         if (!response.ok) {
@@ -467,6 +544,7 @@ export class AIService {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: fetchTimeoutSignal(),
     })
     if (!response.ok) {
       const error = await response.json().catch(() => ({}))
@@ -514,6 +592,7 @@ export class AIService {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: fetchTimeoutSignal(),
     })
     if (!response.ok) {
       const error = await response.json().catch(() => ({}))
@@ -594,6 +673,7 @@ export class AIService {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal: fetchTimeoutSignal(),
     })
 
     if (!response.ok) {
@@ -643,7 +723,7 @@ export class AIService {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal,
+        signal: fetchTimeoutSignal(signal),
       })
 
       if (!response.ok) {
@@ -767,6 +847,7 @@ export class AIService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: fetchTimeoutSignal(),
     })
 
     if (!response.ok) {

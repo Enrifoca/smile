@@ -24,6 +24,48 @@ export const reportWriteSchema = z.object({
   content: z.string().describe('Full markdown body. When revising after file_read, start from that file and apply only the user\'s edits — do not invent facts, tasks, or counts.'),
 })
 
+export const generateChartSchema = z.object({
+  type: z.enum(['bar', 'line', 'area', 'pie', 'doughnut', 'horizontalBar']).describe('Chart type. Use "bar" or "horizontalBar" for comparisons, "line"/"area" for trends over time, "pie"/"doughnut" for part-of-whole.'),
+  data: z.array(z.record(z.unknown())).describe(
+    'Chart data rows. The first key is the label/category axis; remaining keys are numeric series. ' +
+    'Requires at least 2 rows. With only one data point, use generate_image or describe the value in prose instead. ' +
+    'Example: [{"Month": "Jan", "Revenue": 12000, "Cost": 8000}, {"Month": "Feb", "Revenue": 15000, "Cost": 9000}]. ' +
+    'Use numbers, not formatted strings. For percentages or currency the renderer auto-detects $ and % if present in values.'
+  ),
+  options: z.object({
+    title: z.string().optional(),
+    xAxisLabel: z.string().optional().describe('Label for the category axis.'),
+    yAxisLabel: z.string().optional().describe('Label for the value axis.'),
+    unit: z.string().optional().describe('Unit suffix/prefix for values: "%", "$", or a custom string.'),
+    colors: z.array(z.string()).optional().describe('Optional custom color hex codes.'),
+    legend: z.boolean().optional().describe('Show legend (default true).'),
+    dataLabels: z.boolean().optional().describe('Show values on bars/points/slices (default true).'),
+    gridLines: z.boolean().optional().describe('Show grid lines (default true).'),
+    stacked: z.boolean().optional().describe('Stack series for bar/area charts (default false).'),
+    smooth: z.boolean().optional().describe('Smooth lines for line/area charts (default true).'),
+    logScale: z.boolean().optional().describe('Use a logarithmic value axis. Auto-enabled when data spans more than 2 orders of magnitude.'),
+  }).optional().describe('Optional chart rendering options.'),
+  path: z.string().describe('Relative path where the rendered chart image should be saved. Parent directories are created automatically.'),
+  title: z.string().optional().describe('Optional human-readable chart title.'),
+})
+
+export const generateDiagramSchema = z.object({
+  type: z.enum(['mermaid']).describe('Diagram language. Only Mermaid is supported today.'),
+  source: z.string().describe(
+    'Mermaid diagram source. Example flowchart: "flowchart TD\nA[Start] --> B{Decision}\nB -->|Yes| C[Action]\nB -->|No| D[End]". ' +
+    'Supported diagram types include flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, mindmap, timeline, gantt, pie, and journey.'
+  ),
+  path: z.string().describe('Relative path where the rendered diagram image should be saved. Parent directories are created automatically.'),
+  title: z.string().optional().describe('Optional human-readable diagram title.'),
+})
+
+export const generateImageSchema = z.object({
+  prompt: z.string().describe('Text prompt describing the image to generate.'),
+  path: z.string().describe('Relative path where the generated image should be saved. Parent directories are created automatically.'),
+  size: z.string().optional().describe('Optional desired size (e.g. "1024x1024", "1792x1024", "1024x1792").'),
+  style: z.string().optional().describe('Optional style hint (e.g. "vivid", "natural").'),
+})
+
 export const fileMkdirSchema = z.object({
   path: z.string().describe('Relative path of the directory to create (creates all intermediate directories automatically)'),
 })
@@ -115,6 +157,27 @@ export const toolDefinitions: ToolDefinition[] = [
     name: 'report_write',
     description: 'Save a substantial markdown report the user opens in chat (explicit report, user-requested long plan/spec, substantial batch item list, or other requested lengthy/tabular structured document). Do not use for greetings, short answers, simple status updates, one-step tasks, or ordinary answers after read-only tools. The report is the source of truth — your follow-up chat message must match its counts and titles exactly; do not invent a different list in chat. When revising after file_read, reuse the same path and preserve existing content except for the user\'s requested edits. The report path is returned for later file_read when the user iterates. The user can export the same report as PDF or Word from the Download menu on the report card — mention that if they ask for those formats.',
     schema: reportWriteSchema,
+    requiresConfirmation: false,
+    category: 'file-write',
+  },
+  {
+    name: 'generate_chart',
+    description: 'Generate a polished, data-driven chart image from clean tabular data and save it to the workspace. Only use this when you have real numeric data from tool results or files. Pick the right chart type: bar/horizontalBar for comparisons, line/area for trends, pie/doughnut for part-of-whole. The first column is the category axis and must contain unique labels; remaining columns are numeric series. Rows that share the same category label are combined by summing their numeric values. Do not invent data. The resulting image path is returned; embed it in reports with markdown syntax ![description](path) so it appears in PDF and Word exports.',
+    schema: generateChartSchema,
+    requiresConfirmation: false,
+    category: 'file-write',
+  },
+  {
+    name: 'generate_diagram',
+    description: 'Render a text-based diagram (Mermaid) to a PNG image and save it to the workspace. Use for flowcharts, architecture diagrams, sequence diagrams, mind maps, ER diagrams, and other relational/conceptual visuals. The resulting image path is returned; embed it in reports with markdown syntax ![description](path) so it appears in PDF and Word exports.',
+    schema: generateDiagramSchema,
+    requiresConfirmation: false,
+    category: 'file-write',
+  },
+  {
+    name: 'generate_image',
+    description: 'Generate an image from a text prompt and save it to the workspace. Use when the user explicitly asks for an illustration, diagram, or generated image. The resulting image path is returned; embed it in reports with markdown syntax ![description](path) so it appears in PDF and Word exports.',
+    schema: generateImageSchema,
     requiresConfirmation: false,
     category: 'file-write',
   },

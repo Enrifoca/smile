@@ -4,6 +4,7 @@ import {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   HeadingLevel,
   Table,
   TableCell,
@@ -11,8 +12,14 @@ import {
   AlignmentType,
   BorderStyle,
   NumberFormat,
+  TableLayoutType,
+  VerticalAlign,
+  WidthType,
   convertInchesToTwip,
 } from 'docx'
+import { resolveImageDataUrl } from './resolveImagePath'
+
+const EMUS_PER_INCH = 914400
 
 function getText(token: Token): string {
   if ('tokens' in token && Array.isArray((token as Tokens.Text).tokens)) {
@@ -22,16 +29,76 @@ function getText(token: Token): string {
   return ''
 }
 
-function processInline(tokens: Token[] | undefined): TextRun[] {
+function dataUrlToBuffer(dataUrl: string): { buffer: Buffer; mime: string } | null {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+  if (!match) return null
+  return { buffer: Buffer.from(match[2], 'base64'), mime: match[1] }
+}
+
+function mimeToImageType(mime: string): 'png' | 'jpg' | 'gif' | 'bmp' | undefined {
+  if (mime === 'image/png') return 'png'
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'jpg'
+  if (mime === 'image/gif') return 'gif'
+  if (mime === 'image/bmp') return 'bmp'
+  return undefined
+}
+
+async function measureImage(dataUrl: string): Promise<{ width: number; height: number }> {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => {
+      resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    }
+    img.onerror = () => resolve({ width: 0, height: 0 })
+    img.src = dataUrl
+  })
+}
+
+async function createImageRun(src: string, alt?: string): Promise<ImageRun | TextRun> {
+  const dataUrl = await resolveImageDataUrl(src)
+
+  if (!dataUrl) {
+    console.error('[markdownToDocx] Could not resolve image:', src)
+    return new TextRun({ text: alt || '[image]' })
+  }
+
+  const parsed = dataUrlToBuffer(dataUrl)
+  if (!parsed) return new TextRun({ text: alt || '[image]' })
+
+  const { buffer, mime } = parsed
+  const type = mimeToImageType(mime)
+  if (!type) return new TextRun({ text: alt || '[image]' })
+
+  const dims = await measureImage(dataUrl)
+  const maxWidthIn = 5.5
+  let widthIn = dims.width ? dims.width / 96 : maxWidthIn
+  let heightIn = dims.height ? dims.height / 96 : 3
+  if (widthIn > maxWidthIn) {
+    const scale = maxWidthIn / widthIn
+    widthIn = maxWidthIn
+    heightIn = heightIn * scale
+  }
+
+  return new ImageRun({
+    data: buffer,
+    type,
+    transformation: {
+      width: Math.round(widthIn * EMUS_PER_INCH),
+      height: Math.round(heightIn * EMUS_PER_INCH),
+    },
+  })
+}
+
+async function processInline(tokens: Token[] | undefined): Promise<(TextRun | ImageRun)[]> {
   if (!tokens) return []
-  const runs: TextRun[] = []
+  const runs: (TextRun | ImageRun)[] = []
 
   for (const token of tokens) {
     switch (token.type) {
       case 'text': {
         const t = token as Tokens.Text
         if (t.tokens) {
-          runs.push(...processInline(t.tokens))
+          runs.push(...(await processInline(t.tokens)))
         } else {
           runs.push(new TextRun(t.text))
         }
@@ -69,9 +136,19 @@ function processInline(tokens: Token[] | undefined): TextRun[] {
       case 'br':
         runs.push(new TextRun('\n'))
         break
+      case 'image': {
+        const t = token as Tokens.Image
+        try {
+          runs.push(await createImageRun(t.href, t.title || t.text))
+        } catch (err) {
+          console.error('[markdownToDocx] Skipping image due to error:', t.href, err)
+          runs.push(new TextRun({ text: t.title || t.text || '[image]' }))
+        }
+        break
+      }
       default:
         if ('tokens' in token && Array.isArray((token as Tokens.Text).tokens)) {
-          runs.push(...processInline((token as Tokens.Text).tokens))
+          runs.push(...(await processInline((token as Tokens.Text).tokens)))
         } else if ('text' in token) {
           runs.push(new TextRun((token as Tokens.Text).text))
         }
@@ -98,22 +175,22 @@ function headingLevel(depth: number) {
   }
 }
 
-function cellParagraphs(tokens: Token[]): Paragraph[] {
-  return [new Paragraph({ children: processInline(tokens) })]
+async function cellParagraphs(tokens: Token[]): Promise<Paragraph[]> {
+  return [new Paragraph({ children: await processInline(tokens) })]
 }
 
-function processList(list: Tokens.List, level = 0): Paragraph[] {
+async function processList(list: Tokens.List, level = 0): Promise<Paragraph[]> {
   const paragraphs: Paragraph[] = []
   const ordered = list.ordered
   let index = Number(list.start ?? 1)
 
   for (const item of list.items) {
-    const itemRuns: TextRun[] = []
+    const itemRuns: (TextRun | ImageRun)[] = []
     for (const token of item.tokens) {
       if (token.type === 'list') {
-        paragraphs.push(...processList(token as Tokens.List, level + 1))
+        paragraphs.push(...(await processList(token as Tokens.List, level + 1)))
       } else if (token.type === 'paragraph' || token.type === 'text') {
-        itemRuns.push(...processInline((token as Tokens.Paragraph | Tokens.Text).tokens))
+        itemRuns.push(...(await processInline((token as Tokens.Paragraph | Tokens.Text).tokens)))
       }
     }
 
@@ -148,7 +225,7 @@ export async function markdownToDocxBlob(content: string, title: string): Promis
         const t = token as Tokens.Heading
         children.push(
           new Paragraph({
-            children: processInline(t.tokens),
+            children: await processInline(t.tokens),
             heading: headingLevel(t.depth),
           }),
         )
@@ -156,7 +233,7 @@ export async function markdownToDocxBlob(content: string, title: string): Promis
       }
       case 'paragraph': {
         const t = token as Tokens.Paragraph
-        children.push(new Paragraph({ children: processInline(t.tokens) }))
+        children.push(new Paragraph({ children: await processInline(t.tokens) }))
         break
       }
       case 'code': {
@@ -191,26 +268,47 @@ export async function markdownToDocxBlob(content: string, title: string): Promis
         break
       }
       case 'list': {
-        children.push(...processList(token as Tokens.List))
+        children.push(...(await processList(token as Tokens.List)))
         break
       }
       case 'table': {
         const t = token as Tokens.Table
+        const columnCount = Math.max(t.header.length, ...t.rows.map(row => row.length))
+        // A4 page width (11906 twips) minus 0.75" left/right margins (1080 twips each).
+        const contentWidthTwips = 11906 - 1080 - 1080
+        const cellWidthTwips = columnCount > 0 ? Math.floor(contentWidthTwips / columnCount) : contentWidthTwips
+
+        const makeCell = async (cellTokens: Token[], isHeader = false) =>
+          new TableCell({
+            children: await cellParagraphs(cellTokens),
+            shading: isHeader ? { fill: 'F9FAFB' } : undefined,
+            verticalAlign: VerticalAlign.CENTER,
+            margins: { top: 80, bottom: 80, left: 80, right: 80 },
+            width: {
+              size: cellWidthTwips,
+              type: WidthType.DXA,
+            },
+          })
+
         const headerRow = new TableRow({
-          children: t.header.map(cell =>
-            new TableCell({
-              children: cellParagraphs(cell.tokens),
-              shading: { fill: 'F9FAFB' },
+          children: await Promise.all(t.header.map(async cell => makeCell(cell.tokens, true))),
+        })
+        const bodyRows = await Promise.all(
+          t.rows.map(async row =>
+            new TableRow({
+              children: await Promise.all(row.map(async cell => makeCell(cell.tokens))),
             }),
           ),
-        })
-        const bodyRows = t.rows.map(
-          row =>
-            new TableRow({
-              children: row.map(cell => new TableCell({ children: cellParagraphs(cell.tokens) })),
-            }),
         )
-        children.push(new Table({ rows: [headerRow, ...bodyRows] }))
+
+        children.push(
+          new Table({
+            rows: [headerRow, ...bodyRows],
+            width: { size: contentWidthTwips, type: WidthType.DXA },
+            layout: TableLayoutType.FIXED,
+            columnWidths: Array(columnCount).fill(cellWidthTwips),
+          }),
+        )
         break
       }
       case 'hr':

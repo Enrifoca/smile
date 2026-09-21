@@ -1,8 +1,9 @@
-export type ModelRole = 'chat' | 'reasoning' | 'ocr'
+export type ModelRole = 'chat' | 'reasoning' | 'ocr' | 'image'
 
 export type AIProvider = 'openai' | 'anthropic' | 'mistral' | 'groq' | 'moonshot' | 'deepseek' | 'openrouter' | 'xai' | 'minimax' | 'qwen'
 export type OCRProvider = 'mistral' | 'deepseek'
-export type ModelProvider = AIProvider | OCRProvider
+export type ImageProvider = 'openai'
+export type ModelProvider = AIProvider | OCRProvider | ImageProvider
 
 export interface AIConfig {
   provider: AIProvider
@@ -51,9 +52,14 @@ export const OCR_PROVIDER_LABELS: Record<OCRProvider, string> = {
   deepseek: 'DeepSeek OCR',
 }
 
+export const IMAGE_PROVIDER_LABELS: Record<ImageProvider, string> = {
+  openai: 'OpenAI Images',
+}
+
 export const CHAT_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'mistral', 'groq', 'moonshot', 'openrouter', 'xai', 'minimax', 'qwen']
 export const REASONING_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'mistral', 'moonshot', 'deepseek', 'groq', 'openrouter', 'xai', 'minimax', 'qwen']
 export const OCR_PROVIDERS: OCRProvider[] = ['mistral', 'deepseek']
+export const IMAGE_PROVIDERS: ImageProvider[] = ['openai']
 
 export const DEFAULT_MODEL_IDS: Record<ModelRole, Partial<Record<ModelProvider, string>>> = {
   chat: {
@@ -83,6 +89,9 @@ export const DEFAULT_MODEL_IDS: Record<ModelRole, Partial<Record<ModelProvider, 
     mistral: 'mistral-ocr-latest',
     deepseek: 'deepseek-ai/DeepSeek-OCR',
   },
+  image: {
+    openai: 'gpt-4o',
+  },
 }
 
 const bundled = (provider: ModelProvider, role: ModelRole, ids: string[]): ProviderRoleCatalog => ({
@@ -105,6 +114,9 @@ export const BUNDLED_MODEL_CATALOG: ModelCatalog = {
       'o3',
       'o3-mini',
       'o1',
+      'gpt-4o',
+    ]),
+    image: bundled('openai', 'image', [
       'gpt-4o',
     ]),
   },
@@ -291,3 +303,5 @@ export function isOcrModelId(provider: ModelProvider, model: string): boolean {
   if (provider === 'deepseek') return m.includes('ocr')
   return false
 }
+
+

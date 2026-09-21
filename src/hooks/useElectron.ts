@@ -40,12 +40,15 @@ export function useElectron() {
   const fileRead = useCallback(async (relativePath: string) => api.file.read(relativePath), [])
   const fileReadOcr = useCallback(async (relativePath: string) => api.file.readOcr(relativePath), [])
   const fileWrite = useCallback(async (relativePath: string, content: string) => api.file.write(relativePath, content), [])
+  const fileWriteBinary = useCallback(async (relativePath: string, base64: string) => api.file.writeBinary(relativePath, base64), [])
+  const fileReadBinary = useCallback(async (relativePath: string) => api.file.readBinary(relativePath), [])
   const fileMkdir = useCallback(async (relativePath: string) => api.file.mkdir(relativePath), [])
   const fileExists = useCallback(async (relativePath: string) => api.file.exists(relativePath), [])
   const fileSearch = useCallback(async (pattern: string, directory?: string) => api.file.search(pattern, directory), [])
   const fileGetFileInfo = useCallback(async (relativePath: string) => api.file.getFileInfo(relativePath), [])
   const fileEnsureAttachmentsDir = useCallback(async () => api.file.ensureAttachmentsDir(), [])
   const fileSaveAttachment = useCallback(async (fileName: string, data: ArrayBuffer) => api.file.saveAttachment(fileName, data), [])
+  const fileExportPdf = useCallback(async (html: string, filename: string) => api.file.exportPdf(html, filename), [])
   const fileSearchContent = useCallback(async (query: string, directory?: string, maxResults?: number) => api.file.searchContent(query, directory, maxResults), [])
   const filePatch = useCallback(async (relativePath: string, search: string, replace: string, count?: number) => api.file.patch(relativePath, search, replace, count), [])
   const file = useMemo(
@@ -57,6 +60,8 @@ export function useElectron() {
       read: fileRead,
       readOcr: fileReadOcr,
       write: fileWrite,
+      writeBinary: fileWriteBinary,
+      readBinary: fileReadBinary,
       mkdir: fileMkdir,
       exists: fileExists,
       search: fileSearch,
@@ -65,11 +70,12 @@ export function useElectron() {
       getFileInfo: fileGetFileInfo,
       ensureAttachmentsDir: fileEnsureAttachmentsDir,
       saveAttachment: fileSaveAttachment,
+      exportPdf: fileExportPdf,
     }),
     [
       fileSelectWorkspace, fileGetWorkspace, fileSelectFolderInWorkspace, fileList, fileRead, fileReadOcr,
-      fileWrite, fileMkdir, fileExists, fileSearch, fileSearchContent, filePatch, fileGetFileInfo,
-      fileEnsureAttachmentsDir, fileSaveAttachment,
+      fileWrite, fileWriteBinary, fileReadBinary, fileMkdir, fileExists, fileSearch, fileSearchContent, filePatch,
+      fileGetFileInfo, fileEnsureAttachmentsDir, fileSaveAttachment, fileExportPdf,
     ],
   )
 
@@ -107,6 +113,25 @@ export function useElectron() {
       onConnectionStateChange: mcpOnConnectionStateChange,
     }),
     [mcpConnect, mcpDisconnect, mcpStatus, mcpGetConnectionState, mcpOnConnectionStateChange],
+  )
+
+  const mcpServerConnect = useCallback(async (serverId: string) => api.mcpServer.connect(serverId), [])
+  const mcpServerDisconnect = useCallback(async (serverId: string) => api.mcpServer.disconnect(serverId), [])
+  const mcpServerStatus = useCallback(async (serverId: string) => api.mcpServer.status(serverId), [])
+  const mcpServerGetConnectionState = useCallback(async (serverId: string) => api.mcpServer.getConnectionState(serverId), [])
+  const mcpServerOnConnectionStateChange = useCallback(
+    (callback: (state: { serverId: string; state: string; error?: string }) => void) => api.mcpServer.onConnectionStateChange(callback),
+    [],
+  )
+  const mcpServer = useMemo(
+    () => ({
+      connect: mcpServerConnect,
+      disconnect: mcpServerDisconnect,
+      status: mcpServerStatus,
+      getConnectionState: mcpServerGetConnectionState,
+      onConnectionStateChange: mcpServerOnConnectionStateChange,
+    }),
+    [mcpServerConnect, mcpServerDisconnect, mcpServerStatus, mcpServerGetConnectionState, mcpServerOnConnectionStateChange],
   )
 
   const linearConnect = useCallback(async (options?: { forceReauth?: boolean }) => api.linear.connect(options), [])
@@ -163,6 +188,7 @@ export function useElectron() {
     onToken: (token: string) => void,
     onProgress?: (event: { toolName: string; title?: string }) => void,
   ) => api.ai.chatReasoningStream(messages, tools, onToken, onProgress), [])
+  const aiGenerateImage = useCallback(async (prompt: string, options?: { size?: string; style?: string; model?: string }) => api.ai.generateImage(prompt, options), [])
   const aiAbortStream = useCallback(() => api.ai.abortStream(), [])
   const ai = useMemo(
     () => ({
@@ -174,9 +200,10 @@ export function useElectron() {
       chatReview: aiChatReview,
       chatStream: aiChatStream,
       chatReasoningStream: aiChatReasoningStream,
+      generateImage: aiGenerateImage,
       abortStream: aiAbortStream,
     }),
-    [aiConfigure, aiConfigureReasoning, aiConfigureReview, aiChat, aiChatReasoning, aiChatReview, aiChatStream, aiChatReasoningStream, aiAbortStream],
+    [aiConfigure, aiConfigureReasoning, aiConfigureReview, aiChat, aiChatReasoning, aiChatReview, aiChatStream, aiChatReasoningStream, aiGenerateImage, aiAbortStream],
   )
 
   const shellOpenExternal = useCallback(async (url: string) => api.shell.openExternal(url), [])
@@ -338,6 +365,7 @@ export function useElectron() {
     chat,
     ai,
     mcp,
+    mcpServer,
     linear,
     google,
     shell,

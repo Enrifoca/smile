@@ -14,7 +14,21 @@ import { GenericConnectorSettingsView } from './connectors/GenericConnectorSetti
 import { ConnectorPageHeader } from './connectors/ConnectorPageHeader'
 import { Alert, Badge, Button, Input, Panel, Spinner } from './ui'
 
-const CONNECTOR_LOADING_MIN_MS = 700
+interface McpServerState {
+  connected: boolean
+  state: string
+  error?: string
+}
+
+function getMcpServerIds(entries: CatalogEntry[]): string[] {
+  const ids = new Set<string>()
+  for (const entry of entries) {
+    for (const id of entry.manifest?.permissions?.mcp ?? []) {
+      ids.add(id)
+    }
+  }
+  return Array.from(ids)
+}
 
 function CatalogEntryIcon({
   connector,
@@ -183,12 +197,12 @@ function ConnectorDetailView({
 }
 
 export default function ConnectorsView() {
-  const { connectors, mcp, storage, linear, google } = useElectron()
+  const { connectors, mcp, mcpServer, storage, linear, google } = useElectron()
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [loadingCatalog, setLoadingCatalog] = useState(true)
   const [loadingConnectionState, setLoadingConnectionState] = useState(true)
-  const [mcpConnected, setMcpConnected] = useState(false)
+  const [mcpServerStates, setMcpServerStates] = useState<Record<string, McpServerState>>({})
   const [workspaceConnectors, setWorkspaceConnectors] = useState<Array<{ manifest: ConnectorManifest; promptMarkdown: string }>>([])
   const [discoveryErrors, setDiscoveryErrors] = useState<Array<{ id: string; errors: string[] }>>([])
   const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set())
@@ -228,22 +242,26 @@ export default function ConnectorsView() {
     return false
   }, [google, linear])
 
-  const refreshConnectedState = useCallback(async (entries: CatalogEntry[], mcpIsConnected: boolean) => {
-    const next = new Set<string>()
-    for (const entry of entries) {
-      if (!entry.manifest) continue
-      const configured = await isWorkspaceConnectorConfigured(entry.manifest, storage.getSecure, mcpIsConnected)
-      if (!configured) continue
+  const refreshConnectedState = useCallback(async (
+    entries: CatalogEntry[],
+    serverStates: Record<string, McpServerState>,
+  ) => {
+    const isMcpServerConnected = (serverId: string) => serverStates[serverId]?.connected ?? false
+    const results = await Promise.all(
+      entries.map(async entry => {
+        if (!entry.manifest) return null
+        const configured = await isWorkspaceConnectorConfigured(entry.manifest, storage.getSecure, isMcpServerConnected)
+        if (!configured) return null
 
-      const isOAuth = entry.manifest.auth?.type === 'oauth'
-      if (isOAuth) {
-        const connected = await isOAuthConnected(entry.manifest)
-        if (connected) next.add(entry.id)
-      } else {
-        next.add(entry.id)
-      }
-    }
-    setConnectedIds(next)
+        const isOAuth = entry.manifest.auth?.type === 'oauth'
+        if (isOAuth) {
+          const connected = await isOAuthConnected(entry.manifest)
+          return connected ? entry.id : null
+        }
+        return entry.id
+      }),
+    )
+    setConnectedIds(new Set(results.filter((id): id is string => id !== null)))
   }, [storage.getSecure, isOAuthConnected])
 
   const loadCatalog = useCallback(async () => {
@@ -265,24 +283,40 @@ export default function ConnectorsView() {
 
   const loadMcpState = useCallback(async () => {
     setLoadingConnectionState(true)
-    const startedAt = Date.now()
     let keepLoading = false
     try {
+      const serverIds = getMcpServerIds(catalog)
+      const nextStates: Record<string, McpServerState> = {}
+
       const [status, connectionState] = await Promise.all([mcp.status(), mcp.getConnectionState()])
-      const connected = status.connected || connectionState.connected
-      setMcpConnected(connected)
+      nextStates.atlassian = {
+        connected: status.connected || connectionState.connected,
+        state: connectionState.state,
+      }
       keepLoading = connectionState.state === 'connecting' || connectionState.state === 'oauth_pending'
-      await refreshConnectedState(catalog, connected)
+
+      await Promise.all(serverIds
+        .filter(id => id !== 'atlassian')
+        .map(async id => {
+          const state = await mcpServer.getConnectionState(id)
+          nextStates[id] = {
+            connected: state.state === 'connected',
+            state: state.state,
+            error: state.error,
+          }
+          if (state.state === 'connecting') keepLoading = true
+        }))
+
+      setMcpServerStates(prev => ({ ...prev, ...nextStates }))
+      await refreshConnectedState(catalog, nextStates)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load connector state')
     } finally {
       if (!keepLoading) {
-        const elapsed = Date.now() - startedAt
-        const remaining = Math.max(0, CONNECTOR_LOADING_MIN_MS - elapsed)
-        window.setTimeout(() => setLoadingConnectionState(false), remaining)
+        setLoadingConnectionState(false)
       }
     }
-  }, [catalog, mcp, refreshConnectedState])
+  }, [catalog, mcp, mcpServer, refreshConnectedState])
 
   useEffect(() => {
     void loadCatalog()
@@ -293,8 +327,8 @@ export default function ConnectorsView() {
   }, [loadMcpState])
 
   useEffect(() => {
-    void refreshConnectedState(catalog, mcpConnected)
-  }, [catalog, mcpConnected, refreshConnectedState])
+    void refreshConnectedState(catalog, mcpServerStates)
+  }, [catalog, mcpServerStates, refreshConnectedState])
 
   useEffect(() => {
     let active = true
@@ -321,14 +355,40 @@ export default function ConnectorsView() {
 
   useEffect(() => {
     const cleanup = mcp.onConnectionStateChange(state => {
-      const connected = state.state === 'connected'
+      const nextState: McpServerState = {
+        connected: state.state === 'connected',
+        state: state.state,
+        error: state.error,
+      }
+      setMcpServerStates(prev => {
+        const next = { ...prev, atlassian: nextState }
+        void refreshConnectedState(catalog, next)
+        return next
+      })
       const inProgress = state.state === 'connecting' || state.state === 'oauth_pending'
-      setMcpConnected(connected)
       setLoadingConnectionState(inProgress)
       if (state.state === 'error' && state.error) setError(state.error)
     })
     return cleanup
-  }, [mcp])
+  }, [mcp, catalog, refreshConnectedState])
+
+  useEffect(() => {
+    const cleanup = mcpServer.onConnectionStateChange(state => {
+      const nextState: McpServerState = {
+        connected: state.state === 'connected',
+        state: state.state,
+        error: state.error,
+      }
+      setMcpServerStates(prev => {
+        const next = { ...prev, [state.serverId]: nextState }
+        void refreshConnectedState(catalog, next)
+        return next
+      })
+      setLoadingConnectionState(state.state === 'connecting')
+      if (state.state === 'error' && state.error) setError(state.error)
+    })
+    return cleanup
+  }, [mcpServer, catalog, refreshConnectedState])
 
   const connectedCatalog = useMemo(
     () => catalog.filter(entry => connectedIds.has(entry.id)),
@@ -352,7 +412,6 @@ export default function ConnectorsView() {
         workspaceManifest={selectedEntry?.manifest}
         onBack={() => {
           setSelectedConnectorId(null)
-          void loadCatalog()
           void loadMcpState()
         }}
         onInstalled={() => {

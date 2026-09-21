@@ -1,16 +1,21 @@
 /**
- * Context management: a portable project scope stored under `.smile/contexts/<slug>/`.
+ * Context management: a portable project scope.
  *
- * Each context folder contains:
+ * Framework metadata for each context is stored under `.smile/contexts/<slug>/`:
  * - `<slug>.json` — metadata and connector configuration (no secrets)
  * - `<slug>.md` — textual knowledge the agent maintains via context tools
  * - `history/` — automatic backups before agent writes
- * - `files/` — generic file outputs created while the context is active
- * - Markdown reports created while the context is active are saved directly in this folder.
+ *
+ * User-facing files for the context live in the visible workspace folder
+ * `contexts/<slug>/` with subfolders:
+ * - `reports/` — markdown reports
+ * - `charts/` — charts and diagrams
+ * - `images/` — generated images
+ * - `files/` — generic file outputs
  *
  * Activate one context globally from the sidebar. When active, only enabled
  * connectors and their scoped settings apply, and file outputs are scoped to
- * this folder.
+ * the `contexts/<slug>/` folder.
  */
 
 /** Sentinel context id for workspace-wide connector knowledge (no active context). */
@@ -27,7 +32,7 @@ export interface ContextConnectorConfig {
 export interface ProjectContext {
   id: string
   name: string
-  /** Filesystem-safe folder name under `.smile/contexts/`. */
+  /** Filesystem-safe folder name under `contexts/` and `.smile/contexts/`. */
   slug: string
   createdAt: string
   updatedAt: string
@@ -58,12 +63,17 @@ export function getEnabledConnectorIds(context: ProjectContext): string[] {
     .map(([id]) => id)
 }
 
-/** Workspace-relative path to the context folder (e.g. `.smile/contexts/acme`). */
+/** Workspace-relative path to the visible context folder (e.g. `contexts/acme`). */
 export function getContextFolderPath(context: ProjectContext): string {
-  return `.smile/contexts/${context.slug}`
+  return `contexts/${context.slug}`
 }
 
 /** Workspace-relative path to the context generic files folder. */
 export function getContextFilesPath(context: ProjectContext): string {
-  return `.smile/contexts/${context.slug}/files`
+  return `contexts/${context.slug}/files`
+}
+
+/** Workspace-relative path to the context reports folder. */
+export function getContextReportsPath(context: ProjectContext): string {
+  return `contexts/${context.slug}/reports`
 }

@@ -33,7 +33,10 @@ export function MarkdownArtifactCard({ artifact, messageId, className }: Markdow
       <div className={joinClasses('ui-artifact-card', className)}>
         <button type="button" className="ui-artifact-card-header" onClick={handleOpen}>
           <span className="ui-artifact-card-icon"><DocIcon /></span>
-          <span className="ui-artifact-card-title">{artifact.title}</span>
+          <span className="ui-artifact-card-title">
+            {artifact.title}
+            <span className="ui-artifact-card-badge">Report</span>
+          </span>
           <span className="ui-artifact-card-action">Open</span>
         </button>
         <div className="ui-artifact-card-preview">

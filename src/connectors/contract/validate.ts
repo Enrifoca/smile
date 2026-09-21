@@ -34,6 +34,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+const MCP_TRANSPORTS = ['http', 'sse'] as const
+
+function validateMcpServers(raw: Record<string, unknown>, errors: string[]): void {
+  if (raw.mcpServers === undefined) return
+  if (!isRecord(raw.mcpServers)) {
+    errors.push('mcpServers must be an object')
+    return
+  }
+
+  const allowedMcp = ((raw.permissions as { mcp?: string[] } | undefined)?.mcp) || []
+  const authFields = ((raw.auth as { fields?: Array<{ key?: string }> } | undefined)?.fields) || []
+  const authFieldKeys = new Set(authFields.map(f => f.key).filter((k): k is string => typeof k === 'string'))
+
+  for (const [serverId, config] of Object.entries(raw.mcpServers)) {
+    if (!ID_PATTERN.test(serverId)) {
+      errors.push(`mcpServers key "${serverId}" must match /^[a-z][a-z0-9_-]*$/`)
+    }
+    if (!allowedMcp.includes(serverId)) {
+      errors.push(`mcpServers server "${serverId}" is not listed in permissions.mcp`)
+    }
+    if (!isRecord(config)) {
+      errors.push(`mcpServers.${serverId} must be an object`)
+      continue
+    }
+    if (typeof config.baseUrl !== 'string' || !config.baseUrl.startsWith('https://')) {
+      errors.push(`mcpServers.${serverId}.baseUrl must be an https URL`)
+    }
+    if (config.transport !== undefined && !MCP_TRANSPORTS.includes(config.transport as typeof MCP_TRANSPORTS[number])) {
+      errors.push(`mcpServers.${serverId}.transport must be one of ${MCP_TRANSPORTS.join(', ')}`)
+    }
+    if (typeof config.authSecretField !== 'string' || !config.authSecretField.trim()) {
+      errors.push(`mcpServers.${serverId}.authSecretField is required`)
+    } else if (!authFieldKeys.has(config.authSecretField)) {
+      errors.push(`mcpServers.${serverId}.authSecretField "${config.authSecretField}" must match an auth.fields key`)
+    }
+    if (config.authHeader !== undefined && typeof config.authHeader !== 'string') {
+      errors.push(`mcpServers.${serverId}.authHeader must be a string`)
+    }
+    if (config.authHeaderPrefix !== undefined && typeof config.authHeaderPrefix !== 'string') {
+      errors.push(`mcpServers.${serverId}.authHeaderPrefix must be a string`)
+    }
+  }
+}
+
 function validateTool(tool: unknown, index: number, handlerKind: ConnectorHandlerKind, errors: string[]): void {
   const where = `tools[${index}]`
   if (!isRecord(tool)) {
@@ -108,6 +152,8 @@ export function validateManifest(raw: unknown): ManifestValidation {
       }
     }
   }
+
+  validateMcpServers(raw, errors)
 
   if (!Array.isArray(raw.tools) || raw.tools.length === 0) {
     errors.push('tools must be a non-empty array')

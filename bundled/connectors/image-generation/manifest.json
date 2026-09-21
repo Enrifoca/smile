@@ -1,0 +1,50 @@
+{
+  "apiVersion": "1.0",
+  "id": "image-generation",
+  "name": "Image Generation",
+  "version": "1.0.0",
+  "description": "Generate images from text prompts using hosted image models. Supports OpenAI DALL-E 3 and Replicate FLUX.",
+  "handlerKind": "code",
+  "integrationType": "rest",
+  "auth": {
+    "type": "api-key",
+    "fields": [
+      { "key": "provider", "label": "Provider", "secret": false, "optional": false },
+      { "key": "apiKey", "label": "API key", "secret": true, "optional": false }
+    ]
+  },
+  "permissions": {
+    "http": [
+      "https://api.openai.com",
+      "https://api.replicate.com"
+    ],
+    "secrets": ["provider", "apiKey"]
+  },
+  "ui": {
+    "catalogLabel": "Image Generation",
+    "connectedLabel": "Image generation ready",
+    "scopeLabel": "Prompts"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Generate images from prompts"
+  },
+  "agentCapabilities": ["image-generation"],
+  "tools": [
+    {
+      "name": "image_generation_generate",
+      "description": "Generate an image from a text prompt and return the image as base64 or a public URL.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": { "type": "string", "description": "Text prompt describing the image." },
+          "size": { "type": "string", "description": "Desired size, e.g. 1024x1024, 1792x1024, 1024x1792. Provider-specific." },
+          "style": { "type": "string", "description": "Style hint, e.g. vivid, natural. Provider-specific." }
+        },
+        "required": ["prompt"]
+      }
+    }
+  ]
+}

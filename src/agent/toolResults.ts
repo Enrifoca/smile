@@ -21,11 +21,19 @@ export function formatCoreToolResultForAI(
     if (toolName === 'file_read' && /pdf|file_read_ocr|ocr/i.test(error)) {
       return `Error: ${error} Next step: call file_read_ocr with the same path.`
     }
+    if ((toolName === 'file_read' || toolName === 'file_read_ocr') && /ENOENT|no such file|not found|does not exist/i.test(error)) {
+      return `Error: ${error} Next step: call file_list on the parent directory or file_search to locate the file before retrying. Do not retry the same path blindly.`
+    }
     return `Error: ${error}`
   }
 
   if (toolName === 'report_write' && typeof data.data === 'string') {
     return data.data
+  }
+
+  if ((toolName === 'generate_chart' || toolName === 'generate_diagram' || toolName === 'generate_image') && data.path) {
+    const fileName = String(data.path).split(/[\\/]/).pop() || 'generated image'
+    return `Saved: ${data.path}\n\n![${fileName}](${data.path})`
   }
 
   const raw = unwrapToolResult(result)

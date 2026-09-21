@@ -40,6 +40,30 @@ Separate from memory storage. See `src/agent/compression/README.md`.
 
 Compression shrinks tool output **for the current model turn**. It does not decide what to remember.
 
+## Conversation context compression
+
+Two modules work together to keep long chats inside the model's context window without silently dropping messages.
+
+### Inference-time compression (`src/agent/contextEngine.ts`)
+
+Runs before every model call. It is **non-mutating**: the stored transcript stays intact, but only a compressed view is sent to the model.
+
+Pipeline:
+
+1. **Cheap pre-pass** — strip base64 data URIs, collapse old `[tool_result: …]` blocks to one-line summaries, deduplicate identical consecutive results, and cap individual message length.
+2. **Budget check** — if the cheap view fits inside `contextWindowTokens - outputReserve - toolOverhead`, use it. The compressor subtracts the estimated token cost of the available tool definitions so that enabling many connectors does not push the request past the model limit.
+3. **Head + tail protection** — keep the first ~3 user turns verbatim and fill a recent tail budget, anchored on the last user message plus the assistant/tool response that follows it.
+4. **Middle summarization** — send the middle band to a cheap summary call and insert the result as a system message.
+5. **Last-resort guard** — if even head + summary + tail exceeds the budget, drop oldest middle messages, cap the summary, truncate the system prompt only if necessary, and finally drop the oldest remaining message. This guard preserves the newest turn at the cost of older context.
+
+### Background history compression (`src/agent/historyCompression.ts`)
+
+Runs once per user turn when stored visible history crosses 50% of the configured context window. It **mutates** `conversationHistory`, replacing old turns with tiered chunk summaries and a master summary so the renderer and long-term memory usage do not grow forever. The most recent 14 turns are always kept verbatim.
+
+### Configuration
+
+`contextWindowTokens` is read from Settings → Agent Behavior (stored as `agentContextWindow`). Set it to the actual context-window size of the model/provider you are using. If the value is larger than the real model limit, the provider will still reject the request.
+
 ## Connector source memory (phase 2)
 
 Storage: `.smile/memories/sources/<connectorId>/<scopeId>/`

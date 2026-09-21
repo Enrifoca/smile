@@ -27,6 +27,8 @@ export interface ElectronAPI {
     read: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     readOcr: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     write: (relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
+    writeBinary: (relativePath: string, base64: string) => Promise<{ success: boolean; error?: string }>
+    readBinary: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     mkdir: (relativePath: string) => Promise<{ success: boolean; error?: string }>
     exists: (relativePath: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>
     search: (pattern: string, directory?: string) => Promise<{ success: boolean; data?: Array<{ name: string; path: string; size: number; isDirectory: boolean }>; error?: string }>
@@ -35,6 +37,7 @@ export interface ElectronAPI {
     getFileInfo: (relativePath: string) => Promise<{ success: boolean; data?: { name: string; size: number; isDirectory: boolean; mimeType?: string }; error?: string }>
     ensureAttachmentsDir: () => Promise<{ success: boolean; path?: string; error?: string }>
     saveAttachment: (fileName: string, data: ArrayBuffer) => Promise<{ success: boolean; path?: string; error?: string }>
+    exportPdf: (html: string, filename: string) => Promise<{ success: boolean; data?: string; error?: string }>
   }
   ai: {
     configure: (config: AIConfig) => Promise<{ success: boolean }>
@@ -75,6 +78,11 @@ export interface ElectronAPI {
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
       error?: string
     }>
+    generateImage: (prompt: string, options?: { size?: string; style?: string; model?: string }) => Promise<{
+      success: boolean
+      data?: { base64?: string; url?: string }
+      error?: string
+    }>
     abortStream: () => void
   }
   chat: {
@@ -92,6 +100,13 @@ export interface ElectronAPI {
     status: () => Promise<{ connected: boolean }>
     getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
+  }
+  mcpServer: {
+    connect: (serverId: string) => Promise<{ success: boolean; error?: string }>
+    disconnect: (serverId: string) => Promise<{ success: boolean }>
+    status: (serverId: string) => Promise<{ connected: boolean }>
+    getConnectionState: (serverId: string) => Promise<{ state: string; error?: string }>
+    onConnectionStateChange: (callback: (state: { serverId: string; state: string; error?: string }) => void) => () => void
   }
   linear: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>

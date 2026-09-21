@@ -89,6 +89,7 @@ There are no built-in connector packages inside the agent loop. Workspace connec
 | `integrationType` | string | no | Catalog label: `rest`, `mcp`, `cli`, `graphql`, `sop`, `ftp`, `sftp` |
 | `auth` | object | no | Credential fields collected in settings UI |
 | `permissions` | object | no | Host capabilities the handler may use (enforced at runtime) |
+| `mcpServers` | object | no | Remote MCP server configs when `handlerKind` is `mcp` — keyed by `serverId` |
 | `ui` | object | no | Labels for catalog / connected states |
 | `catalog` | object | no | `icon` path (relative), optional `tagline` |
 | `contextSchema` | JSON Schema | no | Per-project scope config; exposed via `host.context.get()` |
@@ -127,7 +128,7 @@ The host **denies** any capability not declared here. Declare the minimum needed
 | Key | Shape | Enables |
 | --- | --- | --- |
 | `http` | `string[]` | `host.http.fetch` — origin prefixes, e.g. `"https://api.example.com"` |
-| `mcp` | `string[]` | `host.mcp.call` — server ids, e.g. `"atlassian"` |
+| `mcp` | `string[]` | `host.mcp.call` — server ids, e.g. `"atlassian"`, `"statista"`. Each id must be registered globally or declared in `mcpServers` |
 | `file.read` / `file.write` | boolean | `host.file.read` (workspace-relative paths) |
 | `secrets` | `string[]` | `host.secrets.get` — keys matching `auth.fields[].key` |
 | `host` | `string[]` | `host.call` — host integrations (id + params defined by your connector) |
@@ -267,23 +268,100 @@ You implement logic in `handler.js`. Full flexibility; permissions gate every ho
 
 ### `mcp`
 
-No `handler.js`. Each tool maps 1:1 to an MCP tool:
+No `handler.js`. Each tool maps 1:1 to an MCP tool. For remote HTTP MCP servers, also declare `mcpServers` so the generic HTTP MCP client can connect:
 
 ```json
 {
   "handlerKind": "mcp",
-  "permissions": { "mcp": ["atlassian"] },
+  "permissions": { "mcp": ["statista"] },
+  "mcpServers": {
+    "statista": {
+      "baseUrl": "https://statista.example.com/mcp",
+      "transport": "http"
+    }
+  },
+  "auth": {
+    "type": "api-key",
+    "fields": [{ "key": "apiKey", "label": "API key", "secret": true }]
+  },
   "tools": [{
-    "name": "my_search_items",
+    "name": "statista_search",
     "category": "connector-read",
     "requiresConfirmation": false,
-    "mcp": { "serverId": "atlassian", "toolName": "searchItems" },
-    "inputSchema": { "type": "object", "properties": { "jql": { "type": "string" } } }
+    "mcp": { "serverId": "statista", "toolName": "search-statistics" },
+    "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } }
   }]
 }
 ```
 
+Supported transports:
+
+- `http` — Streamable HTTP via `@modelcontextprotocol/sdk`; the generic `electron/services/http-mcp.ts` client manages the connection, so no new Electron service file is needed.
+- Custom/local servers — register a dedicated service in `electron/services/` (see `atlassian-mcp.ts`) and add the server id to `mcpServerRegistry` in `electron/main.ts`.
+
 The host calls MCP and normalizes results. Test MCP connectors in the live app after connecting the MCP server — the SDK `test` command only supports `handlerKind: code`.
+
+### Image generation connectors
+
+A connector can provide a backend for the core `generate_image` tool. The host tries the connector first; if it is not configured or returns a config error, the host falls back to the active chat model's native image capability.
+
+Example manifest snippet:
+
+```json
+{
+  "handlerKind": "code",
+  "auth": {
+    "type": "api-key",
+    "fields": [
+      { "key": "provider", "label": "Provider", "secret": false },
+      { "key": "apiKey", "label": "API key", "secret": true }
+    ]
+  },
+  "permissions": {
+    "http": ["https://api.openai.com", "https://api.replicate.com"],
+    "secrets": ["provider", "apiKey"]
+  },
+  "tools": [{
+    "name": "image_generation_generate",
+    "category": "connector-read",
+    "requiresConfirmation": false,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "prompt": { "type": "string" },
+        "size": { "type": "string" },
+        "style": { "type": "string" }
+      },
+      "required": ["prompt"]
+    }
+  }]
+}
+```
+
+The handler should return `{ success: true, data: { base64?: string, url?: string } }`. The host saves the resulting bytes to `images/` (or `contexts/<slug>/images/` when a context is active).
+
+### Chart generation
+
+The core `generate_chart` tool renders charts from tabular data using ECharts. Connectors that return statistical or time-series data can suggest the agent call `generate_chart` with the data, or return data in a shape the agent can pass directly.
+
+Expected `data` shape: an array of objects where the first key is the category axis and remaining keys are numeric series.
+
+```json
+[
+  { "Month": "Jan", "Revenue": 12000, "Cost": 8000 },
+  { "Month": "Feb", "Revenue": 15000, "Cost": 9000 }
+]
+```
+
+The tool supports `bar`, `horizontalBar`, `line`, `area`, `pie`, and `doughnut`. Connectors can set `options.unit` to `%` or `$` and `options.title`, `options.xAxisLabel`, `options.yAxisLabel` for readable output.
+
+`generate_chart` requires at least two data rows. If a connector only has a single value or approximate narrative data, the agent should describe the insight in prose or call `generate_image` instead.
+
+Generated charts and diagrams are saved to `charts/` (or `contexts/<slug>/charts/` when a context is active).
+
+If a connector returns approximate or narrative data, the agent can use `generate_image` instead and describe the desired chart in the prompt. The host will use a configured image-generation connector when available, or fall back to the active model's native image capability.
+
+For architecture, flow, or relationship visuals, the agent can use `generate_diagram` with Mermaid syntax.
 
 ---
 
@@ -318,13 +396,13 @@ When a connector needs per-project configuration (e.g. which scopes to monitor):
 
 ### File outputs scoped to a context
 
-When a project context is active, the host passes the context folder path (e.g. `.smile/contexts/acme`) to every connector call via `host.context.getFolderPath()`. Connectors that write files should:
+When a project context is active, the host passes the visible context folder path (e.g. `contexts/acme`) to every connector call via `host.context.getFolderPath()`. Connectors that write files should:
 
 - Use `host.file.write(path, content)` with `permissions.file.write` declared.
-- Prefer saving outputs directly under `<contextFolderPath>/` (markdown reports) or `<contextFolderPath>/files/` (other files).
+- Prefer saving outputs under the typed subfolders: `<contextFolderPath>/reports/` for markdown reports, `<contextFolderPath>/charts/` for charts/diagrams, `<contextFolderPath>/images/` for images, and `<contextFolderPath>/files/` for other files.
 - Treat explicit relative paths starting with `.smile/` or containing `/` as user/agent intent and write them as-is.
 
-If no context is active, `host.context.getFolderPath()` returns `null` and file writes fall back to the workspace root.
+If no context is active, `host.context.getFolderPath()` returns `null` and file writes fall back to the workspace root folders (`reports/`, `charts/`, `images/`, `files/`).
 
 ---
 

@@ -7,6 +7,9 @@ import { GcalIcon } from '../components/connectors/GcalIcon'
 import { GdriveIcon } from '../components/connectors/GdriveIcon'
 import { JiraIcon } from '../components/connectors/JiraIcon'
 import { LinearIcon } from '../components/connectors/LinearIcon'
+import { StatistaIcon } from '../components/connectors/StatistaIcon'
+import { SimilarWebIcon } from '../components/connectors/SimilarWebIcon'
+import { ImageGenerationIcon } from '../components/connectors/ImageGenerationIcon'
 import type { ConnectorIntegrationType, ConnectorManifest } from './contract'
 
 /**
@@ -96,6 +99,33 @@ const BUNDLED_CATALOG: Array<Omit<CatalogEntry, 'Icon'>> = [
     tagline: 'Files',
     CatalogGraphic: GdriveIcon,
   },
+  {
+    id: 'statista',
+    name: 'Statista',
+    description: 'Market and consumer data via the Statista MCP server. Search statistics, charts, and insights.',
+    origin: 'bundled',
+    integrationType: 'mcp',
+    tagline: 'Market & consumer data',
+    CatalogGraphic: StatistaIcon,
+  },
+  {
+    id: 'similarweb',
+    name: 'SimilarWeb',
+    description: 'Web analytics and competitive intelligence via the SimilarWeb MCP server. Traffic, keywords, referrals, and more.',
+    origin: 'bundled',
+    integrationType: 'mcp',
+    tagline: 'Web analytics & intelligence',
+    CatalogGraphic: SimilarWebIcon,
+  },
+  {
+    id: 'image-generation',
+    name: 'Image Generation',
+    description: 'Generate images from text prompts using hosted providers such as OpenAI DALL-E 3 and Replicate FLUX.',
+    origin: 'bundled',
+    integrationType: 'rest',
+    tagline: 'Generate images from prompts',
+    CatalogGraphic: ImageGenerationIcon,
+  },
 ]
 
 export function inferIntegrationType(manifest: ConnectorManifest): ConnectorIntegrationType | undefined {
@@ -176,10 +206,11 @@ export async function isOAuthClientConfigured(
 export async function isWorkspaceConnectorConfigured(
   manifest: ConnectorManifest,
   getSecure: (key: string) => Promise<string | null>,
-  mcpConnected: boolean,
+  isMcpServerConnected: (serverId: string) => boolean,
 ): Promise<boolean> {
   const secretFields = (manifest.auth?.fields ?? []).filter(field => field.secret !== false)
-  const needsMcp = (manifest.permissions?.mcp?.length ?? 0) > 0
+  const mcpServerIds = manifest.permissions?.mcp ?? []
+  const needsMcp = mcpServerIds.length > 0
   const optionalSecrets = manifest.auth?.type === 'oauth-with-rest-token'
   const isOAuth = manifest.auth?.type === 'oauth'
 
@@ -188,14 +219,14 @@ export async function isWorkspaceConnectorConfigured(
   }
 
   if (secretFields.length > 0 && !optionalSecrets) {
-    for (const field of secretFields) {
-      const value = await getSecure(`connector:${manifest.id}:${field.key}`)
-      if (!value?.trim()) return false
-    }
+    const secretValues = await Promise.all(
+      secretFields.map(field => getSecure(`connector:${manifest.id}:${field.key}`)),
+    )
+    if (secretValues.some(value => !value?.trim())) return false
   }
 
   if (needsMcp) {
-    return mcpConnected
+    return mcpServerIds.every(id => isMcpServerConnected(id))
   }
 
   if (secretFields.length > 0) {

@@ -107,6 +107,8 @@ APPLE_TEAM_ID=…
 
 Until then, unsigned builds are fine for testing and early adopters who accept OS warnings.
 
+Local macOS builds use ad-hoc signing (`scripts/afterSign.cjs`) so the hardened-runtime entitlements required by Electron are applied even without a Developer ID certificate. On some machines macOS re-applies Finder/fileprovider extended attributes to the built `.app` bundle faster than `codesign` can validate it; the script works around this by copying the bundle to a temporary directory, signing it there, and moving it back.
+
 ## Website download page
 
 Minimal pattern:

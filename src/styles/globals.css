@@ -1107,7 +1107,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-artifact-card {
-  @apply rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden max-w-2xl text-left;
+  @apply rounded-2xl border-2 border-neutral-950 bg-white shadow-sm overflow-hidden max-w-2xl text-left;
 }
 
 .ui-artifact-card-header {
@@ -1123,7 +1123,11 @@ input:focus, textarea:focus, select:focus {
 }
 
 .ui-artifact-card-title {
-  @apply flex-1 text-sm font-semibold text-gray-900;
+  @apply flex-1 flex items-center gap-2 text-sm font-semibold text-gray-900;
+}
+
+.ui-artifact-card-badge {
+  @apply inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium tracking-wide uppercase bg-neutral-950 text-white;
 }
 
 .ui-artifact-card-action {
@@ -1181,6 +1185,10 @@ input:focus, textarea:focus, select:focus {
 
 .ui-download-popover-item:hover {
   background-color: var(--color-hover-surface);
+}
+
+.ui-download-popover-error {
+  @apply px-3 py-2 text-xs text-red-600 border-b border-gray-100;
 }
 
 .ui-confirm-modal-backdrop {
@@ -1511,6 +1519,14 @@ input:focus, textarea:focus, select:focus {
 
 .ui-md-hr {
   @apply border-gray-200 my-4;
+}
+
+.ui-md-image {
+  @apply max-w-full h-auto block my-3 rounded;
+}
+
+.ui-md-image-error {
+  @apply inline-block text-sm text-gray-500 italic border border-dashed border-gray-300 rounded px-2 py-1;
 }
 
 .ui-write-action-bar {
@@ -2346,6 +2362,15 @@ input:focus, textarea:focus, select:focus {
 
 .ui-inspector-item--active:hover {
   background: var(--color-surface-alt);
+}
+
+.ui-inspector-item--missing {
+  opacity: 0.7;
+}
+
+.ui-inspector-item--missing .ui-inspector-item__title {
+  text-decoration: line-through;
+  color: var(--color-muted-text);
 }
 
 .ui-inspector-item__title {

@@ -32,6 +32,17 @@ Connector `approveAction` can set `resumeAgent: true` (see `src/connectors/types
 
 Agent emits `Message.type: 'artifact'` after successful `report_write` (and `file_write` under the active context folder or `.smile/*.md` as fallback).
 
+## Visual generation tools
+
+Core tools for creating report visuals. Implemented in `ChatView` and routed through `AgentConfig.executeVisualTool`.
+
+| Tool | Backend | Notes |
+| --- | --- | --- |
+| `generate_chart` | Apache ECharts (renderer) | Data-driven PNG; supports `bar`, `line`, `pie`, `doughnut`, and ECharts option overrides. |
+| `generate_image` | Connector → native model fallback | Uses the `image-generation` connector if installed; otherwise falls back to the active chat model's native image capability (e.g., OpenAI gpt-4o). If neither is available, returns a guidance error. |
+
+Both tools save PNGs to the workspace via `file.writeBinary` and return `{ success: true, path }` for report references.
+
 ## Streaming
 
 | Module | Role |

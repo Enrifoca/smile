@@ -2,12 +2,15 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import { useElectron } from '../hooks/useElectron'
+import { renderChartToPng, validateChartData } from '../utils/chartRenderer'
+import { renderDiagramToPng } from '../utils/diagramRenderer'
+
 import { Agent, Message, PendingAction, UserProfile, type AgentContextSnapshot, type ToolEntry } from '../agent'
 import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
 
-import { buildReportPath, buildReportToolResult, getActiveReportFromMessages, titleFromReportPath, type MarkdownArtifact } from '../agent/artifacts'
+import { buildReportPath, buildReportToolResult, titleFromReportPath, type MarkdownArtifact } from '../agent/artifacts'
 import {
   getContextFilesPath,
   getContextFolderPath,
@@ -20,6 +23,8 @@ import { Button } from './ui/Button'
 import { ChatBanner, ChatEmptyState, ChatActivityIndicator, WriteActionConfirmModule, ActiveReportPill } from './chat'
 import { useChatActivity } from '../chat/ChatActivityContext'
 import { CHAT_HISTORY_CHANGED, notifyChatHistoryChanged } from '../shell/chatHistoryEvents'
+import { embedImagesInMarkdown } from '../utils/resolveImagePath'
+import { registerGeneratedImage, injectMissingImageSources } from '../utils/generatedImageRegistry'
 
 interface ChatViewProps {
   chatId: string | null
@@ -28,6 +33,10 @@ interface ChatViewProps {
   onOpenSettings: () => void
   activeContext: ProjectContext | null
   pinnedReportPath?: string | null
+  /** Report back the currently effective active report for this chat (transcript or pinned). */
+  onActiveReportChange?: (path: string | null) => void
+  /** Pin or unpin a report globally from within the chat (used when a report is created or dismissed). */
+  onSetPinnedReport?: (path: string | null, title: string) => void
   onContextSnapshot?: (snapshot: AgentContextSnapshot) => void
 }
 
@@ -78,6 +87,8 @@ export default function ChatView({
   onOpenSettings,
   activeContext,
   pinnedReportPath,
+  onActiveReportChange,
+  onSetPinnedReport,
   onContextSnapshot,
 }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -89,9 +100,9 @@ export default function ChatView({
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; path: string; size: number }>>([])
   const [managedProjects, setManagedProjects] = useState<ConnectorScope[]>([])
   const [isDragging, setIsDragging] = useState(false)
-  const [dismissedReportMessageId, setDismissedReportMessageId] = useState<string | null>(null)
   const [useThinking, setUseThinking] = useState(false)
   const [reasoningConfigured, setReasoningConfigured] = useState(false)
+  const aiConfigRef = useRef<{ provider: string; model?: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Streaming content accumulator (keyed by message id)
   const streamingContentRef = useRef<Map<string, string>>(new Map())
@@ -158,7 +169,6 @@ export default function ChatView({
   const electron = useElectron()
   const { storage, mcp, file, chat: chatAPI, ai, memory: memoryAPI, contexts: contextsAPI } = electron
 
-  const transcriptReport = useMemo(() => getActiveReportFromMessages(messages), [messages])
   const pinnedReport = useMemo(() => {
     if (!pinnedReportPath) return null
     return {
@@ -166,8 +176,18 @@ export default function ChatView({
       messageId: `pinned:${pinnedReportPath}`,
     }
   }, [pinnedReportPath])
-  const activeReport = transcriptReport ?? pinnedReport
-  const showActiveReport = activeReport && activeReport.messageId !== dismissedReportMessageId
+  const activeReport = pinnedReport
+  const showActiveReport = Boolean(activeReport)
+
+  // Report the effective active report up to the shell so the Inspector's
+  // Reports tab can highlight it.
+  useEffect(() => {
+    if (!isVisible) {
+      onActiveReportChange?.(null)
+      return
+    }
+    onActiveReportChange?.(activeReport?.artifact.path ?? null)
+  }, [isVisible, activeReport, onActiveReportChange])
 
   useEffect(() => {
     agent?.setActiveContext(activeContext)
@@ -367,7 +387,6 @@ export default function ChatView({
         setMessages([])
       }
       setPendingAction(pendingByChatRef.current.get(chatId ?? '') ?? null)
-      setDismissedReportMessageId(null)
       return
     }
 
@@ -390,7 +409,6 @@ export default function ChatView({
       agent?.clearHistory()
     }
     setPendingAction(pendingByChatRef.current.get(chatId ?? '') ?? null)
-    setDismissedReportMessageId(null)
   }, [chatId, agent, chatActivity.runningChatId, isVisible])
 
   // When returning to a chat that is still running in the background, hydrate once if empty.
@@ -449,6 +467,7 @@ export default function ChatView({
 
       // Configure AI service in main process
       const aiConfig = JSON.parse(aiConfigStr)
+      aiConfigRef.current = aiConfig
       await ai.configure(aiConfig)
       
       const userProfile = normalizeUserProfile(await storage.get('userProfile') as Partial<UserProfile> | null)
@@ -533,6 +552,7 @@ export default function ChatView({
         },
         onContextSnapshot: (snapshot) => onContextSnapshot?.(snapshot),
         executeFileTool,
+        executeVisualTool,
         executeMemoryTool,
         executeContextTool,
         loadContextPromptBody: async (contextId: string): Promise<ContextPromptBody> => {
@@ -605,9 +625,11 @@ export default function ChatView({
   const clearStreamingFlags = (msgs: Message[]): Message[] =>
     msgs.map(m => (m.isStreaming ? { ...m, isStreaming: false } : m))
 
-  const extractArtifactFromToolResult = (content: string): MarkdownArtifact | null => {
-    const pathMatch = content.match(/Report saved:\s*(.+)/i)
-    const titleMatch = content.match(/Title:\s*(.+)/i)
+  const extractArtifactFromToolResult = (content: unknown): MarkdownArtifact | null => {
+    const text = typeof content === 'string' ? content : ''
+    if (!text) return null
+    const pathMatch = text.match(/Report saved:\s*(.+)/i)
+    const titleMatch = text.match(/Title:\s*(.+)/i)
     if (!pathMatch?.[1] || !titleMatch?.[1]) return null
     return {
       path: pathMatch[1].trim(),
@@ -634,7 +656,7 @@ export default function ChatView({
         // parsing the report details from the preceding tool_result message.
         for (let i = index - 1; i >= 0; i--) {
           const candidate = msgs[i]
-          if (candidate.type !== 'tool_result') continue
+          if (candidate?.type !== 'tool_result') continue
           const artifact = extractArtifactFromToolResult(candidate.content)
           if (artifact) {
             return { ...m, artifact }
@@ -907,7 +929,14 @@ export default function ChatView({
       ? prev.map(m => m.id === message.id ? message : m)
       : [...prev, message]
     commitMessages(targetId, next, { sync: true })
-  }, [resolveTargetChatId, getMessagesForChat, commitMessages])
+
+    // Auto-pin a newly created report so it appears as the active report in
+    // chat and in the Inspector's Reports tab. Older reports are not re-activated
+    // automatically when the chat is reopened.
+    if (!exists && message.type === 'artifact' && message.artifact) {
+      onSetPinnedReport?.(message.artifact.path, message.artifact.title)
+    }
+  }, [resolveTargetChatId, getMessagesForChat, commitMessages, onSetPinnedReport])
 
   /**
    * Called by the agent during streaming:
@@ -967,14 +996,21 @@ export default function ChatView({
 
   const isScopedPath = (inputPath: string): boolean => {
     const normalized = inputPath.replace(/\\/g, '/')
-    return normalized.startsWith('.smile/') || normalized.includes('/')
+    return normalized.startsWith('.smile/') || normalized.startsWith('contexts/') || normalized.includes('/')
   }
 
-  const resolveWritePath = (inputPath: string, context: ProjectContext | null): string => {
+  const resolveWritePath = (
+    inputPath: string,
+    context: ProjectContext | null,
+    subfolder: string = 'files',
+  ): string => {
     const trimmed = inputPath.trim()
     if (!trimmed) return ''
-    if (context && !isScopedPath(trimmed)) {
-      return `${getContextFilesPath(context)}/${trimmed}`
+    if (!isScopedPath(trimmed)) {
+      if (context) {
+        return `contexts/${context.slug}/${subfolder}/${trimmed}`
+      }
+      return `${subfolder}/${trimmed}`
     }
     return trimmed
   }
@@ -990,8 +1026,8 @@ export default function ChatView({
     if (direct.success) return direct
     if (!context) return direct
 
-    // Fallback: look inside the active context folder.
-    const contextPath = `${getContextFolderPath(context)}/${trimmed}`
+    // Fallback: look inside the active context files folder.
+    const contextPath = `${getContextFilesPath(context)}/${trimmed}`
     return await file.read(contextPath)
   }
 
@@ -1015,13 +1051,19 @@ export default function ChatView({
           if (direct.success || !activeContext) return direct
           return await file.readOcr(`${getContextFilesPath(activeContext)}/${inputPath}`)
         }
+
         case 'file_write': {
           const writePath = resolveWritePath(args.path as string, activeContext)
           return await file.write(writePath, args.content as string)
         }
         case 'report_write': {
           const title = String(args.title || 'Report')
-          const content = String(args.content || '')
+          const rawContent = String(args.content || '')
+          // The model sometimes emits empty image references (e.g. ![alt]()).
+          // Fill them from the session registry of generated charts/images before
+          // embedding so the saved report renders its visuals without IPC reads.
+          const injectedContent = injectMissingImageSources(rawContent)
+          const content = await embedImagesInMarkdown(injectedContent)
           const path = buildReportPath(title, args.path as string | undefined, activeContext)
           const writeResult = await file.write(path, content)
           if (!writeResult.success) return writeResult
@@ -1064,6 +1106,143 @@ export default function ChatView({
       }
     } catch (error) {
       throw error
+    }
+  }
+
+  async function saveBase64Image(
+    path: string,
+    base64: string,
+    subfolder: string = 'images',
+  ): Promise<{ success: boolean; path?: string; error?: string }> {
+    const writePath = resolveWritePath(path, activeContext, subfolder)
+    const data = base64.includes(',') ? base64.split(',')[1] : base64
+    const saveResult = await file.writeBinary(writePath, data)
+    if (!saveResult.success) return { success: false, error: saveResult.error }
+    return { success: true, path: writePath }
+  }
+
+  async function generateImageWithFallback(args: Record<string, unknown>): Promise<{ success: boolean; path?: string; error?: string }> {
+    const prompt = String(args.prompt || '')
+    const path = String(args.path || '')
+    const size = args.size ? String(args.size) : undefined
+    const style = args.style ? String(args.style) : undefined
+
+    if (!prompt) return { success: false, error: 'Prompt is required.' }
+    if (!path) return { success: false, error: 'Path is required.' }
+
+    // 1. Try the image-generation connector first.
+    try {
+      const connectorResult = await electron.connectors.execute('image-generation', 'image_generation_generate', { prompt, size, style })
+      if (connectorResult.success) {
+        const resultData = connectorResult.data as { base64?: string; url?: string } | undefined
+        if (resultData?.base64) {
+          const save = await saveBase64Image(path, resultData.base64)
+          if (save.success) {
+            registerGeneratedImage(save.path, { prompt })
+            return { success: true, path: save.path }
+          }
+          return { success: false, error: save.error }
+        }
+        if (resultData?.url) {
+          const res = await fetch(resultData.url)
+          if (!res.ok) return { success: false, error: `Failed to download generated image: ${res.status}` }
+          const blob = await res.blob()
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onloadend = () => resolve(reader.result as string)
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+          })
+          const save = await saveBase64Image(path, dataUrl)
+          if (save.success) {
+            registerGeneratedImage(save.path, { prompt })
+            return { success: true, path: save.path }
+          }
+          return { success: false, error: save.error }
+        }
+        return { success: false, error: 'Connector returned no image data.' }
+      }
+      const err = (connectorResult as { error?: string }).error || ''
+      const isConfigError = /not configured|api key|credentials|missing/i.test(err)
+      if (!isConfigError) return { success: false, error: err }
+    } catch {
+      // Connector not installed or execution failed — fall through to model fallback.
+    }
+
+    // 2. Fall back to the active chat model's native image capability.
+    const modelResult = await ai.generateImage(prompt, { size, style })
+    if (!modelResult.success) return { success: false, error: modelResult.error }
+    if (!modelResult.data?.base64) return { success: false, error: 'Model returned no image data.' }
+    const save = await saveBase64Image(path, modelResult.data.base64)
+    if (save.success) {
+      registerGeneratedImage(save.path, { prompt })
+      return { success: true, path: save.path }
+    }
+    return { success: false, error: save.error }
+  }
+
+  const executeVisualTool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    try {
+      if (name === 'generate_chart') {
+        const type = String(args.type || 'bar') as import('../utils/chartRenderer').ChartType
+        const data = Array.isArray(args.data) ? args.data as Array<Record<string, unknown>> : []
+        const options = args.options ? (args.options as Record<string, unknown>) : undefined
+        const title = args.title ? String(args.title) : options?.title ? String(options.title) : undefined
+        const path = String(args.path || '')
+        if (!path) return { success: false, error: 'Path is required.' }
+        if (data.length === 0) return { success: false, error: 'Chart data is required.' }
+
+        const validation = validateChartData(type, data)
+        if (!validation.valid) {
+          return { success: false, error: `Invalid chart data: ${validation.error}. Only chart real data from tool results; do not invent values.` }
+        }
+
+        const chartData = (validation.data ?? data) as Array<Record<string, unknown>>
+        const dataUrl = await renderChartToPng({
+          type,
+          data: chartData,
+          title,
+          xAxisLabel: options?.xAxisLabel ? String(options.xAxisLabel) : undefined,
+          yAxisLabel: options?.yAxisLabel ? String(options.yAxisLabel) : undefined,
+          unit: options?.unit ? String(options.unit) : undefined,
+          colors: Array.isArray(options?.colors) ? options.colors.map(String) : undefined,
+          legend: typeof options?.legend === 'boolean' ? options.legend : undefined,
+          dataLabels: typeof options?.dataLabels === 'boolean' ? options.dataLabels : undefined,
+          gridLines: typeof options?.gridLines === 'boolean' ? options.gridLines : undefined,
+          stacked: typeof options?.stacked === 'boolean' ? options.stacked : undefined,
+          smooth: typeof options?.smooth === 'boolean' ? options.smooth : undefined,
+          logScale: typeof options?.logScale === 'boolean' ? options.logScale : undefined,
+          overrides: options,
+        })
+        const save = await saveBase64Image(path, dataUrl, 'charts')
+        if (!save.success) return { success: false, error: save.error }
+        registerGeneratedImage(save.path, { title })
+        return { success: true, path: save.path }
+      }
+
+      if (name === 'generate_diagram') {
+        const type = String(args.type || 'mermaid')
+        const source = String(args.source || '')
+        const title = args.title ? String(args.title) : undefined
+        const path = String(args.path || '')
+        if (!path) return { success: false, error: 'Path is required.' }
+        if (!source) return { success: false, error: 'Diagram source is required.' }
+        if (type !== 'mermaid') return { success: false, error: `Unsupported diagram type: ${type}` }
+
+        const dataUrl = await renderDiagramToPng({ type: 'mermaid', source, title })
+        const save = await saveBase64Image(path, dataUrl, 'charts')
+        if (!save.success) return { success: false, error: save.error }
+        registerGeneratedImage(save.path, { title })
+        return { success: true, path: save.path }
+      }
+
+      if (name === 'generate_image') {
+        return generateImageWithFallback(args)
+      }
+
+      return { success: false, error: `Unknown visual tool: ${name}` }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Visual generation failed' }
     }
   }
 
@@ -1544,12 +1723,12 @@ export default function ChatView({
             />
           )}
 
-          {showActiveReport && (
+          {showActiveReport && activeReport && (
             <ActiveReportPill
               key={activeReport.messageId}
               artifact={activeReport.artifact}
               messageId={activeReport.messageId}
-              onDismiss={() => setDismissedReportMessageId(activeReport.messageId)}
+              onDismiss={() => onSetPinnedReport?.(null, activeReport.artifact.title)}
               className="mb-3"
             />
           )}

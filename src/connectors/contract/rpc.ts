@@ -18,8 +18,8 @@ export interface ContextEnvelope {
   contextId: string
   config: Record<string, unknown> | null
   /**
-   * Workspace-relative path to the active context folder
-   * (e.g. `.smile/contexts/acme`). Connectors may use this to save file outputs
+   * Workspace-relative path to the visible active context folder
+   * (e.g. `contexts/acme`). Connectors may use this to save file outputs
    * inside the context scope (e.g. `<contextFolderPath>/files/` or
    * `<contextFolderPath>/reports/`). Optional for backwards compatibility.
    */
