@@ -1,0 +1,175 @@
+{
+  "apiVersion": "1.0",
+  "id": "similarweb",
+  "name": "SimilarWeb",
+  "version": "1.0.0",
+  "description": "Web analytics and competitive intelligence via the SimilarWeb MCP server. Traffic, engagement, referrals, keywords, geography, and lead enrichment.",
+  "handlerKind": "mcp",
+  "integrationType": "mcp",
+  "auth": {
+    "type": "api-key",
+    "fields": [
+      { "key": "apiKey", "label": "SimilarWeb API key", "secret": true }
+    ]
+  },
+  "permissions": {
+    "mcp": ["similarweb"],
+    "secrets": ["apiKey"]
+  },
+  "ui": {
+    "catalogLabel": "SimilarWeb",
+    "connectedLabel": "SimilarWeb ready",
+    "scopeLabel": "Domains"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Web analytics & intelligence"
+  },
+  "agentCapabilities": ["web-analytics"],
+  "mcpServers": {
+    "similarweb": {
+      "transport": "http",
+      "baseUrl": "https://mcp.similarweb.com",
+      "authHeader": "Authorization",
+      "authHeaderPrefix": "Bearer ",
+      "authSecretField": "apiKey"
+    }
+  },
+  "tools": [
+    {
+      "name": "similarweb_get_website_rank",
+      "description": "Get country and category rank for a domain.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-websites-website-rank" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" },
+          "country": { "type": "string", "description": "ISO country code (optional)" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_get_traffic_and_engagement",
+      "description": "Get traffic and engagement metrics for a domain over time.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-websites-traffic-and-engagement" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" },
+          "country": { "type": "string", "description": "ISO country code (optional)" },
+          "granularity": { "type": "string", "description": "monthly or weekly (optional)" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_get_traffic_channels",
+      "description": "Get traffic channel breakdown for a domain (direct, search, social, referral, paid, email, display).",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-websites-traffic-channels" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" },
+          "country": { "type": "string", "description": "ISO country code (optional)" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_get_geography",
+      "description": "Get country-level traffic breakdown for a domain.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-websites-geography-agg" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_get_keywords",
+      "description": "Get organic and paid keywords for a domain.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-keywords-latest-agg" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" },
+          "country": { "type": "string", "description": "ISO country code (optional)" },
+          "limit": { "type": "integer", "description": "Maximum results (default 20)" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_get_similar_sites",
+      "description": "Get sites with similar audience and traffic patterns to a domain.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-websites-similar-sites-agg" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" },
+          "limit": { "type": "integer", "description": "Maximum results (default 20)" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_get_technologies",
+      "description": "Get technologies installed on a domain.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-website-content-technologies-agg" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_get_referrals",
+      "description": "Get inbound referral sites for a domain.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-websites-referrals-agg" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" },
+          "country": { "type": "string", "description": "ISO country code (optional)" },
+          "limit": { "type": "integer", "description": "Maximum results (default 20)" }
+        },
+        "required": ["domain"]
+      }
+    },
+    {
+      "name": "similarweb_enrich_website",
+      "description": "Enrich a domain/website with company and traffic metadata.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "similarweb", "toolName": "get-lead-enrichment-website" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "description": "Domain, e.g. example.com" }
+        },
+        "required": ["domain"]
+      }
+    }
+  ]
+}

@@ -44,7 +44,7 @@ export default function ContextNewView({ onContextsChange, onOpenContext, onCanc
         <div>
           <h1 className="text-xl font-medium text-neutral-950">New context</h1>
           <p className="mt-1 ui-type-ui">
-            Enter a name to create a portable context folder under <code className="ui-text-meta">.smile/contexts/</code>.
+            Enter a name to create a visible context folder under <code className="ui-text-meta">contexts/</code> (metadata stays in <code className="ui-text-meta">.smile/contexts/</code>).
           </p>
         </div>
 

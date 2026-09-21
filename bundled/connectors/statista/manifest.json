@@ -1,0 +1,126 @@
+{
+  "apiVersion": "1.0",
+  "id": "statista",
+  "name": "Statista",
+  "version": "1.0.0",
+  "description": "Market and consumer data via the Statista MCP server. Search statistics, charts, consumer insights, and market insights.",
+  "handlerKind": "mcp",
+  "integrationType": "mcp",
+  "auth": {
+    "type": "api-key",
+    "fields": [
+      { "key": "apiKey", "label": "Statista API key", "secret": true }
+    ]
+  },
+  "permissions": {
+    "mcp": ["statista"],
+    "secrets": ["apiKey"]
+  },
+  "ui": {
+    "catalogLabel": "Statista",
+    "connectedLabel": "Statista ready",
+    "scopeLabel": "Topics"
+  },
+  "catalog": {
+    "icon": "icon.svg",
+    "tagline": "Market & consumer data"
+  },
+  "agentCapabilities": ["market-research"],
+  "mcpServers": {
+    "statista": {
+      "transport": "http",
+      "baseUrl": "https://api.statista.ai/v1/mcp",
+      "authHeader": "x-api-key",
+      "authSecretField": "apiKey"
+    }
+  },
+  "tools": [
+    {
+      "name": "statista_search_statistics",
+      "description": "Search Statista statistics and charts by keyword. Use this first to find relevant chart IDs before fetching data.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "statista", "toolName": "search-statistics" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query" },
+          "limit": { "type": "integer", "description": "Maximum results (default 10, max 50)" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "statista_get_chart_data",
+      "description": "Get chart data for a Statista statistic by ID. Use after search-statistics to retrieve values.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "statista", "toolName": "get-chart-data-by-id" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Statista chart/statistic ID" }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "statista_search_consumer_insights",
+      "description": "Search Statista Consumer Insights surveys and questions by keyword.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "statista", "toolName": "search-consumer-insights" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query" },
+          "limit": { "type": "integer", "description": "Maximum results (default 10, max 50)" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "statista_fetch_consumer_insights",
+      "description": "Fetch detailed results for a Statista Consumer Insights question by ID.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "statista", "toolName": "fetch-consumer-insights" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Consumer Insights question ID" }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "statista_search_market_insights",
+      "description": "Search Statista Market Insights reports and metrics by keyword.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "statista", "toolName": "search-market-insights" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query" },
+          "limit": { "type": "integer", "description": "Maximum results (default 10, max 50)" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "statista_fetch_market_insights",
+      "description": "Fetch detailed data for a Statista Market Insights report by ID.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "mcp": { "serverId": "statista", "toolName": "fetch-market-insights" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Market Insights report ID" }
+        },
+        "required": ["id"]
+      }
+    }
+  ]
+}

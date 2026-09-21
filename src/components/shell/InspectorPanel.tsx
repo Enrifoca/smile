@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 
 import { useElectron } from '../../hooks/useElectron'
 
-import { titleFromReportPath } from '../../agent/artifacts'
+import { titleFromReportPath, isReportArtifactPath } from '../../agent/artifacts'
 
 import type { InspectorTabId } from '../../shell/types'
 
@@ -22,6 +22,8 @@ import PanelCollapseIcon from './PanelCollapseIcon'
 interface ReportRow {
   path: string
   name: string
+  /** True when the report is referenced as active but was not found in the workspace scan. */
+  missing?: boolean
 }
 
 interface InspectorPanelProps {
@@ -33,7 +35,10 @@ interface InspectorPanelProps {
   onSetActiveContextId: (contextId: string | null) => void
   onOpenContextDetail: (contextId: string, name: string) => void
   onSetActiveReport: (path: string | null, title: string) => void
+  /** Effective active report (transcript or pinned). Used for highlighting and the tab dot. */
   activeReportPath: string | null
+  /** User-pinned report. Used for the toggle switch state. */
+  pinnedReportPath: string | null
 }
 
 const INSPECTOR_TABS: Array<{ id: InspectorTabId; label: string }> = [
@@ -102,6 +107,7 @@ export default function InspectorPanel({
   onOpenContextDetail,
   onSetActiveReport,
   activeReportPath,
+  pinnedReportPath,
 }: InspectorPanelProps) {
   const { file, contexts: contextsAPI } = useElectron()
   const [tab, setTab] = useState<InspectorTabId>('context')
@@ -111,39 +117,86 @@ export default function InspectorPanel({
 
   const isInternalPath = useCallback((reportPath: string): boolean => {
     const normalized = reportPath.replace(/\\/g, '/')
-    // Context knowledge markdown and backups.
-    if (/\.smile\/contexts\/[^/]+\/[^/]+\.md$/.test(normalized)) return true
+    // Context metadata in .smile/ is internal: knowledge markdown, backups,
+    // generic files (now superseded by visible contexts/<slug>/files/), memories,
+    // and connector configs.
+    if (/\.smile\/contexts\/[^/]+\/(?!\d{4}-\d{2}-\d{2}_)[^/]+\.md$/.test(normalized)) return true
     if (/\.smile\/contexts\/[^/]+\/history\//.test(normalized)) return true
     if (/\.smile\/contexts\/[^/]+\/files\//.test(normalized)) return true
-    // Other internal smile folders.
     if (/\.smile\/memories\//.test(normalized)) return true
     if (/\.smile\/connectors\//.test(normalized)) return true
     return false
   }, [])
 
+  const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'build', '.git', 'release', 'out'])
+
+  const findMarkdownFilesRecursive = useCallback(
+    async (dir: string): Promise<ReportRow[]> => {
+      try {
+        const result = await file.list(dir)
+        if (!result.success || !result.data) return []
+
+        const rows: ReportRow[] = []
+        const entries = result.data as Array<{ name: string; path: string; isDirectory: boolean }>
+        for (const entry of entries) {
+          if (entry.isDirectory) {
+            if (SKIPPED_DIRS.has(entry.name)) continue
+            if (entry.name.startsWith('.') && entry.name !== '.smile') continue
+            const subRows = await findMarkdownFilesRecursive(entry.path)
+            rows.push(...subRows)
+          } else if (entry.name.toLowerCase().endsWith('.md')) {
+            rows.push({ path: entry.path, name: entry.name })
+          }
+        }
+        return rows
+      } catch (error) {
+        console.error('[InspectorPanel] Failed to list directory:', dir, error)
+        return []
+      }
+    },
+    [file],
+  )
+
   const loadReports = useCallback(async () => {
     try {
-      const result = await file.search('*.md', '')
-      if (!result.success) {
-        setReportsError(result.error ?? 'Failed to search for reports')
-        setReports([])
-        return
+      // Use both the fast filename search and a manual recursive scan so reports
+      // are found even when the workspace is large or the search index is stale.
+      const [searchResult, manualRows] = await Promise.all([
+        file.search('*.md', ''),
+        findMarkdownFilesRecursive(''),
+      ])
+
+      console.log('[InspectorPanel] file.search result:', searchResult)
+      console.log('[InspectorPanel] manual scan rows:', manualRows)
+
+      const searchRows = (searchResult.success && Array.isArray(searchResult.data)
+        ? (searchResult.data as Array<{ path: string; name: string }>)
+        : []) as ReportRow[]
+
+      const seen = new Set<string>()
+      const rawRows: ReportRow[] = []
+      for (const row of [...searchRows, ...manualRows]) {
+        if (seen.has(row.path)) continue
+        seen.add(row.path)
+        rawRows.push(row)
       }
 
-      const rows = (result.data as Array<{ path: string; name: string }>)
-        .filter(row => !isInternalPath(row.path))
+      const rows = rawRows
+        .filter(row => isReportArtifactPath(row.path) || !isInternalPath(row.path))
         .map(row => ({ path: row.path, name: row.name }))
+
+      console.log('[InspectorPanel] filtered reports:', rows)
 
       // Sort by path (which starts with date for generated reports) descending.
       rows.sort((a, b) => b.path.localeCompare(a.path))
       setReports(rows)
-      setReportsError(null)
+      setReportsError(searchResult.success ? null : (searchResult.error ?? 'Failed to search for reports'))
     } catch (error) {
       console.error('Failed to load reports:', error)
       setReportsError(error instanceof Error ? error.message : 'Failed to load reports')
       setReports([])
     }
-  }, [file, isInternalPath])
+  }, [file, isInternalPath, findMarkdownFilesRecursive])
 
   const loadContexts = useCallback(async () => {
     try {
@@ -268,34 +321,48 @@ export default function InspectorPanel({
             Click a report to read it. Toggle to pin it in the current chat composer context.
           </InspectorHint>
           <div className="ui-inspector__scroll">
-            {reports.map(report => {
-              const title = titleFromReportPath(report.path)
-              const isActive = activeReportPath === report.path
-              return (
-                <div
-                  key={report.path}
-                  className={`ui-inspector-item ${isActive ? 'ui-inspector-item--active' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="ui-inspector-item__main flex-1 min-w-0 text-left"
-                    onClick={() => setViewingReportPath(report.path)}
+            {(() => {
+              // Ensure the active report is always visible, even if the file was
+              // deleted, moved, or saved in a folder the scan missed.
+              const seen = new Set(reports.map(r => r.path))
+              const merged = activeReportPath && !seen.has(activeReportPath)
+                ? [...reports, { path: activeReportPath, name: activeReportPath.split('/').pop() || activeReportPath, missing: true }]
+                : reports
+
+              return merged.map(report => {
+                const title = titleFromReportPath(report.path)
+                const isActive = activeReportPath === report.path
+                const isPinned = pinnedReportPath === report.path
+                return (
+                  <div
+                    key={report.path}
+                    className={`ui-inspector-item ${isActive ? 'ui-inspector-item--active' : ''} ${report.missing ? 'ui-inspector-item--missing' : ''}`}
                   >
-                    <InspectorItemHeading title={title} active={isActive} />
-                    <span className="ui-inspector-item__path">{report.path}</span>
-                  </button>
-                  <Toggle
-                    checked={isActive}
-                    onChange={event =>
-                      onSetActiveReport(event.target.checked ? report.path : null, title)
-                    }
-                    label={isActive ? `Deactivate ${title}` : `Activate ${title}`}
-                    className="ui-toggle--compact shrink-0"
-                  />
-                </div>
-              )
-            })}
-            {reports.length === 0 ? (
+                    <button
+                      type="button"
+                      className="ui-inspector-item__main flex-1 min-w-0 text-left"
+                      onClick={() => setViewingReportPath(report.path)}
+                    >
+                      <InspectorItemHeading title={title} active={isActive} />
+                      <span className="ui-inspector-item__path">
+                        {report.path}
+                        {report.missing ? ' · file not found' : null}
+                      </span>
+                    </button>
+                    <Toggle
+                      checked={isPinned}
+                      disabled={report.missing}
+                      onChange={event =>
+                        onSetActiveReport(event.target.checked ? report.path : null, title)
+                      }
+                      label={isPinned ? `Deactivate ${title}` : `Activate ${title}`}
+                      className="ui-toggle--compact shrink-0"
+                    />
+                  </div>
+                )
+              })
+            })()}
+            {reports.length === 0 && !activeReportPath ? (
               <p className="ui-inspector__empty">
                 {reportsError ?? 'No reports in workspace yet'}
               </p>

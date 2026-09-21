@@ -18,7 +18,8 @@ This folder contains the connector-neutral runtime.
 | `toolErrors.ts` | Detect failed tool results for retry / error loops |
 | `capabilities.ts` | Dynamic **Core capabilities** and **Connector context** prompt sections from the tool registry |
 | `promptTiers.ts` | Foundation / Scope / Turn prompt assembly |
-| `historyCompression.ts` | Conversation history compression when context window is tight |
+| `contextEngine.ts` | Smart inference-time context compression (head/tail + LLM summary) |
+| `historyCompression.ts` | Periodic background compression of stored conversation history |
 | `taskContinuity.ts` | Structural read→write nudges, report grounding — [taskContinuity.md](./taskContinuity.md) |
 | `artifacts.ts` | Markdown report paths and tool result copy |
 | `jsonSchema.ts` | Zod → JSON Schema for tool calling |
@@ -41,6 +42,12 @@ Tool results are persisted as private `type: 'tool_result'` messages. They are h
 The runtime also keeps a per-turn `toolResultCache` to avoid re-executing identical tool calls in the same loop. That cache is not durable; the private tool-result messages are the durable transcript record.
 
 Each executed tool batch also emits a UI-only `tool_summary` message (grouped icon bar) so the user can see what ran without reading raw tool output.
+
+### Visual outputs
+
+- `generate_image` creates images, illustrations, and conceptual or approximate charts from a text prompt. The host tries a configured image-generation connector first, then falls back to the active model's native image capability.
+- `generate_chart` renders precise charts from clean tabular data via ECharts. The renderer validates the data, supports logarithmic scales for high-variance series, and rejects invented or malformed inputs. See [`src/utils/chartRenderer.ts`](../utils/chartRenderer.ts) and [`src/utils/README.charts.md`](../utils/README.charts.md).
+- `generate_diagram` renders Mermaid text diagrams (flowcharts, sequence diagrams, mind maps, ER diagrams, etc.) to PNG. See [`src/utils/diagramRenderer.ts`](../utils/diagramRenderer.ts).
 
 ## Pending actions
 

@@ -9,6 +9,7 @@ import { buildCoreCapabilitiesSection, buildConnectorContextSection } from './ca
 import { buildCommunicationPreferencesPrompt } from './communicationPreferences'
 import { buildEnvironmentContextSection } from '../prompts'
 import { maybeCompressConversationHistory, estimateTokens } from './historyCompression'
+import { smartCompressForInference } from './contextEngine'
 import { selectLearnedNotesForPrompt } from '../memory/learnedBudget'
 import { formatActiveScopesForPrompt } from '../memory/promptSections'
 import { toolDefinitions } from './tools'
@@ -72,7 +73,7 @@ export class Agent {
   private abortFlag = false
   private thinkOnlyNudgedThisTurn = false
   private reportWriteSucceededThisTurn = false
-  private taskContinuationNudgedThisTurn = false
+  private taskContinuationNudgesThisTurn = 0
   private toolsRunThisTurn: ToolRunRecord[] = []
   private lastToolEntryThisTurn: ToolEntry | null = null
   private useReasoningThisTurn = false
@@ -291,8 +292,8 @@ export class Agent {
 
     const lines = [`\n\n## Active Context: ${context.name}`]
     lines.push(`The user scoped this conversation to the "${context.name}" project. Only connectors enabled for this context are available; their tools and instructions are listed in the Connector context section.`)
-    lines.push(`Context folder: \`${getContextFolderPath(context)}\` (portable - share this folder with teammates).`)
-    lines.push(`When creating outputs, prefer this context folder: save reports directly in \`${getContextFolderPath(context)}\` and other files to \`${getContextFilesPath(context)}\`.`)
+    lines.push(`Context folder: \`${getContextFolderPath(context)}\` (visible in the workspace; share this folder with teammates).`)
+    lines.push(`When creating outputs, use the context subfolders: reports go to \`${getContextFolderPath(context)}/reports\`, charts/diagrams to \`${getContextFolderPath(context)}/charts\`, images to \`${getContextFolderPath(context)}/images\`, and other files to \`${getContextFilesPath(context)}\`.`)
     lines.push(`When reading files, look in the context folder first, then fall back to the wider workspace.`)
 
     if (body?.injectFull && body.markdown) {
@@ -403,7 +404,7 @@ export class Agent {
     this.agentLoopIteration = 0
     this.thinkOnlyNudgedThisTurn = false
     this.reportWriteSucceededThisTurn = false
-    this.taskContinuationNudgedThisTurn = false
+    this.taskContinuationNudgesThisTurn = 0
     this.toolsRunThisTurn = []
     this.lastToolEntryThisTurn = null
     const userMsg: Message = {
@@ -424,7 +425,7 @@ export class Agent {
     }
 
     try {
-      await this.maybeCompressHistoryOnce()
+      await this.withTimeout(this.maybeCompressHistoryOnce(), 60_000, 'History compression')
       await this.runAgentLoop()
     } catch (error) {
       const errorMsg: Message = {
@@ -440,6 +441,17 @@ export class Agent {
     }
   }
 
+  private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+        // Ensure the timer doesn't keep the process alive if the promise wins.
+        promise.then(() => clearTimeout(timer)).catch(() => clearTimeout(timer))
+      }),
+    ])
+  }
+
   private async runAgentLoop(): Promise<void> {
     let iterations = 0
     const maxIterations = this.config.maxIterations ?? 10
@@ -449,6 +461,7 @@ export class Agent {
 
     try {
     while (!hasLimit || iterations < maxIterations) {
+      const iterationStartedAt = Date.now()
       // Check abort flag at the top of every iteration
       if (this.abortFlag) {
         this.abortFlag = false
@@ -460,7 +473,13 @@ export class Agent {
       console.log(`[Agent] Loop iteration ${iterations}${hasLimit ? `/${maxIterations}` : ''}`)
       this.agentLoopIteration = iterations
 
-      const { response, wasStreamed, assistantPreamble, preambleMessageId, aborted } = await this.callAI()
+      const aiCallStartedAt = Date.now()
+      const { response, wasStreamed, assistantPreamble, preambleMessageId, aborted } = await this.withTimeout(
+        this.callAI(),
+        120_000,
+        'AI call',
+      )
+      console.log(`[Agent] AI call completed in ${Date.now() - aiCallStartedAt}ms (streamed=${wasStreamed}, toolCalls=${response?.toolCalls?.length ?? 0})`)
 
       if (aborted) {
         console.log('[Agent] Aborted by user.')
@@ -515,6 +534,7 @@ export class Agent {
               confirmation,
             }
             this.pendingActions.set(toolCall.id, pendingAction)
+            console.log(`[Agent] Pending action created for ${toolCall.name}:`, pendingAction.description)
             this.config.onPendingAction(pendingAction)
             this.emitPendingActionChatMessage(
               pendingAction,
@@ -557,7 +577,20 @@ export class Agent {
               completedAt: new Date().toISOString(),
             })
           } else {
-            const result = await this.executeTool(toolCall.name, toolCall.arguments)
+            let result: unknown
+            const toolStartedAt = Date.now()
+            try {
+              result = await this.withTimeout(
+                this.executeTool(toolCall.name, toolCall.arguments),
+                120_000,
+                `Tool ${toolCall.name}`,
+              )
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error)
+              console.error(`[Agent] Tool ${toolCall.name} threw:`, message)
+              result = { success: false, error: message }
+            }
+            console.log(`[Agent] Tool ${toolCall.name} completed in ${Date.now() - toolStartedAt}ms`)
             if (this.abortFlag) {
               this.abortFlag = false
               abortedDuringTools = true
@@ -647,7 +680,11 @@ export class Agent {
         if (hadError) {
           consecutiveErrors++
           if (consecutiveErrors >= maxConsecutiveErrors) {
-            const { response: errResp, wasStreamed: errStreamed } = await this.callAI()
+            const { response: errResp, wasStreamed: errStreamed } = await this.withTimeout(
+              this.callAI(),
+              120_000,
+              'AI error-summary call',
+            )
             if (errResp?.content && !errStreamed) {
               this.conversationHistory.push({ id: uuidv4(), role: 'assistant', content: errResp.content, timestamp: new Date().toISOString() })
               this.config.onMessage({ id: uuidv4(), role: 'assistant', content: errResp.content, timestamp: new Date().toISOString() })
@@ -706,6 +743,7 @@ export class Agent {
         if (this.maybeNudgeTaskContinuation(strippedContent || rawContent)) {
           continue
         }
+        console.log('[Agent] Breaking after streamed response with no further action')
         break
       } else if (
         !strippedContent
@@ -713,6 +751,7 @@ export class Agent {
         && iterations < (hasLimit ? maxIterations : iterations + 1)
       ) {
         console.log('[Agent] Think-only response - nudging model to continue')
+        console.log(`[Agent] Iteration ${iterations} duration: ${Date.now() - iterationStartedAt}ms`)
         this.thinkOnlyNudgedThisTurn = true
         this.conversationHistory.push({
           id: uuidv4(),
@@ -722,6 +761,18 @@ export class Agent {
         })
         continue
       }
+
+      if (!strippedContent) {
+        const fallbackMsg: Message = {
+          id: uuidv4(),
+          role: 'assistant',
+          content: "I stopped without a next step. Please rephrase your request or click Stop.",
+          timestamp: new Date().toISOString(),
+        }
+        this.conversationHistory.push(fallbackMsg)
+        this.config.onMessage(fallbackMsg)
+      }
+      console.log(`[Agent] Loop ending after iteration ${iterations} (content=${strippedContent ? 'present' : 'empty'}, streamed=${wasStreamed})`)
       break
     }
 
@@ -774,7 +825,7 @@ export class Agent {
   private emitContextSnapshot(params: {
     systemPrompt: string
     foundation: string
-    relevantHistory: Message[]
+    relevantHistory: Array<{ role: string; content: string }>
     connectorSections: string[]
     capabilitiesSection: string
     contextSection: string
@@ -784,7 +835,7 @@ export class Agent {
     const lastUserMessage = this.currentUserMessage
 
     const recentHistory = params.relevantHistory
-      .filter(m => m.role !== 'system' && m.type !== 'summary')
+      .filter(m => m.role !== 'system')
       .map(m => ({
         role: m.role,
         content: m.content.length > 2000 ? `${m.content.slice(0, 2000)}…` : m.content,
@@ -894,27 +945,14 @@ export class Agent {
 
     const relevantHistory = this.conversationHistory
       .filter(m => m.type !== 'tool_summary' && m.type !== 'activity' && m.type !== 'artifact')
-      .slice(-40)
 
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: systemPrompt },
-      // Render system notices (approval/refusal feedback, etc.) as user messages
-      // to the model so they are not dropped by providers that only honor a
-      // single system message or ignore interleaved system roles.
-      ...relevantHistory.map(m => ({
-        role: m.role === 'system' ? 'user' : (m.role as 'user' | 'assistant'),
-        content: m.content,
-      })),
-    ]
-
-    this.emitContextSnapshot({
-      systemPrompt,
-      foundation: tiers.foundation,
-      relevantHistory,
-      connectorSections,
-      capabilitiesSection,
-      contextSection,
-    })
+    // Render system notices (approval/refusal feedback, etc.) as user messages
+    // to the model so they are not dropped by providers that only honor a
+    // single system message or ignore interleaved system roles.
+    const historyMessages = relevantHistory.map(m => ({
+      role: m.role === 'system' ? 'user' : (m.role as 'user' | 'assistant'),
+      content: m.content,
+    }))
 
     const tools = this.getAllToolDefinitions().map(tool => ({
       type: 'function' as const,
@@ -924,6 +962,62 @@ export class Agent {
         parameters: tool.jsonSchema ?? (tool.schema ? zodToJsonSchema(tool.schema) : { type: 'object', properties: {} }),
       },
     }))
+
+    // Tool definitions are part of the request token budget but are not present in
+    // the conversation history. Estimate their overhead so compression leaves room
+    // for them plus the model's response.
+    const toolOverheadTokens = estimateTokens(JSON.stringify(tools)) + 2_000
+
+    const uncompressedTokens = estimateTokens(systemPrompt)
+      + historyMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+      + toolOverheadTokens
+    const contextWindow = this.config.contextWindowTokens ?? 128_000
+    const isLargeContext = uncompressedTokens > contextWindow * 0.6
+
+    // Let the user know when a long conversation is being compressed; otherwise
+    // the model call can look frozen for tens of seconds.
+    this.setAgentStatus(
+      isLargeContext
+        ? 'Compressing large conversation — this may take a while…'
+        : 'Compressing conversation…',
+    )
+
+    // Smart context compression: cheap pre-pass + head/tail protection + LLM
+    // summarization of the middle band. This replaces the previous hard truncation
+    // that silently dropped old messages.
+    const compressed = await this.withTimeout(
+      smartCompressForInference({
+        systemPrompt,
+        messages: historyMessages,
+        callAI: this.config.callAI,
+        contextWindowTokens: this.config.contextWindowTokens,
+        outputTokenReserve: 12_000,
+        toolOverheadTokens,
+        headTurns: 3,
+        tailTokenBudget: 18_000,
+      }),
+      120_000,
+      'Smart context compression',
+    )
+
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: compressed.systemPrompt },
+      ...compressed.messages,
+    ]
+
+    const estimatedPromptTokens = estimateTokens(compressed.systemPrompt)
+      + compressed.messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+      + toolOverheadTokens
+    console.log('[Agent] Estimated prompt tokens:', estimatedPromptTokens, 'budget:', this.config.contextWindowTokens, 'toolOverhead:', toolOverheadTokens, 'compressed:', compressed.wasCompressed, 'messages:', compressed.messages.length)
+
+    this.emitContextSnapshot({
+      systemPrompt: compressed.systemPrompt,
+      foundation: tiers.foundation,
+      relevantHistory: compressed.messages.map(m => ({ role: m.role, content: m.content })),
+      connectorSections,
+      capabilitiesSection,
+      contextSection,
+    })
 
     console.log('[Agent] Available tools:', tools.map(t => t.function.name).join(', '))
     console.log('[Agent] Connector context sections:', connectorSections.length)
@@ -1302,7 +1396,7 @@ export class Agent {
       return
     }
 
-    if (toolName === 'file_write' && data.success !== false) {
+    if ((toolName === 'file_write' || toolName === 'generate_chart' || toolName === 'generate_diagram' || toolName === 'generate_image') && data.success !== false) {
       const path = String(data.path || args.path || '').replace(/\\/g, '/')
       if (!isReportArtifactPath(path)) return
       this.emitArtifactMessage({ path, title: titleFromReportPath(path) })
@@ -1337,8 +1431,8 @@ export class Agent {
     for (const key of keysToDelete) {
       this.toolResultCache.delete(key)
     }
-    // file_write -> drop cached read for that exact path
-    if (toolName === 'file_write' || toolName === 'report_write') {
+    // file_write / generated visuals -> drop cached read for that exact path
+    if (toolName === 'file_write' || toolName === 'report_write' || toolName === 'generate_chart' || toolName === 'generate_diagram' || toolName === 'generate_image') {
       const writtenPath = (args.path as string) || ''
       for (const key of this.toolResultCache.keys()) {
         if (key.startsWith('file_read:') && key.includes(writtenPath)) {
@@ -1349,17 +1443,18 @@ export class Agent {
   }
 
   private maybeNudgeTaskContinuation(responseText: string): boolean {
-    if (this.taskContinuationNudgedThisTurn) return false
+    const MAX_CONTINUATION_NUDGES = 3
+    if (this.taskContinuationNudgesThisTurn >= MAX_CONTINUATION_NUDGES) return false
     if (!shouldNudgeIncompleteWorkflow(this.toolsRunThisTurn, responseText, {
       reportWriteSucceededThisTurn: this.reportWriteSucceededThisTurn,
     })) return false
 
     console.log('[Agent] Incomplete workflow - nudging model to continue')
-    this.taskContinuationNudgedThisTurn = true
+    this.taskContinuationNudgesThisTurn++
     this.conversationHistory.push({
       id: uuidv4(),
       role: 'user',
-      content: buildIncompleteWorkflowNudge(this.toolsRunThisTurn),
+      content: buildIncompleteWorkflowNudge(responseText, this.toolsRunThisTurn),
       timestamp: new Date().toISOString(),
     })
     return true
@@ -1382,6 +1477,8 @@ export class Agent {
       return connector.executeTool(name, args, envelope)
     } else if (name === 'report_write' || name.startsWith('file_')) {
       return this.config.executeFileTool(name, args)
+    } else if (name === 'generate_chart' || name === 'generate_diagram' || name === 'generate_image') {
+      return this.config.executeVisualTool(name, args)
     } else if (name.startsWith('memory_')) {
       return this.config.executeMemoryTool(name, args)
     } else if (name.startsWith('context_')) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo, memo } from 'react'
 import { MarkdownArtifact } from '../../../agent/types'
 import { exportReportAsDocx, exportReportAsPdf } from '../../../utils/exportReport'
 import { MarkdownRenderer } from './MarkdownRenderer'
@@ -20,6 +20,61 @@ const DownloadIcon = () => (
   </svg>
 )
 
+interface DownloadMenuProps {
+  canDownload: boolean
+  onExport: (format: 'pdf' | 'docx') => Promise<void>
+}
+
+const DownloadMenu = memo(function DownloadMenu({ canDownload, onExport }: DownloadMenuProps) {
+  const [open, setOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handleClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const handleClick = () => setOpen(v => !v)
+
+  const handleExport = async (format: 'pdf' | 'docx') => {
+    setError(null)
+    try {
+      await onExport(format)
+      setOpen(false)
+    } catch (err) {
+      console.error(`[DownloadMenu] ${format} export failed:`, err)
+      setError(err instanceof Error ? err.message : `${format} export failed`)
+    }
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button variant="ghost" size="sm" disabled={!canDownload} onClick={handleClick} aria-expanded={open} aria-haspopup="menu">
+        <DownloadIcon />
+        Download
+      </Button>
+      {open && canDownload ? (
+        <div className="ui-download-popover" role="menu">
+          {error ? <div className="ui-download-popover-error">{error}</div> : null}
+          <button type="button" className="ui-download-popover-item" role="menuitem" onClick={() => handleExport('pdf')}>
+            PDF
+          </button>
+          <button type="button" className="ui-download-popover-item" role="menuitem" onClick={() => handleExport('docx')}>
+            .docx
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+})
+
 export function MarkdownArtifactModal({
   artifact,
   content,
@@ -28,94 +83,39 @@ export function MarkdownArtifactModal({
   onClose,
   showDownload = true,
 }: MarkdownArtifactModalProps) {
-  const [downloadOpen, setDownloadOpen] = useState(false)
-  const downloadRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!downloadOpen) return
-    const handleClick = (event: MouseEvent) => {
-      if (downloadRef.current && !downloadRef.current.contains(event.target as Node)) {
-        setDownloadOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [downloadOpen])
-
   const canDownload = !loading && !error && !!content
+
+  const handleExport = async (format: 'pdf' | 'docx') => {
+    if (format === 'pdf') {
+      await exportReportAsPdf(content || '', artifact.title, artifact.path)
+    } else {
+      await exportReportAsDocx(content || '', artifact.title, artifact.path)
+    }
+  }
+
+  const body = useMemo(() => {
+    if (loading) return <p className="ui-artifact-card-loading">Loading report…</p>
+    if (error) return <p className="ui-artifact-card-error">{error}</p>
+    if (content) return <MarkdownRenderer content={content} />
+    return <p className="ui-artifact-card-loading">Report is empty</p>
+  }, [loading, error, content])
 
   return (
     <div className="ui-artifact-modal-backdrop" onClick={onClose} role="presentation">
-      <div
-        className="ui-artifact-modal"
-        onClick={event => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={artifact.title}
-      >
+      <div className="ui-artifact-modal" onClick={event => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={artifact.title}>
         <div className="ui-artifact-modal-header">
           <div>
             <h2 className="ui-artifact-modal-title">{artifact.title}</h2>
             <p className="ui-artifact-modal-path">{artifact.path}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {showDownload ? (
-              <div className="relative" ref={downloadRef}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!canDownload}
-                  onClick={() => setDownloadOpen(open => !open)}
-                  aria-expanded={downloadOpen}
-                  aria-haspopup="menu"
-                >
-                  <DownloadIcon />
-                  Download
-                </Button>
-                {downloadOpen && canDownload ? (
-                  <div className="ui-download-popover" role="menu">
-                    <button
-                      type="button"
-                      className="ui-download-popover-item"
-                      role="menuitem"
-                      onClick={() => {
-                        void exportReportAsPdf(content || '', artifact.title, artifact.path)
-                        setDownloadOpen(false)
-                      }}
-                    >
-                      PDF
-                    </button>
-                    <button
-                      type="button"
-                      className="ui-download-popover-item"
-                      role="menuitem"
-                      onClick={() => {
-                        void exportReportAsDocx(content || '', artifact.title, artifact.path)
-                        setDownloadOpen(false)
-                      }}
-                    >
-                      .docx
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            {showDownload ? <DownloadMenu canDownload={canDownload} onExport={handleExport} /> : null}
             <Button variant="ghost" size="sm" onClick={onClose}>
               Close
             </Button>
           </div>
         </div>
-        <div className="ui-artifact-modal-body">
-          {loading ? (
-            <p className="ui-artifact-card-loading">Loading report…</p>
-          ) : error ? (
-            <p className="ui-artifact-card-error">{error}</p>
-          ) : content ? (
-            <MarkdownRenderer content={content} />
-          ) : (
-            <p className="ui-artifact-card-loading">Report is empty</p>
-          )}
-        </div>
+        <div className="ui-artifact-modal-body">{body}</div>
       </div>
     </div>
   )

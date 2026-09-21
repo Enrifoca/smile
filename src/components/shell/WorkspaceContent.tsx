@@ -24,6 +24,10 @@ interface WorkspaceContentProps {
   onCancelContextNew: () => void
   onBackFromContextDetail: () => void
   onContextSnapshot?: (tabId: string, snapshot: AgentContextSnapshot) => void
+  /** Reported by the visible ChatView so the Inspector can highlight the active transcript report. */
+  onActiveReportChange?: (path: string | null) => void
+  /** Called by ChatView to pin/unpin a report when a report is created or dismissed. */
+  onSetPinnedReport?: (path: string | null, title: string) => void
 }
 
 export default function WorkspaceContent({
@@ -41,6 +45,8 @@ export default function WorkspaceContent({
   onCancelContextNew,
   onBackFromContextDetail,
   onContextSnapshot,
+  onActiveReportChange,
+  onSetPinnedReport,
 }: WorkspaceContentProps) {
   const activeContext = contexts.find(context => context.id === activeContextId) ?? null
   const chatTabs = tabs.filter(tab => tab.kind === 'chat')
@@ -62,6 +68,8 @@ export default function WorkspaceContent({
               onOpenSettings={onOpenSettings}
               activeContext={activeContext}
               pinnedReportPath={pinnedReportPath}
+              onActiveReportChange={isVisible ? onActiveReportChange : undefined}
+              onSetPinnedReport={onSetPinnedReport}
               onContextSnapshot={snapshot => onContextSnapshot?.(tab.id, snapshot)}
             />
           </div>

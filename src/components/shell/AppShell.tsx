@@ -42,6 +42,7 @@ export default function AppShell({
   const [chatSidebarOpen, setChatSidebarOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [pinnedReportPath, setPinnedReportPath] = useState<string | null>(null)
+  const [effectiveActiveReportPath, setEffectiveActiveReportPath] = useState<string | null>(null)
   const [contextSnapshots, setContextSnapshots] = useState<Map<string, AgentContextSnapshot>>(new Map())
 
   const {
@@ -88,6 +89,10 @@ export default function AppShell({
       openChat(null, 'New Chat')
     }
     setPinnedReportPath(path)
+  }
+
+  const handleActiveReportChange = (path: string | null) => {
+    setEffectiveActiveReportPath(path)
   }
 
   useEffect(() => {
@@ -148,6 +153,8 @@ export default function AppShell({
             onCancelContextNew={() => focusTab(tabs.find(t => t.kind === 'context-home')?.id ?? activeTabId)}
             onBackFromContextDetail={() => setActivity('context')}
             onContextSnapshot={handleContextSnapshot}
+            onActiveReportChange={handleActiveReportChange}
+            onSetPinnedReport={handleSetActiveReport}
           />
         </main>
         <InspectorPanel
@@ -159,7 +166,8 @@ export default function AppShell({
           onSetActiveContextId={onSetActiveContextId}
           onOpenContextDetail={openContextDetail}
           onSetActiveReport={(path, _title) => handleSetActiveReport(path)}
-          activeReportPath={pinnedReportPath}
+          activeReportPath={effectiveActiveReportPath}
+          pinnedReportPath={pinnedReportPath}
         />
       </div>
       <StatusBar />

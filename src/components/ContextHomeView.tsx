@@ -42,7 +42,9 @@ export default function ContextHomeView({
                   onClick={() => onOpenContextDetail(context.id, context.name)}
                 >
                   <span className="ui-context-home-row__title">{context.name}</span>
-                  <span className="ui-context-home-row__path">.smile/contexts/{context.slug}/{context.slug}.md</span>
+                  <span className="ui-context-home-row__path">
+                    contexts/{context.slug}/ · .smile/contexts/{context.slug}/{context.slug}.md
+                  </span>
                 </button>
                 <Toggle
                   checked={isActive}

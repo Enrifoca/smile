@@ -24,7 +24,7 @@ Desktop workspace layout for smile:D.
 
 | File | Role |
 |------|------|
-| `AppShell.tsx` | Composes layout; sidebar/inspector collapse; pinned report path |
+| `AppShell.tsx` | Composes layout; sidebar/inspector collapse; pinned + effective active report state |
 | `AppTitleBar.tsx` | Brand + section nav + window controls |
 | `ChatHistorySidebar.tsx` | Chat history list + New chat |
 | `WorkspaceTabBar.tsx` | Document tabs + new tab |

@@ -11,6 +11,7 @@ import {
   HostCliResponse,
   HostHttpRequest,
   HostHttpResponse,
+  McpServerConfig,
   SandboxToHostMessage,
   ToolResult,
   validateManifest,
@@ -199,6 +200,13 @@ export interface ConnectorCapabilityDeps {
   hostCall?: (capability: string, params: Record<string, unknown>) => Promise<ToolResult>
   /** Optional diagnostic callback when a connector calls host.log. */
   onLog?: (connectorId: string, level: string, args: unknown[]) => void
+  /**
+   * Optional lifecycle hook called after connectors are discovered.
+   * Allows the host to register HTTP MCP servers declared in connector manifests.
+   */
+  onMcpServersDiscovered?: (
+    servers: Array<{ serverId: string; connectorId: string; config: McpServerConfig }>,
+  ) => Promise<void>
 }
 
 interface PendingCall {
@@ -223,6 +231,7 @@ export class ConnectorsService {
   private sandboxModulePath: string
   private sandboxes = new Map<string, SandboxInstance>()
   private callSeq = 0
+  private discoveryCache: { connectors: LoadedConnector[]; errors: Array<{ id: string; errors: string[] }> } | null = null
 
   constructor(deps: ConnectorCapabilityDeps, sandboxModulePath: string) {
     this.deps = deps
@@ -231,6 +240,7 @@ export class ConnectorsService {
 
   setWorkspace(workspacePath: string | null): void {
     this.workspacePath = workspacePath
+    this.discoveryCache = null
     void this.shutdownAll()
   }
 
@@ -241,6 +251,8 @@ export class ConnectorsService {
 
   /** Discover and validate all connectors in the workspace. */
   async discover(): Promise<{ connectors: LoadedConnector[]; errors: Array<{ id: string; errors: string[] }> }> {
+    if (this.discoveryCache) return this.discoveryCache
+
     const root = this.connectorsRoot()
     const connectors: LoadedConnector[] = []
     const errors: Array<{ id: string; errors: string[] }> = []
@@ -283,7 +295,22 @@ export class ConnectorsService {
       })
     }
 
-    return { connectors, errors }
+    if (this.deps.onMcpServersDiscovered) {
+      const mcpServers: Array<{ serverId: string; connectorId: string; config: McpServerConfig }> = []
+      for (const connector of connectors) {
+        for (const [serverId, config] of Object.entries(connector.manifest.mcpServers ?? {})) {
+          mcpServers.push({ serverId, connectorId: connector.manifest.id, config })
+        }
+      }
+      try {
+        await this.deps.onMcpServersDiscovered(mcpServers)
+      } catch {
+        // Registration failures are non-fatal for discovery; individual tool calls will surface errors.
+      }
+    }
+
+    this.discoveryCache = { connectors, errors }
+    return this.discoveryCache
   }
 
   /**
@@ -313,6 +340,7 @@ export class ConnectorsService {
     const connector = await this.getConnector(connectorId)
     await this.shutdownConnector(connectorId)
     fs.rmSync(connector.dir, { recursive: true, force: true })
+    this.discoveryCache = null
   }
 
   /** Copy a shipped bundled connector from `bundled/connectors/<id>/` into the workspace. */
@@ -363,6 +391,7 @@ export class ConnectorsService {
       fs.rmSync(destDir, { recursive: true, force: true })
       throw error
     }
+    this.discoveryCache = null
     return validation.manifest
   }
 

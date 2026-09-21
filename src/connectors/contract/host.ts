@@ -92,8 +92,8 @@ export interface HostBridge {
      */
     saveKnowledge(markdown: string): Promise<void>
     /**
-     * Workspace-relative path to the active context folder
-     * (e.g. `.smile/contexts/acme`), or null when no context is active.
+     * Workspace-relative path to the visible active context folder
+     * (e.g. `contexts/acme`), or null when no context is active.
      * Connectors can use this to save file outputs inside the context scope.
      */
     getFolderPath(): Promise<string | null>

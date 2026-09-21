@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readOcr: (relativePath: string) => ipcRenderer.invoke('file:readOcr', relativePath),
     write: (relativePath: string, content: string) => 
       ipcRenderer.invoke('file:write', relativePath, content),
+    writeBinary: (relativePath: string, base64: string) =>
+      ipcRenderer.invoke('file:writeBinary', relativePath, base64),
+    readBinary: (relativePath: string) => ipcRenderer.invoke('file:readBinary', relativePath),
     mkdir: (relativePath: string) => ipcRenderer.invoke('file:mkdir', relativePath),
     exists: (relativePath: string) => ipcRenderer.invoke('file:exists', relativePath),
     search: (pattern: string, directory?: string) => 
@@ -51,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ensureAttachmentsDir: () => ipcRenderer.invoke('file:ensureAttachmentsDir'),
     saveAttachment: (fileName: string, data: ArrayBuffer) => 
       ipcRenderer.invoke('file:saveAttachment', fileName, data),
+    exportPdf: (html: string, filename: string) => ipcRenderer.invoke('file:exportPdf', { html, filename }),
   },
 
   // AI
@@ -127,6 +131,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.send('ai:reasoning:stream', messages, tools)
       })
     },
+    generateImage: (prompt: string, options?: { size?: string; style?: string; model?: string }) =>
+      ipcRenderer.invoke('ai:generateImage', prompt, options),
     abortStream: () => ipcRenderer.send('ai:abortStream'),
   },
 
@@ -139,6 +145,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => {
       ipcRenderer.on('mcp:connectionState', (_, data) => callback(data))
       return () => ipcRenderer.removeAllListeners('mcp:connectionState')
+    },
+  },
+
+  // Per-server HTTP MCP connection
+  mcpServer: {
+    connect: (serverId: string) => ipcRenderer.invoke('mcpServer:connect', serverId),
+    disconnect: (serverId: string) => ipcRenderer.invoke('mcpServer:disconnect', serverId),
+    status: (serverId: string) => ipcRenderer.invoke('mcpServer:status', serverId),
+    getConnectionState: (serverId: string) => ipcRenderer.invoke('mcpServer:getConnectionState', serverId),
+    onConnectionStateChange: (callback: (state: { serverId: string; state: string; error?: string }) => void) => {
+      ipcRenderer.on('mcpServer:connectionState', (_, data) => callback(data))
+      return () => ipcRenderer.removeAllListeners('mcpServer:connectionState')
     },
   },
 
@@ -296,6 +314,7 @@ export interface ElectronAPI {
     read: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     readOcr: (relativePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
     write: (relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
+    writeBinary: (relativePath: string, base64: string) => Promise<{ success: boolean; error?: string }>
     exists: (relativePath: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>
     search: (pattern: string, directory?: string) => Promise<{ success: boolean; data?: Array<{ name: string; path: string; size: number; isDirectory: boolean }>; error?: string }>
     searchContent: (query: string, directory?: string, maxResults?: number) => Promise<{ success: boolean; data?: unknown[]; error?: string }>
@@ -342,6 +361,11 @@ export interface ElectronAPI {
       data?: { content: string; toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }> }
       error?: string
     }>
+    generateImage: (prompt: string, options?: { size?: string; style?: string; model?: string }) => Promise<{
+      success: boolean
+      data?: { base64?: string; url?: string }
+      error?: string
+    }>
   }
   mcp: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>
@@ -349,6 +373,13 @@ export interface ElectronAPI {
     status: () => Promise<{ connected: boolean }>
     getConnectionState: () => Promise<{ state: 'disconnected' | 'connecting' | 'oauth_pending' | 'connected' | 'error'; connected: boolean }>
     onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => () => void
+  }
+  mcpServer: {
+    connect: (serverId: string) => Promise<{ success: boolean; error?: string }>
+    disconnect: (serverId: string) => Promise<{ success: boolean }>
+    status: (serverId: string) => Promise<{ connected: boolean }>
+    getConnectionState: (serverId: string) => Promise<{ state: string; error?: string }>
+    onConnectionStateChange: (callback: (state: { serverId: string; state: string; error?: string }) => void) => () => void
   }
   linear: {
     connect: (options?: { forceReauth?: boolean }) => Promise<{ success: boolean; error?: string }>

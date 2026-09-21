@@ -774,7 +774,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
                   <div>
                     <span className="font-medium text-gray-800">Context window</span>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      Compress older history when it reaches 50% of this limit.
+                      Set this to your model's actual context-window limit. The agent compresses history before each call to stay under this budget.
                     </p>
                   </div>
                   <div className="flex items-center gap-3">

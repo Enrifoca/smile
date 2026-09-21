@@ -79,6 +79,24 @@ export interface ToolConfirmationTemplate {
 /** How tool execution is implemented for this connector package. */
 export type ConnectorHandlerKind = 'code' | 'mcp'
 
+/** Transport type for a declared MCP server. */
+export type McpServerTransport = 'http' | 'sse'
+
+/**
+ * Configuration for an MCP server the connector talks to over HTTP/SSE.
+ * The host owns connection lifecycle; the connector only declares endpoint + auth mapping.
+ */
+export interface McpServerConfig {
+  transport?: McpServerTransport
+  baseUrl: string
+  /** Header name for the auth credential, e.g. "x-api-key" or "Authorization". */
+  authHeader?: string
+  /** Optional prefix for the header value, e.g. "Bearer ". */
+  authHeaderPrefix?: string
+  /** Key in `auth.fields` whose value is used as the credential. */
+  authSecretField: string
+}
+
 /** Maps a connector tool to an MCP server tool (used when handlerKind is 'mcp'). */
 export interface ToolMcpBinding {
   serverId: string
@@ -118,6 +136,12 @@ export interface ConnectorManifest {
   ui?: ConnectorUI
   /** Catalog presentation (icon path relative to connector dir). */
   catalog?: ConnectorCatalogMeta
+  /**
+   * MCP servers this connector uses. Key is the serverId referenced in
+   * `permissions.mcp` and tool `mcp.serverId` bindings. Value describes the
+   * endpoint and how to authenticate.
+   */
+  mcpServers?: Record<string, McpServerConfig>
   /**
    * JSON Schema describing what a per-project context must provide for this
    * connector (e.g. `{ projectKeys: string[] }`). The Context management UI

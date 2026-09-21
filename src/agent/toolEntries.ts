@@ -87,6 +87,42 @@ export function getCoreToolEntry(name: string, args: Record<string, unknown>): T
         afterLabel: 'Summarizing report…',
       }
     }
+    case 'generate_chart': {
+      const chartTitle = str(args.title).trim() || str(args.path).split(/[\\/]/).pop() || 'chart'
+      return {
+        tool: name,
+        label: `Generated chart: ${chartTitle}`,
+        group: 'file',
+        category: 'file-write',
+        preparingLabel: `Rendering chart: ${chartTitle}…`,
+        runningLabel: `Saving chart: ${chartTitle}…`,
+        afterLabel: 'Analyzing chart…',
+      }
+    }
+    case 'generate_diagram': {
+      const diagramTitle = str(args.title).trim() || str(args.type).toUpperCase() || 'diagram'
+      return {
+        tool: name,
+        label: `Generated diagram: ${diagramTitle}`,
+        group: 'file',
+        category: 'file-write',
+        preparingLabel: `Rendering diagram: ${diagramTitle}…`,
+        runningLabel: `Saving diagram: ${diagramTitle}…`,
+        afterLabel: 'Analyzing diagram…',
+      }
+    }
+    case 'generate_image': {
+      const imagePath = str(args.path).split(/[\\/]/).pop() || 'image'
+      return {
+        tool: name,
+        label: `Generated image: ${imagePath}`,
+        group: 'file',
+        category: 'file-write',
+        preparingLabel: `Generating image: ${imagePath}…`,
+        runningLabel: `Saving image: ${imagePath}…`,
+        afterLabel: 'Analyzing image…',
+      }
+    }
     case 'file_search': {
       const pattern = str(args.pattern)
       const active = `Searching for "${pattern}"…`

@@ -1,4 +1,4 @@
-import { getContextFolderPath, type ProjectContext } from '../context/types'
+import { getContextReportsPath, type ProjectContext } from '../context/types'
 
 /** Chat artifact attached when the agent writes a markdown report. */
 export interface MarkdownArtifact {
@@ -34,20 +34,29 @@ export function slugifyReportTitle(title: string): string {
 
 export function titleFromReportPath(reportPath: string): string {
   const fileName = reportPath.split('/').pop()?.replace(/\.md$/i, '') || 'Report'
-  const withoutDate = fileName.replace(/^\d{4}-\d{2}-\d{2}_/, '')
-  const words = withoutDate.replace(/_/g, ' ').trim()
+  const words = fileName.replace(/_/g, ' ').trim()
   return words ? words.replace(/\b\w/g, char => char.toUpperCase()) : 'Report'
 }
 
 export function isReportArtifactPath(path: string): boolean {
   const normalized = path.replace(/\\/g, '/')
   if (!normalized.endsWith('.md')) return false
+  // Visible workspace reports folder.
+  if (normalized.startsWith('reports/')) return true
+  // Context-scoped reports.
+  if (/^contexts\/[^/]+\/reports\//.test(normalized)) return true
   // Legacy workspace reports folder.
   if (normalized.includes('.smile/reports/')) return true
-  // Reports saved directly in the workspace metadata root.
+  // Legacy reports saved directly in the workspace metadata root.
   if (/^\.smile\/\d{4}-\d{2}-\d{2}_/.test(normalized)) return true
-  // Reports saved directly inside a context folder (not in files/ or history/).
-  if (/\.smile\/contexts\/[^/]+\/\d{4}-\d{2}-\d{2}_/.test(normalized)) return true
+  // Legacy reports saved directly inside a context folder (not in files/ or history/).
+  // Any .md file in the legacy context root counts as a report, except the context's
+  // own knowledge file which is named exactly after the context slug.
+  const contextMatch = normalized.match(/\.smile\/contexts\/([^/]+)\/([^/]+)\.md$/)
+  if (contextMatch) {
+    const [, slug, fileName] = contextMatch
+    if (fileName !== slug) return true
+  }
   return false
 }
 
@@ -59,9 +68,8 @@ export function buildReportPath(
   const trimmed = explicitPath?.trim()
   if (trimmed) return trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`
 
-  const stamp = new Date().toISOString().slice(0, 10)
-  const baseDir = context ? getContextFolderPath(context) : '.smile'
-  return `${baseDir}/${stamp}_${slugifyReportTitle(title)}.md`
+  const baseDir = context ? getContextReportsPath(context) : 'reports'
+  return `${baseDir}/${slugifyReportTitle(title)}.md`
 }
 
 export function buildReportToolResult(path: string, title: string): string {

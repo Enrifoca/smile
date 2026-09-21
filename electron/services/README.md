@@ -109,15 +109,16 @@ Keep normalization in the service or connector handler, not in `src/agent`.
 | File | Role |
 | --- | --- |
 | `atlassian-mcp.ts` | Atlassian Rovo MCP: OAuth via `mcp-remote`, proxy process, raw tool calls — registered as MCP server id `atlassian` |
+| `http-mcp.ts` | Generic HTTP MCP client: connects to remote MCP servers over Streamable HTTP, maintains a per-server registry, and brokers `host.mcp.call` for any connector-declared server |
 | `connectors.ts` | Discovers workspace packages, forks sandbox, brokers `host.*`. At discovery it merges each workspace manifest with its bundled source so installed connectors pick up additive manifest updates (new auth fields, extra `permissions.host` entries, etc.) without requiring re-install. |
 | `ai.ts` | LLM providers (streaming, tools, retries) | Core agent |
 | `files.ts` | Workspace read/write/search | Core file tools |
 | `memory.ts` | `.smile/memories` persistence | Core memory tools |
-| `contexts.ts` | `.smile/contexts` portable project contexts | Context management UI + agent context tools |
+| `contexts.ts` | Portable project contexts: metadata in `.smile/contexts/`, visible files in `contexts/` | Context management UI + agent context tools |
 | `storage.ts` / `encryption.ts` | Settings and secure credentials | App-wide |
 | `ocr.ts` | OCR provider calls | `file_read_ocr` |
 
-Connectors that declare `"permissions": { "mcp": ["atlassian"] }` call tools through the sandbox broker → `mcpServerRegistry.atlassian`. The renderer only exposes MCP **connection** IPC (`mcp.connect` / `disconnect` / status) for the settings UI.
+Connectors that declare `"permissions": { "mcp": ["atlassian"] }` call tools through the sandbox broker → `mcpServerRegistry.atlassian`. Connectors that declare remote HTTP MCP servers in `manifest.mcpServers` are registered automatically under their declared `serverId` and exposed through per-server IPC (`mcpServer.connect`, `mcpServer.disconnect`, `mcpServer.status`). The renderer shows one connect module per server on the connector settings page.
 
 ---
 
@@ -127,9 +128,9 @@ When you add transport for a new provider:
 
 1. **Service class** — focused methods, no IPC inside the class
 2. **`electron/main.ts`** — register in `mcpServerRegistry` and/or `hostCall` broker; thin `ipcMain.handle` for user-facing connect/disconnect if needed
-3. **`electron/preload.ts`** — expose only what the renderer needs (prefer generic `connectors.*` + minimal `mcp.*`)
+3. **`electron/preload.ts`** — expose only what the renderer needs (prefer generic `connectors.*` + minimal `mcp.*` / `mcpServer.*`)
 4. **`src/types/electron.d.ts`** + **`src/hooks/useElectron.ts`** — types and hooks for new IPC surface
-5. **Connector manifest** — declare `permissions.mcp` / `permissions.host` / `permissions.http` to match
+5. **Connector manifest** — declare `permissions.mcp` / `permissions.host` / `permissions.http` to match; for HTTP MCP, also declare `mcpServers`
 
 Keep `main.ts` thin: register handlers, compose services, forward events.
 
@@ -141,13 +142,13 @@ Prefer descriptive transport names: `atlassian-mcp.ts`, `acme-api.ts`. Avoid gen
 
 ## MCP vs REST patterns
 
-### MCP pattern (like `atlassian-mcp.ts`)
+### MCP pattern (like `atlassian-mcp.ts` or HTTP MCP servers)
 
-Use when the vendor ships a hosted MCP server or you run a local MCP server.
+Use when the vendor ships a hosted MCP server, a remote Streamable HTTP MCP server, or you run a local MCP server.
 
 The service typically:
 
-1. Spawns or connects to an MCP proxy (e.g. `mcp-remote`)
+1. Spawns or connects to an MCP proxy (e.g. `mcp-remote`) or opens a Streamable HTTP session
 2. Implements OAuth if required
 3. Exposes `callRawTool(toolName, args)` for the connector broker
 4. Parses MCP content blocks and `isError` flags
@@ -157,6 +158,19 @@ Declarative connector tools map 1:1 in the manifest:
 ```json
 "mcp": { "serverId": "atlassian", "toolName": "searchItems" }
 ```
+
+For generic HTTP MCP servers, no custom service file is required. Declare the server in the connector manifest:
+
+```json
+"mcpServers": {
+  "statista": {
+    "baseUrl": "https://statista.example.com/mcp",
+    "transport": "http"
+  }
+}
+```
+
+`electron/services/http-mcp.ts` discovers the server from the manifest, manages the connection, and brokers `host.mcp.call("statista", toolName, args)`.
 
 ### REST pattern
 
@@ -175,6 +189,10 @@ Adding a connector?
 ├─ Vendor MCP + OAuth
 │    └─ manifest + handler.js + electron/services/<vendor>-mcp.ts
 │       + entry in mcpServerRegistry (see atlassian-mcp.ts)
+│
+├─ Vendor MCP over HTTP (Streamable HTTP, API-key auth)
+│    └─ manifest + handler.js only; declare server in `mcpServers`
+│       and let `electron/services/http-mcp.ts` broker the connection
 │
 └─ Custom host integration (binary upload, proprietary SDK)
      └─ manifest permissions.host + host.call broker in ConnectorsService

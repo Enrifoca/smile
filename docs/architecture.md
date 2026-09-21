@@ -23,6 +23,19 @@ flowchart TD
 - `src/components` owns generic UI. Connector settings use `GenericConnectorSettingsView` driven by manifest auth/MCP fields.
 - `electron` owns desktop services and IPC boundaries. The sandbox broker calls optional **transport services** under `electron/services/` when OAuth, MCP, or secure API access is required. See [electron/services/README.md](../electron/services/README.md).
 
+## Workspace layout
+
+| Location | Purpose |
+| --- | --- |
+| `reports/`, `charts/`, `images/`, `files/` | Visible user artifact folders when no project context is active |
+| `contexts/<slug>/reports/`, `charts/`, `images/`, `files/` | Visible user artifact folders for an active project context |
+| `<workspace>/.smile/connectors/<id>/` | Manifest, prompt, sandboxed handler (required for every connector at runtime) |
+| `<workspace>/.smile/contexts/<slug>/<slug>.md` | Editable context knowledge (framework metadata) |
+| `<workspace>/.smile/contexts/<slug>/history/` | Automatic backups before agent writes |
+| `<workspace>/.smile/memories/` | User memory, learned notes, issue-type notes |
+| `<workspace>/.smile/attachments/` | Files saved as attachments |
+| `<workspace>/.smile/smile.db` | SQLite DB with FTS5 indexes |
+
 ## Connector package vs transport service
 
 | Location | Purpose |
@@ -42,7 +55,8 @@ The agent never imports desktop services directly. Only the main-process sandbox
 5. Core tools execute through generic handlers; connector tools execute via IPC → sandbox → broker.
 6. Write tools create pending actions and wait for user approval.
 7. Tool results are compressed before being returned to the model.
-8. **Task continuity** (`taskContinuity.ts`) keeps read→write workflows from stopping early. Detail: [taskContinuity.md](../src/agent/taskContinuity.md).
+8. Before each model call, the **smart context engine** (`src/agent/contextEngine.ts`) cheaply compresses old tool results, protects the head and tail of the conversation, and LLM-summarizes the middle band when the configured context window is tight. A separate background compressor (`src/agent/historyCompression.ts`) periodically mutates stored history so long chats do not grow without bound.
+9. **Task continuity** (`taskContinuity.ts`) keeps read→write workflows from stopping early. Detail: [taskContinuity.md](../src/agent/taskContinuity.md).
 
 ## Agent loop guards (core)
 

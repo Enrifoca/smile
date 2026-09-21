@@ -69,9 +69,16 @@ export class FileService {
 
   async ensureWorkspaceFolders(): Promise<void> {
     console.log('[FileService] Ensuring workspace folders for:', this.workspacePath)
+    // Framework metadata (hidden).
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'contexts'), { recursive: true })
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'connectors'), { recursive: true })
     await fs.mkdir(path.join(this.workspacePath, '.smile', 'memories'), { recursive: true })
+    // Visible user artifact folders.
+    await fs.mkdir(path.join(this.workspacePath, 'reports'), { recursive: true })
+    await fs.mkdir(path.join(this.workspacePath, 'charts'), { recursive: true })
+    await fs.mkdir(path.join(this.workspacePath, 'images'), { recursive: true })
+    await fs.mkdir(path.join(this.workspacePath, 'files'), { recursive: true })
+    await fs.mkdir(path.join(this.workspacePath, 'contexts'), { recursive: true })
     console.log('[FileService] Workspace folders ensured')
   }
 
@@ -314,6 +321,26 @@ export class FileService {
   }
 
   /**
+   * Write base64-decoded binary content to a file
+   */
+  async writeBinaryFile(relativePath: string, base64: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const fullPath = this.validatePath(relativePath)
+
+      // Ensure the directory exists
+      const dir = path.dirname(fullPath)
+      await fs.mkdir(dir, { recursive: true })
+
+      const buffer = Buffer.from(base64, 'base64')
+      await fs.writeFile(fullPath, buffer)
+      return { success: true }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to write binary file'
+      return { success: false, error: message }
+    }
+  }
+
+  /**
    * Check if a file exists
    */
   async exists(relativePath: string): Promise<{ success: boolean; exists?: boolean; error?: string }> {
@@ -434,7 +461,7 @@ export class FileService {
           }
 
           // Always search subdirectories (recursive search)
-          if (entry.isDirectory() && results.length < 500) {
+          if (entry.isDirectory() && results.length < 5000) {
             await searchDir(entryRelPath)
           }
         }

@@ -14,6 +14,7 @@ import { getLinearOAuthService, LinearOAuthService, LINEAR_REDIRECT_URI } from '
 import { getGoogleOAuthService, GoogleOAuthService, GOOGLE_REDIRECT_URI } from './services/google-oauth'
 import { getJiraAttachmentService, JiraAttachmentService } from './services/jira-attachment'
 import { ConnectorsService } from './services/connectors'
+import { getHttpMcpService, HttpMcpService, type HttpMcpConnectionState } from './services/http-mcp'
 import type { ContextEnvelope, ToolResult } from '../src/connectors/contract'
 import { normalizeMcpResult } from '../src/connectors/contract'
 import type { ProjectContext } from '../src/context/types'
@@ -41,6 +42,7 @@ let googleOAuthService: GoogleOAuthService | null = null
 let jiraAttachmentService: JiraAttachmentService | null = null
 let modelCatalogService: ModelCatalogService | null = null
 let connectorsService: ConnectorsService | null = null
+let httpMcpService: HttpMcpService | null = null
 let contextService: ContextService | null = null
 let databaseService: DatabaseService | null = null
 
@@ -60,8 +62,14 @@ const mcpServerRegistry: Record<string, () => McpServerHandle> = {
 
 function resolveMcpServer(serverId: string): McpServerHandle {
   const factory = mcpServerRegistry[serverId]
-  if (!factory) throw new Error(`Unknown MCP server: ${serverId}`)
-  return factory()
+  if (factory) return factory()
+
+  const httpService = getHttpMcpService()
+  if (httpService.isRegistered(serverId)) {
+    return httpService.getHandle(serverId)
+  }
+
+  throw new Error(`Unknown MCP server: ${serverId}`)
 }
 
 async function uploadJiraAttachmentFromWorkspace(issueKey: string, filePath: string): Promise<ToolResult> {
@@ -161,6 +169,22 @@ function getConnectorsService(): ConnectorsService {
             return service.apiCall(endpoint, method, params.body as Record<string, unknown>, params.queryParams as Record<string, string>)
           }
           return { success: false, error: `Host capability not implemented: ${capability}` }
+        },
+        onMcpServersDiscovered: async (servers) => {
+          const service = getHttpMcpService()
+          const seen = new Set<string>()
+          for (const { serverId, connectorId, config } of servers) {
+            seen.add(serverId)
+            await service.register(serverId, config, async (key) =>
+              storageService.getSecure(`connector:${connectorId}:${key}`),
+            )
+          }
+          // Remove servers no longer declared by any connector.
+          for (const existingId of service.getRegisteredServerIds()) {
+            if (!seen.has(existingId)) {
+              await service.unregister(existingId)
+            }
+          }
         },
       },
       path.join(__dirname, 'connector-sandbox.js'),
@@ -425,6 +449,12 @@ async function initializeServices() {
   encryptionService = new EncryptionService()
   storageService = new StorageService(encryptionService)
   modelCatalogService = new ModelCatalogService(storageService)
+  httpMcpService = getHttpMcpService()
+  httpMcpService.on('connectionState', ({ serverId, state, error }: { serverId: string; state: HttpMcpConnectionState; error?: string }) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('mcpServer:connectionState', { serverId, state, error })
+    }
+  })
 
   // Initialize File service if workspace is set
   const workspace = await storageService.getWorkspacePath()
@@ -436,6 +466,9 @@ async function initializeServices() {
     memoryService.setWorkspace(workspace)
     getSourceMemoryService().setWorkspace(workspace)
     getConnectorsService().setWorkspace(workspace)
+    getHttpMcpService().disconnectAll().catch(error => {
+      console.warn('[HttpMcp] Failed to disconnect previous workspace servers:', error)
+    })
     ensureContextService()
     databaseService = getDatabaseService()
     databaseService.setWorkspace(workspace)
@@ -854,6 +887,9 @@ ipcMain.handle('file:selectWorkspace', async () => {
     memoryService.setWorkspace(workspacePath)
     getSourceMemoryService().setWorkspace(workspacePath)
     getConnectorsService().setWorkspace(workspacePath)
+    getHttpMcpService().disconnectAll().catch(error => {
+      console.warn('[HttpMcp] Failed to disconnect previous workspace servers:', error)
+    })
     ensureContextService()
     databaseService = getDatabaseService()
     databaseService.setWorkspace(workspacePath)
@@ -915,6 +951,18 @@ ipcMain.handle('file:write', async (_, relativePath: string, content: string) =>
   return fileService.writeFile(relativePath, content)
 })
 
+ipcMain.handle('file:writeBinary', async (_, relativePath: string, base64: string) => {
+  if (!fileService) return { success: false, error: 'Workspace not configured' }
+  return fileService.writeBinaryFile(relativePath, base64)
+})
+
+ipcMain.handle('file:readBinary', async (_, relativePath: string) => {
+  if (!fileService) return { success: false, error: 'Workspace not configured' }
+  const result = await fileService.readFileBuffer(relativePath)
+  if (!result.success || !result.data) return { success: false, error: result.error || 'Failed to read file' }
+  return { success: true, data: result.data.toString('base64') }
+})
+
 ipcMain.handle('file:mkdir', async (_, relativePath: string) => {
   if (!fileService) return { success: false, error: 'Workspace not configured' }
   return fileService.createDirectory(relativePath)
@@ -953,6 +1001,63 @@ ipcMain.handle('file:ensureAttachmentsDir', async () => {
 ipcMain.handle('file:saveAttachment', async (_, fileName: string, data: ArrayBuffer) => {
   if (!fileService) return { success: false, error: 'Workspace not configured' }
   return fileService.saveAttachment(fileName, Buffer.from(data))
+})
+
+ipcMain.handle('file:exportPdf', async (_, { html }: { html: string; filename: string }) => {
+  // PDF export does not require a workspace; it renders the provided HTML in a
+  // hidden off-screen window and returns the PDF bytes as base64.
+  let exportWindow: BrowserWindow | null = null
+  try {
+    exportWindow = new BrowserWindow({
+      show: false,
+      width: 1200,
+      height: 1600,
+      webPreferences: { offscreen: true },
+    })
+
+    await exportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+
+    // Wait for all images to finish loading before printing so charts/figures
+    // actually appear in the exported PDF.
+    await exportWindow.webContents.executeJavaScript(`
+      new Promise((resolve) => {
+        const check = () => {
+          if (document.readyState !== 'complete') {
+            setTimeout(check, 50)
+            return
+          }
+          const images = Array.from(document.images)
+          if (images.length === 0 || images.every(img => img.complete)) {
+            resolve(true)
+          } else {
+            setTimeout(check, 50)
+          }
+        }
+        check()
+      })
+    `)
+
+    const pdfBuffer = await exportWindow.webContents.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      preferCSSPageSize: false,
+      margins: {
+        top: 0.2,
+        bottom: 0.2,
+        left: 0.2,
+        right: 0.2,
+      },
+    })
+
+    return { success: true, data: pdfBuffer.toString('base64') }
+  } catch (error) {
+    console.error('[Main] PDF export failed:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'PDF export failed' }
+  } finally {
+    if (exportWindow && !exportWindow.isDestroyed()) {
+      exportWindow.close()
+    }
+  }
 })
 
 // AI Service
@@ -1038,6 +1143,25 @@ ipcMain.handle('ai:chat', async (_, messages: Array<{ role: 'system' | 'user' | 
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'AI request failed'
     console.error('[AI:chat] Error:', msg)
+    return { success: false, error: msg }
+  }
+})
+
+ipcMain.handle('ai:generateImage', async (_, prompt: string, options?: { size?: string; style?: string; model?: string }) => {
+  if (!aiService) {
+    const aiConfigStr = storageService.getSecure('aiConfig')
+    if (aiConfigStr) {
+      try { aiService = new AIService(JSON.parse(aiConfigStr)) }
+      catch { return { success: false, error: 'AI not configured' } }
+    } else {
+      return { success: false, error: 'AI not configured' }
+    }
+  }
+  try {
+    return await aiService.generateImage(prompt, options)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Image generation failed'
+    console.error('[AI:generateImage] Error:', msg)
     return { success: false, error: msg }
   }
 })
@@ -1143,6 +1267,41 @@ ipcMain.handle('mcp:getConnectionState', async () => {
     state: mcpConnectionState,
     connected: mcpService?.getConnectionStatus() ?? false,
   }
+})
+
+// ============================================
+// GENERIC PER-SERVER HTTP MCP HANDLERS
+// ============================================
+
+ipcMain.handle('mcpServer:connect', async (_, serverId: string) => {
+  const service = getHttpMcpService()
+  try {
+    return await service.connect(serverId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'MCP connection failed'
+    return { success: false, error: message }
+  }
+})
+
+ipcMain.handle('mcpServer:disconnect', async (_, serverId: string) => {
+  const service = getHttpMcpService()
+  try {
+    await service.disconnect(serverId)
+    return { success: true }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to disconnect MCP server'
+    return { success: false, error: message }
+  }
+})
+
+ipcMain.handle('mcpServer:status', async (_, serverId: string) => {
+  const service = getHttpMcpService()
+  return { connected: service.getConnectionStatus(serverId) }
+})
+
+ipcMain.handle('mcpServer:getConnectionState', async (_, serverId: string) => {
+  const service = getHttpMcpService()
+  return service.getConnectionState(serverId)
 })
 
 // ============================================

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useElectron } from '../../hooks/useElectron'
 import { useActionFeedback } from '../../hooks/useActionFeedback'
@@ -49,22 +49,28 @@ type OAuthServiceApi = {
   onConnectionStateChange: (callback: (state: { state: string; error?: string }) => void) => (() => void)
 }
 
+interface McpServerUiState {
+  connected: boolean
+  connecting: boolean
+  error: string | null
+}
+
 export function GenericConnectorSettingsView({
   manifest,
   onBack,
   onConnectionChange,
 }: GenericConnectorSettingsViewProps) {
-  const { storage, mcp, linear, google, connectors } = useElectron()
+  const { storage, mcp, mcpServer, linear, google, connectors } = useElectron()
   const saveFeedback = useActionFeedback()
   const authFields = manifest.auth?.fields ?? []
   const secretFields = authFields.filter(field => field.secret !== false)
   const requiredFields = authFields.filter(field => !field.optional)
 
   const [form, setForm] = useState<Record<string, string>>({})
+  const formRef = useRef(form)
+  formRef.current = form
   const [configured, setConfigured] = useState(false)
-  const [mcpConnected, setMcpConnected] = useState(false)
-  const [mcpConnecting, setMcpConnecting] = useState(false)
-  const [mcpError, setMcpError] = useState<string | null>(null)
+  const [mcpServerStates, setMcpServerStates] = useState<Record<string, McpServerUiState>>({})
   const [oauthConnected, setOauthConnected] = useState(false)
   const [oauthConnecting, setOauthConnecting] = useState(false)
   const [oauthError, setOauthError] = useState<string | null>(null)
@@ -77,10 +83,23 @@ export function GenericConnectorSettingsView({
     ? INTEGRATION_TYPE_LABELS[manifest.integrationType]
     : null
 
-  const needsMcp = (manifest.permissions?.mcp?.length ?? 0) > 0
+  const mcpServerIds = useMemo(() => manifest.permissions?.mcp ?? [], [manifest.permissions?.mcp])
+  const needsMcp = mcpServerIds.length > 0
   const isOAuth = manifest.auth?.type === 'oauth'
   const optionalSecrets = manifest.auth?.type === 'oauth-with-rest-token'
   const restApiTitle = optionalSecrets ? `${manifest.name} REST API` : isOAuth ? 'OAuth app credentials' : 'Connection'
+
+  const isAtlassianServer = (serverId: string) => serverId === 'atlassian'
+
+  const getMcpServerState = (serverId: string): McpServerUiState =>
+    mcpServerStates[serverId] ?? { connected: false, connecting: false, error: null }
+
+  const setMcpServerState = (serverId: string, patch: Partial<McpServerUiState>): void => {
+    setMcpServerStates(prev => ({
+      ...prev,
+      [serverId]: { ...(prev[serverId] ?? { connected: false, connecting: false, error: null }), ...patch },
+    }))
+  }
 
   const oauthServiceId = useMemo(() => {
     const host = manifest.permissions?.host?.find(h => h.endsWith('.api'))
@@ -107,60 +126,81 @@ export function GenericConnectorSettingsView({
     }
   }, [oauth])
 
-  const refreshConfigured = async () => {
+  const credentialsSaved = (nextForm: Record<string, string>): boolean => {
+    if (requiredFields.length === 0 || optionalSecrets) return true
+    return requiredFields.every(field => {
+      const value = nextForm[field.key]
+      return !!value?.trim() && value !== '••••••••'
+    })
+  }
+
+  const refreshConfigured = useCallback(async () => {
     try {
       const nextForm: Record<string, string> = {}
 
       if (isOAuth && oauthServiceId) {
         const clientRaw = await storage.getSecure(oauthClientKey(oauthServiceId))
         const client = clientRaw ? (JSON.parse(clientRaw) as OAuthClientCredentials) : {}
-        for (const field of authFields) {
-          const value = client[field.key as keyof OAuthClientCredentials] || ''
-          nextForm[field.key] = field.secret !== false && value ? '••••••••' : value
-        }
+        await Promise.all(
+          authFields.map(async field => {
+            const value = client[field.key as keyof OAuthClientCredentials] || ''
+            nextForm[field.key] = field.secret !== false && value ? '••••••••' : value
+          }),
+        )
       } else {
-        for (const field of authFields) {
-          const stored = await storage.getSecure(connectorSecretKey(manifest.id, field.key))
-          nextForm[field.key] = field.secret !== false && stored ? '••••••••' : (stored || '')
-        }
+        await Promise.all(
+          authFields.map(async field => {
+            const stored = await storage.getSecure(connectorSecretKey(manifest.id, field.key))
+            nextForm[field.key] = field.secret !== false && stored ? '••••••••' : (stored || '')
+          }),
+        )
       }
       if (authFields.length > 0) {
         setForm(nextForm)
       }
 
+      // Refresh per-server MCP state.
+      const nextMcpStates: Record<string, McpServerUiState> = {}
       if (needsMcp) {
-        const [status, connectionState] = await Promise.all([mcp.status(), mcp.getConnectionState()])
-        const connected = status.connected || connectionState.connected
-        setMcpConnected(connected)
-        setConfigured(connected)
-        onConnectionChange?.(connected)
-        return
+        await Promise.all(
+          mcpServerIds.map(async serverId => {
+            if (isAtlassianServer(serverId)) {
+              const [status, connectionState] = await Promise.all([mcp.status(), mcp.getConnectionState()])
+              const connected = status.connected || connectionState.connected
+              nextMcpStates[serverId] = { connected, connecting: false, error: null }
+            } else {
+              const state = await mcpServer.getConnectionState(serverId)
+              nextMcpStates[serverId] = {
+                connected: state.state === 'connected',
+                connecting: state.state === 'connecting',
+                error: state.error ?? null,
+              }
+            }
+          }),
+        )
+        setMcpServerStates(prev => ({ ...prev, ...nextMcpStates }))
       }
 
       if (isOAuth && oauth) {
         const status = await oauth.status()
         setOauthConnected(status.connected)
-        setConfigured(status.connected)
-        onConnectionChange?.(status.connected)
+        const nextConfigured = status.connected
+        setConfigured(nextConfigured)
+        onConnectionChange?.(nextConfigured)
         return
       }
 
-      if (requiredFields.length > 0 && !optionalSecrets) {
-        const allSet = requiredFields.every(field => {
-          const value = nextForm[field.key]
-          return !!value?.trim() && value !== '••••••••'
-        })
-        setConfigured(allSet)
-        onConnectionChange?.(allSet)
-        return
-      }
-
-      setConfigured(true)
-      onConnectionChange?.(true)
+      const saved = credentialsSaved(nextForm)
+      const allConnected = needsMcp
+        ? mcpServerIds.every(id => nextMcpStates[id]?.connected)
+        : true
+      const nextConfigured = saved && allConnected
+      setConfigured(nextConfigured)
+      onConnectionChange?.(nextConfigured)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load connector settings')
     }
-  }
+  }, [isOAuth, oauthServiceId, authFields, manifest.id, needsMcp, mcpServerIds, mcp, mcpServer, oauth, storage, onConnectionChange])
 
   useEffect(() => {
     void refreshConfigured()
@@ -168,11 +208,20 @@ export function GenericConnectorSettingsView({
 
   useEffect(() => {
     const cleanupMcp = mcp.onConnectionStateChange(state => {
+      const atlassianId = mcpServerIds.find(isAtlassianServer)
+      if (!atlassianId) return
       const connected = state.state === 'connected'
-      setMcpConnected(connected)
-      if (needsMcp) {
-        setConfigured(connected)
-        onConnectionChange?.(connected)
+      setMcpServerState(atlassianId, { connected, connecting: false, error: state.error ?? null })
+      void refreshConfigured()
+    })
+
+    const cleanupMcpServer = mcpServer.onConnectionStateChange(state => {
+      if (!mcpServerIds.includes(state.serverId)) return
+      const connected = state.state === 'connected'
+      setMcpServerState(state.serverId, { connected, connecting: false, error: state.error ?? null })
+      // Recompute configured when any tracked HTTP MCP server changes.
+      if (!isOAuth) {
+        void refreshConfigured()
       }
     })
 
@@ -187,9 +236,10 @@ export function GenericConnectorSettingsView({
 
     return () => {
       cleanupMcp()
+      cleanupMcpServer()
       cleanupOauth?.()
     }
-  }, [oauth, isOAuth, needsMcp, onConnectionChange])
+  }, [oauth, isOAuth, needsMcp, mcpServerIds, onConnectionChange, refreshConfigured])
 
   const restCredentialsSaved = useMemo(
     () => authFields.some(field => !!form[field.key]?.trim()),
@@ -248,34 +298,43 @@ export function GenericConnectorSettingsView({
     })
   }
 
-  async function handleMcpConnect(forceReauth = false) {
-    setMcpConnecting(true)
-    setMcpError(null)
+  async function handleMcpConnect(serverId: string) {
+    const state = getMcpServerState(serverId)
+    setMcpServerState(serverId, { connecting: true, error: null })
     try {
-      const result = await mcp.connect(forceReauth ? { forceReauth: true } : undefined)
+      const result = isAtlassianServer(serverId)
+        ? await mcp.connect(state.connected ? { forceReauth: true } : undefined)
+        : await mcpServer.connect(serverId)
       if (!result.success) throw new Error(result.error || 'MCP connection failed')
       await refreshConfigured()
     } catch (err) {
-      setMcpError(err instanceof Error ? err.message : 'MCP connection failed')
+      setMcpServerState(serverId, {
+        error: err instanceof Error ? err.message : 'MCP connection failed',
+      })
     } finally {
-      setMcpConnecting(false)
+      setMcpServerState(serverId, { connecting: false })
     }
   }
 
-  async function handleMcpDisconnect() {
-    setMcpConnecting(true)
-    setMcpError(null)
+  async function handleMcpDisconnect(serverId: string) {
+    setMcpServerState(serverId, { connecting: true, error: null })
     try {
-      await mcp.disconnect()
-      setMcpConnected(false)
+      if (isAtlassianServer(serverId)) {
+        await mcp.disconnect()
+      } else {
+        await mcpServer.disconnect(serverId)
+      }
+      setMcpServerState(serverId, { connected: false })
       if (needsMcp && secretFields.length === 0) {
         setConfigured(false)
         onConnectionChange?.(false)
       }
     } catch (err) {
-      setMcpError(err instanceof Error ? err.message : 'Failed to disconnect MCP')
+      setMcpServerState(serverId, {
+        error: err instanceof Error ? err.message : 'Failed to disconnect MCP',
+      })
     } finally {
-      setMcpConnecting(false)
+      setMcpServerState(serverId, { connecting: false })
     }
   }
 
@@ -324,10 +383,13 @@ export function GenericConnectorSettingsView({
     if (isOAuth) {
       await handleOAuthDisconnect()
     }
-    if (!needsMcp) {
-      setConfigured(false)
-      onConnectionChange?.(false)
+    if (needsMcp) {
+      for (const serverId of mcpServerIds) {
+        await handleMcpDisconnect(serverId)
+      }
     }
+    setConfigured(false)
+    onConnectionChange?.(false)
   }
 
   async function handleDeleteConnector() {
@@ -366,19 +428,28 @@ export function GenericConnectorSettingsView({
 
         {error && <Alert>{error}</Alert>}
 
-        {needsMcp && (
-          <McpConnectionModule
-            title="MCP connection"
-            description={`Required servers: ${manifest.permissions?.mcp?.join(', ')}. Tool calls are brokered through the connector sandbox.`}
-            connected={mcpConnected}
-            connecting={mcpConnecting}
-            onConnect={() => void handleMcpConnect(mcpConnected)}
-            onDisconnect={mcpConnected ? () => void handleMcpDisconnect() : undefined}
-            connectLabel="Connect MCP"
-            reconnectLabel="Reconnect MCP"
-            error={mcpError}
-          />
-        )}
+        {needsMcp && mcpServerIds.map(serverId => {
+          const state = getMcpServerState(serverId)
+          const config = manifest.mcpServers?.[serverId]
+          const title = config ? `${serverId} MCP` : 'MCP connection'
+          const description = config
+            ? `Connect to ${config.baseUrl}`
+            : `Required server: ${serverId}. Tool calls are brokered through the connector sandbox.`
+          return (
+            <McpConnectionModule
+              key={serverId}
+              title={title}
+              description={description}
+              connected={state.connected}
+              connecting={state.connecting}
+              onConnect={() => void handleMcpConnect(serverId)}
+              onDisconnect={state.connected ? () => void handleMcpDisconnect(serverId) : undefined}
+              connectLabel={`Connect ${serverId}`}
+              reconnectLabel={`Reconnect ${serverId}`}
+              error={state.error}
+            />
+          )
+        })}
 
         {authFields.length > 0 && (
           <ApiConnectionModule
@@ -390,13 +461,13 @@ export function GenericConnectorSettingsView({
                   ? `Client credentials from your ${manifest.name} OAuth app. Redirect URI must be ${oAuthRedirectUri}.`
                   : `Credentials for ${manifest.name}. Stored encrypted on this device.`
             }
-            configured={optionalSecrets ? restCredentialsSaved : isOAuth ? oAuthCredentialsSaved : configured}
+            configured={optionalSecrets ? restCredentialsSaved : isOAuth ? oAuthCredentialsSaved : credentialsSaved(form)}
             saving={saveFeedback.busy}
             saveDisabled={saveDisabled}
             saveStatus={saveFeedback.status}
             onSave={() => void handleSave()}
             onRemove={
-              (optionalSecrets ? restCredentialsSaved : isOAuth ? oAuthCredentialsSaved : configured)
+              (optionalSecrets ? restCredentialsSaved : isOAuth ? oAuthCredentialsSaved : credentialsSaved(form))
                 ? () => void handleRemove()
                 : undefined
             }

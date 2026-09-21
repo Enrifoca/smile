@@ -2,10 +2,13 @@
 
 Shrink verbose tool output **before it re-enters the model**.
 
+This is the first, cheapest layer of compression. For the second layer — deciding which conversation history to send to the model — see [`src/agent/contextEngine.ts`](../contextEngine.ts) and [`src/agent/historyCompression.ts`](../historyCompression.ts).
+
 ## What this is not
 
 - Does not compress the system prompt, user messages, or memory blocks.
 - Does not decide what to store in Learned Notes or connector source memory.
+- Does not decide which old turns to keep, drop, or summarize (that is the context engine).
 
 ## Pipeline
 

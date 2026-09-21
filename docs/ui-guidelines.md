@@ -11,6 +11,7 @@ Shell layout code: `src/components/shell/` — see [shell README](../src/compone
 ## Principles
 
 - **Black and white first.** The app is white-label; avoid brand colors beyond the palette below.
+  - **Exception:** connector catalog icons must use each vendor’s exact brand logo and brand colors so users can recognize them instantly.
 - **Grey for structure and secondary emphasis** — borders, muted text, informational surfaces.
 - **Red only for danger** — errors, destructive actions, danger zones. Not for decoration.
 - **Green only for “active” chips and catalog dots** — see [Chips](#chips) and [Active indicators](#active-indicators). Inspector list dots use **black**.
@@ -269,7 +270,7 @@ Range sliders (`RangeSlider` in Communication preferences): **mouse wheel scroll
 ## Connector and catalog UI
 
 - Catalog tiles: `connector-card` — `1px` border, `--radius-control`, base typography; hover `--color-hover-surface`.
-- Catalog connector icons must be the correct brand SVG in its brand colors (not generic letter placeholders); register the icon component in `src/connectors/catalog.ts` as `CatalogGraphic`.
+- Catalog connector icons must be the vendor’s exact brand logo in the vendor’s brand colors. Do not recolor them to black-and-white or grey. Register the icon component in `src/connectors/catalog.ts` as `CatalogGraphic`.
 - Green dot top-right when configured (`connector-card-active-dot`).
 - Integration type labels (REST, MCP, etc.) are **white chips with a black border and black label** (`Badge tone="primary"`).
 - Detail/settings: `ui-page-frame` + `Panel variant="soft"` (sharp corners via `--radius-control`).

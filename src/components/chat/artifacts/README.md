@@ -4,7 +4,7 @@ Manus-style **report cards** in chat when the agent calls `report_write`.
 
 ## Agent tool
 
-`report_write` saves markdown to the workspace and emits a chat **artifact** message. With an active context the default path is `.smile/contexts/<slug>/<date>_<slug>.md`; with no active context the default is `.smile/<date>_<slug>.md`.
+`report_write` saves markdown to the workspace and emits a chat **artifact** message. With an active context the default path is `contexts/<slug>/reports/<slug>.md`; with no active context the default is `reports/<slug>.md`.
 
 | Field | Purpose |
 | --- | --- |
@@ -21,7 +21,7 @@ The tool result tells the model the path — use `file_read` on that path when t
 | `MarkdownArtifactCard` | Inline preview in the transcript; click to open |
 | `MarkdownArtifactModal` | Full-screen reader |
 | `ActiveReportPill` | Composer chip for the latest report — open or dismiss |
-| `MarkdownRenderer` | Shared markdown → HTML via `react-markdown` + `remark-gfm` (headings, lists, tables, code blocks, blockquotes, task lists) |
+| `MarkdownRenderer` | Shared markdown → HTML via `marked` (default renderer), then Smile UI classes are injected with `DOMParser` so headings, lists, tables, code blocks, blockquotes, task lists, images and links render correctly |
 
 Styles: `.ui-artifact-*`, `.ui-md-*`, `.ui-chat-report-pill*` in `src/styles/globals.css`.
 
@@ -44,11 +44,11 @@ Dismiss is per artifact message id, not per file path — revising the same path
 | | `report_write` | `file_write` |
 | --- | --- | --- |
 | Purpose | Chat-visible markdown reports | General workspace files |
-| Default path | Context folder (or `.smile/` if no context) | Any path you pass |
-| UI | Report card + composer pill + tool result copy for the model | No report UI (unless path looks like a report — under `.smile/` with a date prefix or under `.smile/reports/` legacy) |
+| Default path | `contexts/<slug>/reports/` (or `reports/` if no context) | Any path you pass |
+| UI | Report card + composer pill + tool result copy for the model | No report UI (unless path looks like a report — under `reports/` or `contexts/<slug>/reports/`) |
 | When revising | Same path + `title` for the card | Same path only |
 
-Prefer **`report_write`** only for explicit reports, substantial plans/specs, batch lists, or lengthy/tabular structured documents. If the model uses `file_write` under the context folder or `.smile/`, the UI still activates so features are not lost.
+Prefer **`report_write`** only for explicit reports, substantial plans/specs, batch lists, or lengthy/tabular structured documents. If the model uses `file_write` under `reports/` or `contexts/<slug>/reports/`, the UI still activates so features are not lost.
 
 ## Download / export
 
@@ -63,7 +63,7 @@ Implementation: `src/utils/exportReport.ts` and `src/utils/markdownToDocx.ts`.
 
 ## Customization
 
-- Edit rendering: `MarkdownRenderer.tsx` (uses `react-markdown` + `remark-gfm`)
+- Edit rendering: `MarkdownRenderer.tsx` (uses `marked` + `DOMParser` for class injection)
 - Edit card/modal layout: `MarkdownArtifactCard.tsx`, `MarkdownArtifactModal.tsx`
 - Change default folder: `buildReportPath()` in `src/agent/artifacts.ts`
 - Prompt guidance: `src/prompts/core/system.md` (Reports section)
