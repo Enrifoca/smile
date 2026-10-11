@@ -142,16 +142,70 @@ function hasActionIntent(text: string): boolean {
  * Does not nudge after a successful write, or when the model produced no prose and no tools
  * (think-only / empty - handled elsewhere in the loop).
  */
+export interface LastToolResultSnapshot {
+  tool: string
+  isError: boolean
+}
+
+export interface TaskContinuityContext {
+  reportWriteSucceededThisTurn?: boolean
+  /** Path of the report pinned in the chat composer, if any. */
+  activeReportPath?: string
+  /** Last tool result produced this turn, so we can recover from errors. */
+  lastToolResult?: LastToolResultSnapshot
+}
+
+function activeReportToolUsedThisTurn(
+  toolsRunThisTurn: ToolRunRecord[],
+  activeReportPath: string,
+): boolean {
+  const normalized = activeReportPath.replace(/\\/g, '/')
+  return toolsRunThisTurn.some(tool => {
+    if (!tool.path) return false
+    if (tool.name !== 'report_write' && tool.name !== 'file_read' && tool.name !== 'file_read_ocr') return false
+    return tool.path.replace(/\\/g, '/') === normalized
+  })
+}
+
+// Detect when the model asks the user to clarify which report/project/file
+// even though an active report is already pinned in the composer.
+function agentAsksWhichReport(text: string): boolean {
+  const lower = text.toLowerCase()
+  const phrases = [
+    'which report',
+    'quale report',
+    'which project',
+    'quale progetto',
+    'which file',
+    'quale file',
+    'what report',
+    'che report',
+    'a quale report',
+    'a quale progetto',
+    'a quale file',
+  ]
+  return phrases.some(phrase => lower.includes(phrase))
+}
+
 export function shouldNudgeIncompleteWorkflow(
   toolsRunThisTurn: ToolRunRecord[],
   responseText: string,
-  context: { reportWriteSucceededThisTurn?: boolean } = {},
+  context: TaskContinuityContext = {},
 ): boolean {
+  const text = responseText.trim()
+  if (!text) return false
+
+  // If the last tool failed, the model must try to fix or retry instead of stopping.
+  if (context.lastToolResult?.isError) return true
+
   if (context.reportWriteSucceededThisTurn) return false
   if (toolsRunThisTurn.some(isWriteTool)) return false
 
-  const text = responseText.trim()
-  if (!text) return false
+  // If an active report is pinned and the model asks "which report", nudge it
+  // to use the pinned report instead of asking the user.
+  if (context.activeReportPath && !activeReportToolUsedThisTurn(toolsRunThisTurn, context.activeReportPath) && agentAsksWhichReport(text)) {
+    return true
+  }
 
   // The model described an action it plans to take but didn't actually call a tool.
   if (hasActionIntent(text)) return true
@@ -164,7 +218,19 @@ export function shouldNudgeIncompleteWorkflow(
   return false
 }
 
-export function buildIncompleteWorkflowNudge(responseText: string, toolsRunThisTurn: ToolRunRecord[]): string {
+export function buildIncompleteWorkflowNudge(
+  responseText: string,
+  toolsRunThisTurn: ToolRunRecord[],
+  context: TaskContinuityContext = {},
+): string {
+  if (context.lastToolResult?.isError) {
+    return `[SYSTEM] The last tool (${context.lastToolResult.tool}) failed. Read the error in the tool_result above, fix the issue, and call the appropriate tool again. Do not stop at the error message.`
+  }
+
+  if (context.activeReportPath && agentAsksWhichReport(responseText.trim())) {
+    return `[SYSTEM] The active report is \`${context.activeReportPath.replace(/\\/g, '/')}\`. The user is asking about this report. Read it with file_read if needed, then update it with report_write. Do not ask the user which report they mean.`
+  }
+
   if (hasActionIntent(responseText.trim())) {
     return '[SYSTEM] You described a planned action but did not call a tool. Call the appropriate tool now to actually perform the action. Do not stop at acknowledgments or promises.'
   }

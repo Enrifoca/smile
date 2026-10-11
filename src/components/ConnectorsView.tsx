@@ -11,6 +11,7 @@ import {
 import { ConnectorManifest } from '../connectors/contract'
 import { useElectron } from '../hooks/useElectron'
 import { GenericConnectorSettingsView } from './connectors/GenericConnectorSettingsView'
+import { ImageGenerationSettingsView } from './connectors/ImageGenerationSettingsView'
 import { ConnectorPageHeader } from './connectors/ConnectorPageHeader'
 import { Alert, Badge, Button, Input, Panel, Spinner } from './ui'
 
@@ -173,6 +174,15 @@ function ConnectorDetailView({
   onConnectionChange: (connectorId: string, connected: boolean) => void
 }) {
   if (workspaceManifest) {
+    if (connectorId === 'image-generation') {
+      return (
+        <ImageGenerationSettingsView
+          manifest={workspaceManifest}
+          onBack={onBack}
+          onConnectionChange={connected => onConnectionChange(connectorId, connected)}
+        />
+      )
+    }
     return (
       <GenericConnectorSettingsView
         manifest={workspaceManifest}

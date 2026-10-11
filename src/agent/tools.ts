@@ -28,7 +28,7 @@ export const generateChartSchema = z.object({
   type: z.enum(['bar', 'line', 'area', 'pie', 'doughnut', 'horizontalBar']).describe('Chart type. Use "bar" or "horizontalBar" for comparisons, "line"/"area" for trends over time, "pie"/"doughnut" for part-of-whole.'),
   data: z.array(z.record(z.unknown())).describe(
     'Chart data rows. The first key is the label/category axis; remaining keys are numeric series. ' +
-    'Requires at least 2 rows. With only one data point, use generate_image or describe the value in prose instead. ' +
+    'Requires at least 1 row. With only one data point, a single-bar/single-slice chart is still valid. ' +
     'Example: [{"Month": "Jan", "Revenue": 12000, "Cost": 8000}, {"Month": "Feb", "Revenue": 15000, "Cost": 9000}]. ' +
     'Use numbers, not formatted strings. For percentages or currency the renderer auto-detects $ and % if present in values.'
   ),
@@ -259,6 +259,15 @@ export const toolDefinitions: ToolDefinition[] = [
     category: 'context',
   },
 ]
+
+/**
+ * Maps core tools that are implemented through a connector to the connector id
+ * they require. When the connector is not enabled for the active scope, the tool
+ * is hidden from the agent so it does not attempt a doomed call.
+ */
+export const CORE_TOOL_CONNECTOR_DEPENDENCY: Record<string, string> = {
+  generate_image: 'image-generation',
+}
 
 /**
  * Get a tool definition by name

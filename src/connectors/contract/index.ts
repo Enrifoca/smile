@@ -21,6 +21,7 @@ export type {
   ConnectorHandlerKind,
   ConnectorAuth,
   ConnectorAuthField,
+  ConnectorAuthFieldOption,
   ConnectorPermissions,
   ConnectorUI,
   ConnectorIntegrationType,

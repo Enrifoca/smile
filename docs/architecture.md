@@ -1,6 +1,6 @@
 # Architecture
 
-smile:D is a desktop framework for building vertical AI agents. The core should stay connector-neutral; domain behavior belongs in workspace connector packages.
+smile:D is an Open Source AI Workspace. The core stays connector-neutral; domain behavior belongs in workspace connector packages.
 
 ## Layers
 

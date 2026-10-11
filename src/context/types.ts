@@ -77,3 +77,8 @@ export function getContextFilesPath(context: ProjectContext): string {
 export function getContextReportsPath(context: ProjectContext): string {
   return `contexts/${context.slug}/reports`
 }
+
+/** Workspace-relative path to the hidden context markdown file maintained by context tools. */
+export function getContextMarkdownPath(context: ProjectContext): string {
+  return `.smile/contexts/${context.slug}/${context.slug}.md`
+}

@@ -10,7 +10,7 @@ Shell layout code: `src/components/shell/` — see [shell README](../src/compone
 
 ## Principles
 
-- **Black and white first.** The app is white-label; avoid brand colors beyond the palette below.
+- **Black and white first.** The app uses a minimal black-and-white palette; avoid brand colors beyond the palette below.
   - **Exception:** connector catalog icons must use each vendor’s exact brand logo and brand colors so users can recognize them instantly.
 - **Grey for structure and secondary emphasis** — borders, muted text, informational surfaces.
 - **Red only for danger** — errors, destructive actions, danger zones. Not for decoration.
@@ -251,7 +251,7 @@ Grey box for optional guidance — `Callout` / `.ui-callout`.
 ## Chat composer
 
 - Default input: white shell, grey border.
-- **Active report pinned:** grey composer background (`ui-chat-composer--with-report`); pill above input — white, black border, hover surface.
+- **Active report pinned:** white composer background with a pill above the input — white, black border, hover surface.
 - **Write approval:** `WriteActionConfirmModule` — Accept (primary) / Refuse (secondary).
 - **Empty chat:** `ChatEmptyState` — heading only; **no suggestion chips** by default.
 

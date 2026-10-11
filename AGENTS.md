@@ -1,12 +1,12 @@
 # smile:D Agent Instructions
 
-smile:D is a framework for building vertical AI agents in a desktop app.
+smile:D is an Open Source AI Workspace.
 
 ## Product Direction
 
-- Keep the core framework connector-neutral — no connector tool logic in the agent loop; workspace packages under `.smile/connectors/` plus optional `bundled/connectors/` catalog sources.
+- Keep the core connector-neutral — no connector tool logic in the agent loop; workspace packages under `.smile/connectors/` plus optional `bundled/connectors/` catalog sources.
 - Prefer module boundaries where connectors provide tools, Markdown prompt sections, auth UI, action previews, result formatting, and cache invalidation.
-- Keep the default UI black and white so downstream agents can rebrand it — see `docs/ui-guidelines.md`.
+- Keep the default UI black and white — a minimal, neutral workspace interface. See `docs/ui-guidelines.md`.
 - Preserve human approval for write actions.
 
 ## Architecture Notes

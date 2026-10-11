@@ -1,14 +1,21 @@
 # smile:D
 
-A desktop framework for building vertical AI agents for work.
+Open Source AI Workspace.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/enrifoca/smile?color=black&label=release)](https://github.com/enrifoca/smile/releases/latest)
 [![Built by Enrico Focaccia](https://img.shields.io/badge/Built%20by-Enrico%20Focaccia-black?logo=linkedin)](https://www.linkedin.com/in/enrico-focaccia/)
 
-smile:D gives you the reusable structure: a local desktop shell, multi-model agent loop, human-in-the-loop tool approvals, editable memory, workspace file access, and a connector system. Bring a use case, add connector modules, tune the prompts, and ship a focused agent for that domain.
+smile:D is a desktop AI workspace: a local chat interface that can read, write, search, remember, and use connector modules to work with external services. It keeps files in a workspace folder, maintains project contexts, and asks for approval before destructive actions.
 
 [![Download latest release](https://img.shields.io/badge/Download-latest%20release-black?style=for-the-badge)](https://github.com/enrifoca/smile/releases/latest)
+
+## Demo
+
+A short demo video will be added here.
+
+<!-- Replace the line below with a video link or an HTML `<video>` tag pointing to the demo file. -->
+<!-- [Watch demo](https://www.youtube.com/watch?v=REPLACE_ME) -->
 
 ## Features
 
@@ -17,12 +24,14 @@ smile:D gives you the reusable structure: a local desktop shell, multi-model age
 | **Multimodal** | Choose your chat model, switch to a reasoning model, and use the OCR model for scanned or image-based documents. |
 | **Human in the loop** | Read tools run freely; write tools pause for your approval before they execute. |
 | **Editable memory** | User memory and learned notes live in Markdown under `.smile/memories`. |
+| **Project contexts** | Switch between project scopes; each context keeps its own knowledge, connectors, and output folders. |
+| **Workspace tools** | List, read, search, write, patch files, and generate markdown reports in a local folder. |
+| **Visual tools** | Generate charts, diagrams, and images and embed them directly in reports. |
+| **Connector modules** | Extend the workspace with connectors under `.smile/connectors/<id>/` or install from the bundled catalog. |
 | **Compression** | Verbose tool output is shrunk before it re-enters the model context. |
-| **Context management** | Switch easily between project contexts to keep work scoped. |
-| **Connector modules** | Create and install your own connector packages under `.smile/connectors/<id>/`. |
-| **Clean white-label UI** | Minimal black-and-white interface, ready to adapt to a vertical use case. |
+| **Minimal UI** | Black-and-white interface, no unnecessary chrome. |
 
-## Getting started
+## Installation
 
 ### End users
 
@@ -76,7 +85,7 @@ There is no first-launch onboarding wizard. After the app opens, configure every
 1. **AI Provider** — choose and configure your chat, reasoning, and OCR providers.
 2. **Workspace** — select a folder for document access and generated outputs.
 3. **Memory** — edit durable user instructions in Markdown.
-4. **Connectors** — install packages under `<workspace>/.smile/connectors/<id>/` (see the Connectors section and `docs/creating-a-connector.md`).
+4. **Connectors** — install packages under `<workspace>/.smile/connectors/<id>/` (see `docs/creating-a-connector.md`).
 
 ## Supported AI providers
 
@@ -95,25 +104,31 @@ Chat, reasoning, and OCR models can be configured independently.
 | **MiniMax** | ✅ | ✅ | — | `MiniMax-Text-01` and chat models |
 | **Qwen / Alibaba** | ✅ | ✅ | — | `qwen-plus`, `qwq-32b`, Qwen3 reasoning |
 
-## Framework Pillars
+## Roadmap
 
-- **Multimodal by default** — chat, reasoning, and OCR models are configured independently.
-- **Human in the loop** — connector write actions show Accept/Refuse above the composer before execution.
-- **Craftable modules** — connectors contribute tools, prompt sections, auth, preview labels, and approval copy.
-- **Editable memory & contexts** — user memory is authoritative; project contexts keep work scoped.
+- [x] Multi-model chat and reasoning support
+- [x] Workspace file tools and markdown reports
+- [x] Editable memory and project contexts
+- [x] Connector system for external services
+- [x] Image generation and chart/diagram rendering
+- [ ] More bundled connectors
+- [ ] Improved context compression for very long conversations
+- [ ] Optional cloud-sync / team workspace support
 
-## Connector Contract
+## Documentation
 
-A connector should be able to provide:
-
-- Tool definitions, split by read and write safety.
-- A prompt section describing domain capabilities and heuristics.
-- A human-readable tool summary entry.
-- A write-action confirmation message and preview.
-- Auth or OAuth setup UI.
-- Cache invalidation rules after writes.
-
-The host app ships no connector runtime inside the agent loop. Authors install packages in the active workspace (manually or from **Connectors → Catalog**); the core stays connector-neutral. Optional transport services and host capability handlers live in `electron/`.
+| Doc | Purpose |
+| --- | --- |
+| [README.md](README.md) | Project overview, setup, and this index |
+| [AGENTS.md](AGENTS.md) | Instructions for coding agents (boundaries, where to edit) |
+| [docs/architecture.md](docs/architecture.md) | Layers, data flow, connector vs core rules |
+| [docs/repository-map.md](docs/repository-map.md) | Where to add features by area |
+| [docs/creating-a-connector.md](docs/creating-a-connector.md) | End-to-end connector authoring |
+| [docs/prompts.md](docs/prompts.md) | Core vs connector prompts, assembly rules |
+| [docs/memory.md](docs/memory.md) | User memory, learned notes, source memory, admission |
+| [docs/ui-guidelines.md](docs/ui-guidelines.md) | UI design rules |
+| [docs/distribution.md](docs/distribution.md) | Release builds, installers, and auto-updater |
+| [docs/macos-install.md](docs/macos-install.md) | Installing the unsigned macOS `.dmg`/`.zip` release |
 
 ## Security
 
@@ -131,116 +146,10 @@ The host app ships no connector runtime inside the agent loop. Authors install p
 - **TailwindCSS** - Styling
 - **Vercel AI SDK concepts** - AI agent architecture
 
-## Repository direction
+## Contributing
 
-smile:D is an open-source desktop framework for vertical AI agents: connector-neutral core, workspace-scoped packages, Markdown prompts, and a white-label shell. Fork it for a domain, add connectors under `.smile/connectors/`, and tune prompts for your use case.
-
-## Documentation
-
-All framework docs live in the repo as Markdown. Use this map to find the right guide.
-
-### Start here
-
-| Doc | Purpose |
-| --- | --- |
-| [README.md](README.md) | Project overview, setup, and this index |
-| [AGENTS.md](AGENTS.md) | Instructions for coding agents (boundaries, where to edit) |
-| [docs/repository-map.md](docs/repository-map.md) | Where to add features by area |
-| [docs/architecture.md](docs/architecture.md) | Layers, data flow, connector vs core rules |
-
-### Guides (`docs/`)
-
-| Doc | Purpose |
-| --- | --- |
-| [docs/creating-a-connector.md](docs/creating-a-connector.md) | End-to-end connector authoring (tools, runtime, UI, auth) |
-| [docs/prompts.md](docs/prompts.md) | Core vs connector prompts, assembly rules |
-| [docs/memory.md](docs/memory.md) | User memory, learned notes, source memory, admission |
-| [docs/ui-guidelines.md](docs/ui-guidelines.md) | **UI design rules** — colors, chips, snippets, content boxes, CTAs |
-| [docs/distribution.md](docs/distribution.md) | Release builds, installers, and auto-updater |
-| [docs/macos-install.md](docs/macos-install.md) | Installing the unsigned macOS `.dmg`/`.zip` release |
-
-### Electron (desktop shell)
-
-| Doc | Purpose |
-| --- | --- |
-| [electron/README.md](electron/README.md) | Main process, preload, IPC responsibilities |
-| [electron/services/README.md](electron/services/README.md) | **Connector transport services** (OAuth, MCP, REST) — when to add a file like `atlassian-mcp.ts`, wiring checklist |
-
-### Agent runtime (`src/agent/`)
-
-| Doc | Purpose |
-| --- | --- |
-| [src/agent/README.md](src/agent/README.md) | Connector-neutral agent loop, core tools, file map |
-| [src/agent/HELPERS.md](src/agent/HELPERS.md) | Loop guards (action-first), errors, artifacts, streaming |
-| [src/agent/taskContinuity.md](src/agent/taskContinuity.md) | Read→write nudges, turn intent, report grounding |
-| [src/agent/compression/README.md](src/agent/compression/README.md) | Tool result compression before model context |
-
-### Prompts (`src/prompts/`)
-
-| Doc | Purpose |
-| --- | --- |
-| [src/prompts/README.md](src/prompts/README.md) | Editing `core/system.md`, assembly, prompt tiers |
-| `src/prompts/core/system.md` | Live core system prompt (Markdown) |
-
-### Connectors
-
-| Doc | Purpose |
-| --- | --- |
-| [docs/creating-a-connector.md](docs/creating-a-connector.md) | End-to-end connector authoring (manifest, handler, permissions) |
-| [src/connectors/README.md](src/connectors/README.md) | Host contract, discovery, catalog |
-| [src/connectors/contract/README.md](src/connectors/contract/README.md) | Manifest and sandbox API reference |
-| [packages/connector-sdk/README.md](packages/connector-sdk/README.md) | Validate / test CLI for connector packages |
-
-### UI (`src/components/` + theme)
-
-| Doc | Purpose |
-| --- | --- |
-| [src/components/shell/README.md](src/components/shell/README.md) | **Desktop shell** — titlebar, chat history, tabs, inspector |
-| [src/components/README.md](src/components/README.md) | Generic React UI overview, what belongs where |
-| [src/components/ui/README.md](src/components/ui/README.md) | **UI kit** — buttons, forms, panels, tokens |
-| [src/components/chat/README.md](src/components/chat/README.md) | Write bar, activity status, chat modules |
-| [src/components/chat/artifacts/README.md](src/components/chat/artifacts/README.md) | Markdown report cards (`report_write`) |
-| [src/components/connectors/README.md](src/components/connectors/README.md) | Reusable connector setup modules (MCP, API, scopes) |
-| [src/theme/README.md](src/theme/README.md) | Design tokens (`tokens.css`) |
-
-### Memory (`src/memory/`)
-
-| Doc | Purpose |
-| --- | --- |
-| [src/memory/README.md](src/memory/README.md) | Memory layers, learned-note budget (framework code) |
-
-### Project governance
-
-| Doc | Purpose |
-| --- | --- |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute code, report issues, and open pull requests |
-| [SECURITY.md](SECURITY.md) | Reporting security vulnerabilities and supported versions |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards and expected behavior |
-| [.github/CODEOWNERS](.github/CODEOWNERS) | Default reviewers for each area of the codebase |
-| [.github/dependabot.yml](.github/dependabot.yml) | Automated dependency update configuration |
-| [.github/rulesets/main.json](.github/rulesets/main.json) | `main` branch protection ruleset |
-
-### Quick paths by task
-
-| I want to… | Read |
-| --- | --- |
-| Add a new connector | [docs/creating-a-connector.md](docs/creating-a-connector.md) → [src/connectors/README.md](src/connectors/README.md) |
-| Add OAuth / MCP / REST for a provider | [electron/services/README.md](electron/services/README.md) |
-| Change agent behavior (core) | [src/prompts/core/system.md](src/prompts/core/system.md), [docs/prompts.md](docs/prompts.md) |
-| Change connector agent behavior | `<workspace>/.smile/connectors/<id>/prompt.md` |
-| Customize write approval UI | [src/components/chat/README.md](src/components/chat/README.md) + manifest `confirmation` / `preview` |
-| Add markdown report cards | [src/components/chat/artifacts/README.md](src/components/chat/artifacts/README.md) |
-| Rebrand the UI | [docs/ui-guidelines.md](docs/ui-guidelines.md) → [src/components/shell/README.md](src/components/shell/README.md) → [src/theme/README.md](src/theme/README.md) |
-| Understand memory rules | [docs/memory.md](docs/memory.md) → [src/memory/README.md](src/memory/README.md) |
-| Fix agent stopping after file read | [src/agent/taskContinuity.md](src/agent/taskContinuity.md) |
-| Fix model planning in chat instead of tools | [src/agent/HELPERS.md § Loop guards](src/agent/HELPERS.md#loop-guards) |
-| Handle provider overload / retries | [src/agent/HELPERS.md](src/agent/HELPERS.md) → `src/shared/aiErrors.ts` |
-| Work as a coding agent | [AGENTS.md](AGENTS.md) |
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).

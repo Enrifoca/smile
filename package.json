@@ -1,7 +1,7 @@
 {
   "name": "smile",
   "version": "0.4.0",
-  "description": "White-label desktop framework for building vertical AI agents",
+  "description": "Open Source AI Workspace",
   "license": "MIT",
   "main": "dist-electron/main.js",
   "author": "Enrico Focaccia",
@@ -147,7 +147,7 @@
       "category": "Office",
       "executableName": "smiled",
       "maintainer": "Enrico Focaccia <enrifoca@gmail.com>",
-      "synopsis": "Desktop framework for building vertical AI agents"
+      "synopsis": "Open Source AI Workspace"
     },
     "nsis": {
       "oneClick": false,

@@ -148,6 +148,40 @@ The host **denies** any capability not declared here. Declare the minimum needed
 
 - Values with `"secret": true` are stored encrypted (`connector:<id>:<key>`) and readable only via `host.secrets.get('apiKey')`.
 - Generic settings UI in the app renders these fields automatically; no custom React page required for simple API-key connectors.
+- Field `type` controls the input rendered in the generic settings UI:
+  - `"text"` (default): free-form input.
+  - `"select"`: dropdown with a fixed list of options.
+  - `"dependent-select"`: dropdown whose options depend on the value of another field (`dependsOn`). Use `group` on each option to tie it to a parent value.
+
+Example with a provider dropdown and a model dropdown that changes based on the provider:
+
+```json
+"auth": {
+  "type": "api-key",
+  "fields": [
+    {
+      "key": "provider",
+      "label": "Provider",
+      "type": "select",
+      "options": [
+        { "value": "openai", "label": "OpenAI" },
+        { "value": "qwen", "label": "Qwen / Alibaba Cloud" }
+      ]
+    },
+    {
+      "key": "model",
+      "label": "Model",
+      "type": "dependent-select",
+      "dependsOn": "provider",
+      "options": [
+        { "value": "dall-e-3", "label": "DALL-E 3", "group": "openai" },
+        { "value": "qwen-image-3.0-pro", "label": "Qwen Image 3.0 Pro", "group": "qwen" }
+      ]
+    },
+    { "key": "apiKey", "label": "API key", "secret": true }
+  ]
+}
+```
 
 Other auth types:
 

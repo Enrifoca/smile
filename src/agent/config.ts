@@ -7,6 +7,13 @@ import type { AIStreamProgressEvent } from '../shared/streamProgress'
 import type { ContextPromptBody } from '../context/promptInjection'
 import type { ProjectContext } from '../context/types'
 
+export interface ActiveReportRef {
+  /** Workspace-relative path to the report markdown file. */
+  path: string
+  /** Optional human-readable title. */
+  title?: string
+}
+
 export interface AIResponse {
   content: string
   toolCalls?: Array<{
@@ -39,6 +46,8 @@ export interface AgentConfig {
   loadContextPromptBody?: (contextId: string) => Promise<ContextPromptBody>
   /** Reload the active context record from storage before tool calls (avoids stale scope config). */
   refreshActiveContext?: (contextId: string) => Promise<ProjectContext | null>
+  /** Report currently pinned/active in the chat composer. Injected into the system prompt. */
+  activeReport?: ActiveReportRef | null
   callAI: (messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, tools?: unknown[]) => Promise<{
     success: boolean
     data?: AIResponse

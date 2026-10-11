@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useElectron } from '../../hooks/useElectron'
 import { useActionFeedback } from '../../hooks/useActionFeedback'
-import { ConnectorAuthField, ConnectorManifest, ConnectorPermissions } from '../../connectors/contract'
+import { ConnectorAuthField, ConnectorAuthFieldOption, ConnectorManifest, ConnectorPermissions } from '../../connectors/contract'
 import { INTEGRATION_TYPE_LABELS } from '../../connectors/catalog'
-import { Alert, Button, ConfirmModal, Field, Input, Panel, SectionHeader } from '../ui'
+import { Alert, Button, ConfirmModal, Field, Input, Panel, SectionHeader, Select } from '../ui'
 import { ApiConnectionModule, McpConnectionModule, OAuthConnectionModule } from './ConnectorSettingsModules'
 import { ConnectorPageHeader } from './ConnectorPageHeader'
 
@@ -65,6 +65,10 @@ export function GenericConnectorSettingsView({
   const authFields = manifest.auth?.fields ?? []
   const secretFields = authFields.filter(field => field.secret !== false)
   const requiredFields = authFields.filter(field => !field.optional)
+  const dependentFields = useMemo(
+    () => authFields.filter(field => field.type === 'dependent-select' && field.dependsOn),
+    [authFields],
+  )
 
   const [form, setForm] = useState<Record<string, string>>({})
   const formRef = useRef(form)
@@ -408,7 +412,55 @@ export function GenericConnectorSettingsView({
   }
 
   function updateField(field: ConnectorAuthField, value: string) {
-    setForm(prev => ({ ...prev, [field.key]: value }))
+    setForm(prev => {
+      const next = { ...prev, [field.key]: value }
+      // When a parent field changes, reset any dependent selects so the user
+      // cannot keep a model that does not belong to the newly chosen provider.
+      for (const dep of dependentFields) {
+        if (dep.dependsOn === field.key) {
+          next[dep.key] = ''
+        }
+      }
+      return next
+    })
+  }
+
+  function getFieldOptions(field: ConnectorAuthField): ConnectorAuthFieldOption[] {
+    const baseOptions = field.options ?? []
+    if (field.type !== 'dependent-select' || !field.dependsOn) return baseOptions
+    const parentValue = form[field.dependsOn] ?? ''
+    return baseOptions.filter(option => option.group === parentValue)
+  }
+
+  function renderField(field: ConnectorAuthField) {
+    const isSelect = field.type === 'select' || field.type === 'dependent-select'
+    if (isSelect) {
+      const options = getFieldOptions(field)
+      const disabled = field.type === 'dependent-select' && !form[field.dependsOn ?? '']
+      return (
+        <Select
+          value={form[field.key] ?? ''}
+          onChange={event => updateField(field, event.target.value)}
+          disabled={disabled}
+        >
+          <option value="">{disabled ? 'Select a provider first' : 'Select…'}</option>
+          {options.map(option => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+      )
+    }
+
+    return (
+      <Input
+        type={field.secret !== false ? 'password' : 'text'}
+        value={form[field.key] ?? ''}
+        onChange={event => updateField(field, event.target.value)}
+        autoComplete="off"
+      />
+    )
   }
 
   const oAuthRedirectUri = oauthRedirectUri || ''
@@ -474,12 +526,7 @@ export function GenericConnectorSettingsView({
           >
             {authFields.map(field => (
               <Field key={field.key} label={field.label}>
-                <Input
-                  type={field.secret !== false ? 'password' : 'text'}
-                  value={form[field.key] ?? ''}
-                  onChange={event => updateField(field, event.target.value)}
-                  autoComplete="off"
-                />
+                {renderField(field)}
               </Field>
             ))}
           </ApiConnectionModule>

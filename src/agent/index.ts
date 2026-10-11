@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import { AgentActivity, Message, PendingAction, ToolEntry, UserProfile, type AgentContextSnapshot } from './types'
-import { AIResponse, AgentConfig } from './config'
+import { AIResponse, AgentConfig, type ActiveReportRef } from './config'
 import { shouldAdmitSourceLeaf } from '../memory/sourceAdmission'
 import { buildDefaultWriteSourceLeaf } from '../memory/sourceLeaf'
 
@@ -12,7 +12,7 @@ import { maybeCompressConversationHistory, estimateTokens } from './historyCompr
 import { smartCompressForInference } from './contextEngine'
 import { selectLearnedNotesForPrompt } from '../memory/learnedBudget'
 import { formatActiveScopesForPrompt } from '../memory/promptSections'
-import { toolDefinitions } from './tools'
+import { toolDefinitions, CORE_TOOL_CONNECTOR_DEPENDENCY } from './tools'
 import { ConnectorRuntime, ownsTool, ToolDefinition } from '../connectors/types'
 import type { ContextEnvelope } from '../connectors/contract'
 import type { ProjectContext } from '../context/types'
@@ -21,6 +21,7 @@ import {
   getEnabledConnectorIds,
   getContextFolderPath,
   getContextFilesPath,
+  getContextMarkdownPath,
 } from '../context/types'
 import type { ContextPromptBody } from '../context/promptInjection'
 import { zodToJsonSchema } from './jsonSchema'
@@ -29,6 +30,7 @@ import { getConnectorToolEntry } from './connectorToolEntries'
 import { resolveActivityLabel, type AgentPhase } from './activityStatus'
 import { formatCoreToolResultForAI } from './toolResults'
 import { isFailedToolResult } from './toolErrors'
+import { validateLearnedNoteContent } from '../memory/admission'
 import {
   buildIncompleteWorkflowNudge,
   shouldNudgeIncompleteWorkflow,
@@ -60,6 +62,8 @@ export class Agent {
   // Active project context (sticky for the conversation); null = no context.
   private activeContext: ProjectContext | null = null
   private activeContextBody: ContextPromptBody | null = null
+  // Report pinned/active in the chat composer; injected into the system prompt.
+  private activeReport: ActiveReportRef | null = null
   // Deduplication cache: maps "toolName:JSON(args)" -> formatted result string.
   // Cleared at the start of each processMessage call. Write operations trigger
   // targeted invalidation so read-after-write always returns fresh data.
@@ -84,6 +88,8 @@ export class Agent {
   // it if the loop moves to a non-streaming phase (e.g. tool execution/approval).
   private streamingMessageId: string | null = null
   private streamingMessageContent = ''
+  /** Set to true when the current user turn is aborted by the user. */
+  private turnAborted = false
 
   private setAgentStatus(status: string | null): void {
     this.config.onAgentStatus?.(status)
@@ -214,6 +220,7 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config
+    this.activeReport = config.activeReport ?? null
   }
 
   updateUserProfile(profile: UserProfile | null): void {
@@ -236,6 +243,15 @@ export class Agent {
         : null
       void connector.setActiveContext?.(envelope)
     }
+  }
+
+  /**
+   * Set the active report pinned in the chat composer. The report path/title are
+   * injected into the system prompt so the agent knows which report the user is
+   * currently focused on.
+   */
+  setActiveReport(report: ActiveReportRef | null): void {
+    this.activeReport = report
   }
 
   /** Build the context envelope for a connector from the active project context. */
@@ -308,13 +324,30 @@ export class Agent {
     } else {
       lines.push(`\nUse \`context_read\` when you need project knowledge. Update with \`context_append\` or \`context_replace_section\`.`)
     }
+
+    if (this.activeReport) {
+      const title = this.activeReport.title || this.activeReport.path.split('/').pop() || this.activeReport.path
+      lines.push(`\n### Active report`)
+      lines.push(`The user is currently focused on the report \`${this.activeReport.path}\` ("${title}"). Treat this report as the primary target for updates, references, and follow-ups. Read it with \`file_read\` when you need its full contents.`)
+      lines.push(`When the user says "this report" or "the active report", they always mean \`${this.activeReport.path}\`. Do not ask which report they are referring to.`)
+    }
+
     return lines.join('\n')
   }
 
   private getCoreToolDefinitions(): ToolDefinition[] {
     const contextToolNames = new Set(['context_read', 'context_append', 'context_replace_section'])
+    const connectorIds = new Set((this.config.connectors ?? []).map(c => c.definition.id))
     return toolDefinitions.filter(tool => {
       if (contextToolNames.has(tool.name) && !this.activeContext) return false
+      const requiredConnector = CORE_TOOL_CONNECTOR_DEPENDENCY[tool.name]
+      if (requiredConnector) {
+        if (this.activeContext) {
+          if (!getEnabledConnectorIds(this.activeContext).includes(requiredConnector)) return false
+        } else {
+          if (!connectorIds.has(requiredConnector)) return false
+        }
+      }
       return true
     })
   }
@@ -396,6 +429,7 @@ export class Agent {
   async processMessage(userMessage: string, options?: { useReasoning?: boolean }): Promise<void> {
     this.currentUserMessage = userMessage
     this.useReasoningThisTurn = options?.useReasoning ?? false
+    this.turnAborted = false
     await this.syncActiveContextFromSource()
     this.abortFlag = false
     this.toolResultCache.clear()
@@ -424,10 +458,12 @@ export class Agent {
       }
     }
 
+    let turnErrored = false
     try {
       await this.withTimeout(this.maybeCompressHistoryOnce(), 60_000, 'History compression')
       await this.runAgentLoop()
     } catch (error) {
+      turnErrored = true
       const errorMsg: Message = {
         id: uuidv4(),
         role: 'assistant',
@@ -438,6 +474,13 @@ export class Agent {
       this.config.onMessage(errorMsg)
     } finally {
       this.useReasoningThisTurn = false
+      if (!this.turnAborted && !turnErrored) {
+        try {
+          await this.runMemoryReview()
+        } catch (error) {
+          console.warn('[Agent] End-of-turn memory review failed:', error)
+        }
+      }
     }
   }
 
@@ -465,6 +508,7 @@ export class Agent {
       // Check abort flag at the top of every iteration
       if (this.abortFlag) {
         this.abortFlag = false
+        this.turnAborted = true
         console.log('[Agent] Aborted by user.')
         break
       }
@@ -482,6 +526,7 @@ export class Agent {
       console.log(`[Agent] AI call completed in ${Date.now() - aiCallStartedAt}ms (streamed=${wasStreamed}, toolCalls=${response?.toolCalls?.length ?? 0})`)
 
       if (aborted) {
+        this.turnAborted = true
         console.log('[Agent] Aborted by user.')
         break
       }
@@ -503,6 +548,7 @@ export class Agent {
           const toolCall = response.toolCalls[i]
           if (this.abortFlag) {
             this.abortFlag = false
+            this.turnAborted = true
             abortedDuringTools = true
             console.log('[Agent] Aborted by user during tool execution.')
             break
@@ -593,6 +639,7 @@ export class Agent {
             console.log(`[Agent] Tool ${toolCall.name} completed in ${Date.now() - toolStartedAt}ms`)
             if (this.abortFlag) {
               this.abortFlag = false
+              this.turnAborted = true
               abortedDuringTools = true
               console.log('[Agent] Aborted by user during tool execution.')
               break
@@ -1445,8 +1492,12 @@ export class Agent {
   private maybeNudgeTaskContinuation(responseText: string): boolean {
     const MAX_CONTINUATION_NUDGES = 3
     if (this.taskContinuationNudgesThisTurn >= MAX_CONTINUATION_NUDGES) return false
+
+    const lastResult = this.latestToolResultsThisTurn.at(-1)
     if (!shouldNudgeIncompleteWorkflow(this.toolsRunThisTurn, responseText, {
       reportWriteSucceededThisTurn: this.reportWriteSucceededThisTurn,
+      activeReportPath: this.activeReport?.path,
+      lastToolResult: lastResult ? { tool: lastResult.tool, isError: lastResult.isError } : undefined,
     })) return false
 
     console.log('[Agent] Incomplete workflow - nudging model to continue')
@@ -1454,16 +1505,40 @@ export class Agent {
     this.conversationHistory.push({
       id: uuidv4(),
       role: 'user',
-      content: buildIncompleteWorkflowNudge(responseText, this.toolsRunThisTurn),
+      content: buildIncompleteWorkflowNudge(responseText, this.toolsRunThisTurn, {
+        activeReportPath: this.activeReport?.path,
+        lastToolResult: lastResult ? { tool: lastResult.tool, isError: lastResult.isError } : undefined,
+      }),
       timestamp: new Date().toISOString(),
     })
     return true
   }
 
+  private invalidateActiveContextBodyAfterWrite(name: string, args: Record<string, unknown>): void {
+    if (!this.activeContext) return
+
+    // Core context tools always mutate the context markdown.
+    if (name === 'context_append' || name === 'context_replace_section' || name === 'context_write') {
+      this.activeContextBody = null
+      return
+    }
+
+    // A direct file_write on the hidden context markdown file should also invalidate
+    // the cached prompt body, even though agents are instructed not to do this.
+    if (name === 'file_write') {
+      const writtenPath = String(args.path || '').replace(/\\/g, '/')
+      const contextMarkdownPath = getContextMarkdownPath(this.activeContext).replace(/\\/g, '/')
+      if (writtenPath === contextMarkdownPath) {
+        this.activeContextBody = null
+      }
+    }
+  }
+
   private async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     console.log('[Agent] Executing tool:', name, 'with args:', args)
-    
+
     const connector = this.getConnectorForTool(name)
+    let result: unknown
     if (connector) {
       const envelope = await this.buildConnectorContextEnvelope(connector.definition.id)
       if (this.activeContext && getEnabledConnectorIds(this.activeContext).includes(connector.definition.id)) {
@@ -1474,18 +1549,22 @@ export class Agent {
           }
         }
       }
-      return connector.executeTool(name, args, envelope)
+      result = await connector.executeTool(name, args, envelope)
     } else if (name === 'report_write' || name.startsWith('file_')) {
-      return this.config.executeFileTool(name, args)
+      result = await this.config.executeFileTool(name, args)
     } else if (name === 'generate_chart' || name === 'generate_diagram' || name === 'generate_image') {
-      return this.config.executeVisualTool(name, args)
+      result = await this.config.executeVisualTool(name, args)
     } else if (name.startsWith('memory_')) {
-      return this.config.executeMemoryTool(name, args)
+      result = await this.config.executeMemoryTool(name, args)
     } else if (name.startsWith('context_')) {
-      return this.config.executeContextTool(name, args)
+      result = await this.config.executeContextTool(name, args)
+    } else {
+      throw new Error(`Unknown tool: ${name}`)
     }
 
-    throw new Error(`Unknown tool: ${name}`)
+    // Keep the injected context knowledge fresh if the context file was just changed.
+    this.invalidateActiveContextBodyAfterWrite(name, args)
+    return result
   }
 
   /**
@@ -1710,6 +1789,104 @@ export class Agent {
     })
   }
 
+  /**
+   * End-of-turn memory review.
+   *
+   * When `agentAutoMemoryReview` is enabled and a dedicated review caller is
+   * configured, pass the last few conversation turns to a cheap model and ask
+   * it to extract any reusable preference or correction. Valid notes are saved
+   * via `memory_update`; duplicates are skipped.
+   */
+  private async runMemoryReview(): Promise<void> {
+    if (!this.config.agentAutoMemoryReview) return
+    if (this.abortFlag) return
+    const callReview = this.config.callReviewAI
+    if (!callReview) return
+
+    // Review the last few turns so the model has the immediate request + final answer.
+    const turnsToReview = this.conversationHistory
+      .filter(m =>
+        (m.role === 'user' || m.role === 'assistant')
+        && m.type !== 'tool_result'
+        && m.type !== 'activity'
+        && m.type !== 'artifact'
+        && m.type !== 'tool_summary',
+      )
+      .slice(-20)
+    if (turnsToReview.length < 2) return
+
+    const transcript = turnsToReview
+      .map(m => `${m.role}: ${m.content}`)
+      .join('\n\n')
+
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      {
+        role: 'system',
+        content:
+          'You are a memory reviewer. Given the assistant-user conversation below, decide whether there is a clear, reusable preference, correction, or project rule the assistant should remember for future turns. ' +
+          'Save only durable habits/preferences (e.g. "User prefers tables over bullet lists", "User writes titles in Italian", "Always include a cost estimate"). ' +
+          'If a note should be saved, output a JSON object exactly like {"section":"learned","content":"<concise one-sentence note>"}. ' +
+          'If nothing durable should be saved, output {"skip":true}. ' +
+          'Do not explain, do not use markdown, and do not store raw tool output.',
+      },
+      {
+        role: 'user',
+        content: `Review this conversation and decide whether to save a learned note:\n\n${transcript}`,
+      },
+    ]
+
+    this.setAgentStatus('Reviewing memory…')
+    const result = await this.withTimeout(callReview(messages), 60_000, 'Memory review')
+    this.setAgentStatus(null)
+
+    if (!result.success || !result.data?.content) {
+      console.log('[Agent] Memory review produced no content:', result.error)
+      return
+    }
+
+    let parsed: { section?: string; content?: string; skip?: boolean } | null = null
+    try {
+      const text = result.data.content.trim()
+      const jsonText = text.replace(/^```json\s*/, '').replace(/```$/, '').trim()
+      parsed = JSON.parse(jsonText)
+    } catch {
+      console.log('[Agent] Memory review output was not valid JSON:', result.data.content)
+      return
+    }
+
+    if (!parsed || parsed.skip || !parsed.content?.trim()) return
+    if (parsed.section !== 'learned' && parsed.section !== 'style') return
+
+    const content = parsed.content.trim()
+    const admission = validateLearnedNoteContent(content)
+    if (!admission.ok) {
+      console.log('[Agent] Memory review content rejected by admission:', admission.reason)
+      return
+    }
+
+    // Avoid saving a note that already exists or is a substring of an existing one.
+    const searchResult = await this.config.executeMemoryTool('memory_search', {
+      query: content,
+      kind: 'learned',
+      max_results: 5,
+    })
+    const existing = (searchResult as { success?: boolean; data?: Array<{ content?: string }> } | undefined)?.data
+    if (
+      Array.isArray(existing)
+      && existing.some(entry =>
+        entry.content
+        && (entry.content === content
+          || entry.content.includes(content)
+          || content.includes(entry.content))
+      )
+    ) {
+      console.log('[Agent] Memory review found duplicate note; skipping.')
+      return
+    }
+
+    await this.config.executeMemoryTool('memory_update', { section: parsed.section, content })
+    console.log('[Agent] Saved learned note from end-of-turn review:', content)
+  }
 
   /**
    * Clear conversation history
