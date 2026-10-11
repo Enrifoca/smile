@@ -35,7 +35,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
     "@types/adm-zip": "^0.5.8",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.1",
     "axios": "^1.7.0",
     "better-sqlite3": "^12.11.1",
     "docx": "^9.7.1",
