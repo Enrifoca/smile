@@ -12,6 +12,18 @@ import { JSONSchema } from './jsonSchema'
 /** Categories a plugin tool may declare. Core tool categories are host-owned. */
 export type PluginToolCategory = 'connector-read' | 'connector-write' | 'connector-attachment'
 
+/** A labeled option for select-style auth fields. */
+export interface ConnectorAuthFieldOption {
+  value: string
+  label: string
+  /**
+   * For dependent-select fields, identifies which parent value this option belongs to.
+   * The UI shows only options whose `group` matches the current value of the field
+   * declared in `dependsOn`.
+   */
+  group?: string
+}
+
 /** A single auth field collected from the user and stored connector-scoped. */
 export interface ConnectorAuthField {
   key: string
@@ -20,6 +32,20 @@ export interface ConnectorAuthField {
   secret?: boolean
   /** When true, the field may be left empty. */
   optional?: boolean
+  /**
+   * Input kind rendered in the generic connector settings UI.
+   * - `text` (default): free-form input.
+   * - `select`: dropdown with fixed options.
+   * - `dependent-select`: dropdown whose options depend on the value of another field.
+   */
+  type?: 'text' | 'select' | 'dependent-select'
+  /** Fixed options for `select` or `dependent-select` fields. */
+  options?: ConnectorAuthFieldOption[]
+  /**
+   * For `dependent-select`, the key of the field this select depends on.
+   * The UI filters `options` to those whose `value` appears in the dependent field's option group.
+   */
+  dependsOn?: string
 }
 
 export interface ConnectorAuth {

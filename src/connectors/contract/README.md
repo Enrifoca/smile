@@ -24,6 +24,22 @@ The stable, **language-neutral** boundary that connectors are written against. N
 - `handler.js` — sandboxed module matching `ConnectorHandlerModule` (**required when `handlerKind` is `code`**, the default)
 - `icon.png` — optional catalog image (path overridable via `catalog.icon`)
 
+### auth fields
+
+`ConnectorAuth.fields` describes credentials collected by the generic connector settings UI. Each field supports:
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `key` | `string` | Storage key, readable via `host.secrets.get(key)`. |
+| `label` | `string` | Label shown in the UI. |
+| `secret` | `boolean` | When `true`, the value is encrypted at rest and masked in the form. |
+| `optional` | `boolean` | When `true`, the field may be left empty. |
+| `type` | `"text" \| "select" \| "dependent-select"` | Default `"text"`. |
+| `options` | `Array<{ value, label, group? }>` | Options for `select` or `dependent-select`. |
+| `dependsOn` | `string` | For `dependent-select`, the `key` of the parent field. |
+
+For `dependent-select`, each option should include a `group` matching one of the parent field's option values. The UI shows only options belonging to the currently selected parent value and resets the dependent field when the parent changes.
+
 ### integrationType
 
 Optional catalog hint: `sop`, `rest`, `graphql`, `ftp`, `sftp`, `mcp`, `cli`. Shown in the Connectors catalog; host enforces `permissions.*` regardless.

@@ -33,6 +33,18 @@ Enforced in:
 
 - Electron `memoryService.addGeneralMemory` / `addLexiconEntry`
 - Chat `memory_update` handler (returns error to the agent)
+- End-of-turn auto-memory review (`Agent.runMemoryReview`)
+
+## Auto-memory review
+
+When `agentAutoMemoryReview` is enabled in Settings → Agent Behavior and a review model is configured, the agent runs `runMemoryReview()` at the end of each successful turn.
+
+- The review caller (`callReviewAI`) sends the last ~20 user/assistant messages to a cheap model.
+- The model returns either `{"skip":true}` or `{"section":"learned","content":"<concise note>"}`.
+- The agent validates the note through the same admission rules, searches for duplicates, and saves it via `memory_update`.
+- It does **not** run after an aborted or errored turn.
+
+This is opt-in and connector-neutral: it only ever writes Learned Notes, never source memory or User Memory.
 
 ## Tool result compression
 

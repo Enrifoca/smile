@@ -11,6 +11,7 @@ Core nudges that keep the model on track during a user turn. Wired in `index.ts`
 | **Task continuity** | `taskContinuity.ts` | [taskContinuity.md](./taskContinuity.md) |
 | **Tool errors** | `toolErrors.ts` | [Error handling](#error-handling) |
 | **Think-only stop** | `index.ts` | Nudge when the model emits thinking with no tools or answer |
+| **End-of-turn memory review** | `index.ts` | Optional `callReviewAI` review that saves `memory_update` notes automatically |
 
 Task continuity covers early stops (read without write, chat prose without tools). Signals are **structural** — tool runs and response shape — not user-message keywords.
 

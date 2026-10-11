@@ -120,7 +120,7 @@ const BUNDLED_CATALOG: Array<Omit<CatalogEntry, 'Icon'>> = [
   {
     id: 'image-generation',
     name: 'Image Generation',
-    description: 'Generate images from text prompts using hosted providers such as OpenAI DALL-E 3 and Replicate FLUX.',
+    description: 'Generate images from text prompts using hosted providers such as OpenAI DALL-E 3, Replicate FLUX, and Qwen / QwenCloud.',
     origin: 'bundled',
     integrationType: 'rest',
     tagline: 'Generate images from prompts',

@@ -36,6 +36,110 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const MCP_TRANSPORTS = ['http', 'sse'] as const
 
+const AUTH_FIELD_TYPES = ['text', 'select', 'dependent-select'] as const
+
+function validateAuthFields(raw: Record<string, unknown>, errors: string[]): void {
+  if (raw.auth === undefined) return
+  if (!isRecord(raw.auth)) {
+    errors.push('auth must be an object')
+    return
+  }
+  if (raw.auth.fields === undefined) return
+  if (!Array.isArray(raw.auth.fields)) {
+    errors.push('auth.fields must be an array')
+    return
+  }
+
+  const fields = raw.auth.fields as Array<Record<string, unknown>>
+  const keys = new Set<string>()
+
+  for (const [index, field] of fields.entries()) {
+    const where = `auth.fields[${index}]`
+    if (!isRecord(field)) {
+      errors.push(`${where} must be an object`)
+      continue
+    }
+    if (typeof field.key !== 'string' || !field.key.trim()) {
+      errors.push(`${where}.key is required`)
+    } else if (keys.has(field.key)) {
+      errors.push(`${where}.key "${field.key}" is duplicated`)
+    } else {
+      keys.add(field.key)
+    }
+    if (typeof field.label !== 'string' || !field.label.trim()) {
+      errors.push(`${where}.label is required`)
+    }
+    if (field.secret !== undefined && typeof field.secret !== 'boolean') {
+      errors.push(`${where}.secret must be a boolean`)
+    }
+    if (field.optional !== undefined && typeof field.optional !== 'boolean') {
+      errors.push(`${where}.optional must be a boolean`)
+    }
+    if (field.type !== undefined && !AUTH_FIELD_TYPES.includes(field.type as typeof AUTH_FIELD_TYPES[number])) {
+      errors.push(`${where}.type must be one of ${AUTH_FIELD_TYPES.join(', ')}`)
+    }
+  }
+
+  // Second pass: dependent-select fields need their parent key to exist.
+  for (const [index, field] of fields.entries()) {
+    const where = `auth.fields[${index}]`
+    if (field.type !== 'dependent-select') continue
+    if (typeof field.dependsOn !== 'string' || !field.dependsOn.trim()) {
+      errors.push(`${where}.dependsOn is required for dependent-select`)
+      continue
+    }
+    if (!keys.has(field.dependsOn)) {
+      errors.push(`${where}.dependsOn "${field.dependsOn}" must match another auth.fields key`)
+    }
+    if (!Array.isArray(field.options) || field.options.length === 0) {
+      errors.push(`${where}.options is required for dependent-select`)
+      continue
+    }
+    for (const [optIndex, option] of (field.options as Array<unknown>).entries()) {
+      const optWhere = `${where}.options[${optIndex}]`
+      if (!isRecord(option)) {
+        errors.push(`${optWhere} must be an object`)
+        continue
+      }
+      if (typeof option.value !== 'string' || !option.value.trim()) {
+        errors.push(`${optWhere}.value is required`)
+      }
+      if (typeof option.label !== 'string' || !option.label.trim()) {
+        errors.push(`${optWhere}.label is required`)
+      }
+      if (typeof option.group !== 'string' || !option.group.trim()) {
+        errors.push(`${optWhere}.group is required for dependent-select options`)
+      }
+    }
+  }
+
+  // Third pass: select fields need options without groups.
+  for (const [index, field] of fields.entries()) {
+    const where = `auth.fields[${index}]`
+    if (field.type !== 'select') continue
+    if (!Array.isArray(field.options) || field.options.length === 0) {
+      errors.push(`${where}.options is required for select`)
+      continue
+    }
+    for (const [optIndex, option] of (field.options as Array<unknown>).entries()) {
+      const optWhere = `${where}.options[${optIndex}]`
+      if (!isRecord(option)) {
+        errors.push(`${optWhere} must be an object`)
+        continue
+      }
+      if (typeof option.value !== 'string' || !option.value.trim()) {
+        errors.push(`${optWhere}.value is required`)
+      }
+      if (typeof option.label !== 'string' || !option.label.trim()) {
+        errors.push(`${optWhere}.label is required`)
+      }
+      if ('group' in option) {
+        errors.push(`${optWhere}.group is only allowed for dependent-select options`)
+      }
+    }
+  }
+}
+
 function validateMcpServers(raw: Record<string, unknown>, errors: string[]): void {
   if (raw.mcpServers === undefined) return
   if (!isRecord(raw.mcpServers)) {
@@ -154,6 +258,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
   }
 
   validateMcpServers(raw, errors)
+  validateAuthFields(raw, errors)
 
   if (!Array.isArray(raw.tools) || raw.tools.length === 0) {
     errors.push('tools must be a non-empty array')

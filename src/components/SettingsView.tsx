@@ -963,7 +963,7 @@ export default function SettingsView({ onContextsChange }: SettingsViewProps) {
           </section>
 
           <section className="text-center py-4">
-            <p className="text-sm text-gray-500">smile:D v{appVersion} — White-label desktop agent framework</p>
+            <p className="text-sm text-gray-500">smile:D v{appVersion} — Open Source AI Workspace</p>
             <p className="text-xs text-gray-400 mt-1">All data is stored locally on your machine</p>
           </section>
         </div>

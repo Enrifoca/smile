@@ -5,6 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import {
   ApproveActionOutcome,
+  ConnectorAuthField,
   ConnectorManifest,
   ContextEnvelope,
   HostCliRequest,
@@ -93,6 +94,23 @@ function loadBundledManifest(connectorId: string): ConnectorManifest | null {
   }
 }
 
+function bundledConnectorDir(connectorId: string): string | null {
+  const dir = path.join(resolveBundledConnectorsRoot(), connectorId)
+  return fs.existsSync(dir) ? dir : null
+}
+
+function readBundledFile(connectorId: string, filename: string): string | undefined {
+  const dir = bundledConnectorDir(connectorId)
+  if (!dir) return undefined
+  const filePath = path.join(dir, filename)
+  try {
+    if (!fs.existsSync(filePath)) return undefined
+    return fs.readFileSync(filePath, 'utf-8')
+  } catch {
+    return undefined
+  }
+}
+
 function mergeManifestFields(bundled: ConnectorManifest, workspace: ConnectorManifest): ConnectorManifest {
   // Start from the bundled (authoritative) manifest and overlay the workspace copy.
   // This lets installed connectors receive additive updates (new auth fields,
@@ -131,17 +149,31 @@ function mergeManifestFields(bundled: ConnectorManifest, workspace: ConnectorMan
     )
   }
 
-  // Auth: bundled fields are authoritative; workspace may override field metadata
-  // for keys that already exist (e.g. labels), but new bundled fields appear automatically.
+  // Auth: bundled fields are authoritative for structural metadata (type, options,
+  // dependsOn) so that rendering behavior updates automatically when the bundled
+  // source evolves. Workspace copies may still override labels, secret flags, and
+  // optionality for keys that already exist, and may add entirely new fields.
   if (workspace.auth !== undefined) {
     const bundledAuthFields = bundled.auth?.fields
     const workspaceAuthFields = workspace.auth.fields
     if (bundledAuthFields && workspaceAuthFields) {
       const workspaceFieldMap = new Map(workspaceAuthFields.map(field => [field.key, field]))
+      const structuralKeys = new Set<keyof ConnectorAuthField>(['type', 'options', 'dependsOn'])
       merged.auth = {
         ...bundled.auth,
         ...workspace.auth,
-        fields: bundledAuthFields.map(field => workspaceFieldMap.get(field.key) ?? field),
+        fields: bundledAuthFields.map(field => {
+          const workspaceField = workspaceFieldMap.get(field.key)
+          if (!workspaceField) return field
+          // Workspace can override presentation flags, but bundled controls structure.
+          const mergedField: ConnectorAuthField = { ...field }
+          for (const key of Object.keys(workspaceField) as Array<keyof ConnectorAuthField>) {
+            if (structuralKeys.has(key)) continue
+            // @ts-expect-error merging typed auth field objects
+            mergedField[key] = workspaceField[key]
+          }
+          return mergedField
+        }),
       }
     } else {
       merged.auth = { ...bundled.auth, ...workspace.auth }
@@ -231,7 +263,11 @@ export class ConnectorsService {
   private sandboxModulePath: string
   private sandboxes = new Map<string, SandboxInstance>()
   private callSeq = 0
-  private discoveryCache: { connectors: LoadedConnector[]; errors: Array<{ id: string; errors: string[] }> } | null = null
+  private discoveryCache: {
+    connectors: LoadedConnector[]
+    errors: Array<{ id: string; errors: string[] }>
+    bundledHash: string
+  } | null = null
 
   constructor(deps: ConnectorCapabilityDeps, sandboxModulePath: string) {
     this.deps = deps
@@ -244,6 +280,26 @@ export class ConnectorsService {
     void this.shutdownAll()
   }
 
+  /** Hash of bundled handler.js / prompt.md files for currently discovered workspace connectors.
+   *  Used to invalidate the discovery cache when bundled connectors are updated. */
+  private bundledFilesHash(): string {
+    const root = this.connectorsRoot()
+    if (!root || !fs.existsSync(root)) return ''
+    const hashes: string[] = []
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const dir = bundledConnectorDir(entry.name)
+      if (!dir) continue
+      for (const filename of ['handler.js', 'prompt.md']) {
+        const filePath = path.join(dir, filename)
+        if (fs.existsSync(filePath)) {
+          hashes.push(hashHandlerSource(fs.readFileSync(filePath, 'utf-8')))
+        }
+      }
+    }
+    return hashHandlerSource(hashes.join(''))
+  }
+
   private connectorsRoot(): string | null {
     if (!this.workspacePath) return null
     return path.join(this.workspacePath, '.smile', 'connectors')
@@ -251,7 +307,10 @@ export class ConnectorsService {
 
   /** Discover and validate all connectors in the workspace. */
   async discover(): Promise<{ connectors: LoadedConnector[]; errors: Array<{ id: string; errors: string[] }> }> {
-    if (this.discoveryCache) return this.discoveryCache
+    const bundledHash = this.bundledFilesHash()
+    if (this.discoveryCache && this.discoveryCache.bundledHash === bundledHash) {
+      return this.discoveryCache
+    }
 
     const root = this.connectorsRoot()
     const connectors: LoadedConnector[] = []
@@ -287,11 +346,20 @@ export class ConnectorsService {
       const manifest = bundledManifest
         ? mergeManifestFields(bundledManifest, validation.manifest)
         : validation.manifest
+
+      // Bundled connectors ship updates to handler.js and prompt.md in the app bundle.
+      // Use the bundled copies when available so installed connectors stay current.
+      const handlerSource = handlerKind === 'code'
+        ? (readBundledFile(validation.manifest.id, 'handler.js') ?? fs.readFileSync(handlerPath, 'utf-8'))
+        : undefined
+      const promptMarkdown = readBundledFile(validation.manifest.id, 'prompt.md')
+        ?? (fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf-8') : '')
+
       connectors.push({
         manifest,
         dir,
-        handlerSource: handlerKind === 'code' ? fs.readFileSync(handlerPath, 'utf-8') : undefined,
-        promptMarkdown: fs.existsSync(promptPath) ? fs.readFileSync(promptPath, 'utf-8') : '',
+        handlerSource,
+        promptMarkdown,
       })
     }
 
@@ -309,7 +377,7 @@ export class ConnectorsService {
       }
     }
 
-    this.discoveryCache = { connectors, errors }
+    this.discoveryCache = { connectors, errors, bundledHash }
     return this.discoveryCache
   }
 

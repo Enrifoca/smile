@@ -17,12 +17,13 @@ Used by `index.ts` on every user turn. Connector-neutral — uses tool **categor
 ```text
 User message (in conversation history)
   → agent loop (tools + model)
-      -> shouldNudgeIncompleteWorkflow(toolsRunThisTurn, responseText)
+      -> shouldNudgeIncompleteWorkflow(toolsRunThisTurn, responseText, { activeReportPath })
        signals:
          - retry/fix promise without a tool call
          - framework-visible pending write from a tool result
          - read-only tools used this turn with no follow-up write
-       -> [SYSTEM] nudge from buildIncompleteWorkflowNudge(responseText, toolsRunThisTurn)
+         - active report is pinned and the model asks "which report"
+       -> [SYSTEM] nudge from buildIncompleteWorkflowNudge(responseText, toolsRunThisTurn, { activeReportPath })
 ```
 
 ## Module API (`taskContinuity.ts`)

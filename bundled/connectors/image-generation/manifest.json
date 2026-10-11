@@ -2,23 +2,41 @@
   "apiVersion": "1.0",
   "id": "image-generation",
   "name": "Image Generation",
-  "version": "1.0.0",
-  "description": "Generate images from text prompts using hosted image models. Supports OpenAI DALL-E 3 and Replicate FLUX.",
+  "version": "1.1.0",
+  "description": "Generate images from text prompts using hosted image models. Supports OpenAI DALL-E 3, Replicate FLUX, and Qwen / QwenCloud.",
   "handlerKind": "code",
   "integrationType": "rest",
   "auth": {
     "type": "api-key",
     "fields": [
-      { "key": "provider", "label": "Provider", "secret": false, "optional": false },
+      {
+        "key": "provider",
+        "label": "Provider",
+        "type": "select",
+        "secret": false,
+        "optional": false,
+        "options": [
+          { "value": "openai", "label": "OpenAI" },
+          { "value": "replicate", "label": "Replicate" },
+          { "value": "qwen", "label": "Qwen / Alibaba Cloud" }
+        ]
+      },
+      {
+        "key": "model",
+        "label": "Model",
+        "secret": false,
+        "optional": false
+      },
       { "key": "apiKey", "label": "API key", "secret": true, "optional": false }
     ]
   },
   "permissions": {
     "http": [
       "https://api.openai.com",
-      "https://api.replicate.com"
+      "https://api.replicate.com",
+      "https://maas.qwencloudapi.com"
     ],
-    "secrets": ["provider", "apiKey"]
+    "secrets": ["provider", "model", "apiKey"]
   },
   "ui": {
     "catalogLabel": "Image Generation",
@@ -44,6 +62,20 @@
           "style": { "type": "string", "description": "Style hint, e.g. vivid, natural. Provider-specific." }
         },
         "required": ["prompt"]
+      }
+    },
+    {
+      "name": "image_generation_list_models",
+      "description": "List available image generation models for the configured provider. Used by the settings UI.",
+      "category": "connector-read",
+      "requiresConfirmation": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": { "type": "string", "description": "Provider id: openai, replicate, or qwen." },
+          "apiKey": { "type": "string", "description": "API key for the provider." }
+        },
+        "required": ["provider", "apiKey"]
       }
     }
   ]

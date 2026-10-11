@@ -90,7 +90,7 @@ export interface ChartValidationResult {
 }
 
 const MAX_CATEGORIES = 30
-const MIN_ROWS = 2
+const MIN_ROWS = 1
 
 /**
  * Combine rows that share the same category label by summing their numeric series.
@@ -128,7 +128,7 @@ function aggregateRowsByLabel(
  */
 export function validateChartData(type: ChartType, data: ChartDataRow[]): ChartValidationResult {
   if (!Array.isArray(data) || data.length < MIN_ROWS) {
-    return { valid: false, error: `Chart needs at least ${MIN_ROWS} data rows.` }
+    return { valid: false, error: `Chart needs at least ${MIN_ROWS} data row${MIN_ROWS === 1 ? '' : 's'}.` }
   }
 
   if (data.length > MAX_CATEGORIES && (type === 'pie' || type === 'doughnut')) {

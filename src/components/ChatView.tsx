@@ -6,6 +6,7 @@ import { renderChartToPng, validateChartData } from '../utils/chartRenderer'
 import { renderDiagramToPng } from '../utils/diagramRenderer'
 
 import { Agent, Message, PendingAction, UserProfile, type AgentContextSnapshot, type ToolEntry } from '../agent'
+import type { ActiveReportRef } from '../agent/config'
 import { normalizeUserProfile } from '../agent/communicationPreferences'
 import { MemoryStore } from '../types/memory'
 import { validateLearnedNoteContent } from '../memory/admission'
@@ -192,6 +193,13 @@ export default function ChatView({
   useEffect(() => {
     agent?.setActiveContext(activeContext)
   }, [agent, activeContext])
+
+  useEffect(() => {
+    const report: ActiveReportRef | null = activeReport
+      ? { path: activeReport.artifact.path, title: activeReport.artifact.title }
+      : null
+    agent?.setActiveReport(report)
+  }, [agent, activeReport])
 
   // If the user starts typing while a write action is awaiting approval, they
   // are implicitly choosing to respond instead. Dismiss the approval bar silently
@@ -534,6 +542,7 @@ export default function ChatView({
 
       const newAgent = new Agent({
         userProfile,
+        activeReport: activeReport ? { path: activeReport.artifact.path, title: activeReport.artifact.title } : null,
         connectors: connectors.runtimes,
         monitoredScopes: connectors.scopes,
         memory,
@@ -1198,22 +1207,31 @@ export default function ChatView({
         }
 
         const chartData = (validation.data ?? data) as Array<Record<string, unknown>>
-        const dataUrl = await renderChartToPng({
-          type,
-          data: chartData,
-          title,
-          xAxisLabel: options?.xAxisLabel ? String(options.xAxisLabel) : undefined,
-          yAxisLabel: options?.yAxisLabel ? String(options.yAxisLabel) : undefined,
-          unit: options?.unit ? String(options.unit) : undefined,
-          colors: Array.isArray(options?.colors) ? options.colors.map(String) : undefined,
-          legend: typeof options?.legend === 'boolean' ? options.legend : undefined,
-          dataLabels: typeof options?.dataLabels === 'boolean' ? options.dataLabels : undefined,
-          gridLines: typeof options?.gridLines === 'boolean' ? options.gridLines : undefined,
-          stacked: typeof options?.stacked === 'boolean' ? options.stacked : undefined,
-          smooth: typeof options?.smooth === 'boolean' ? options.smooth : undefined,
-          logScale: typeof options?.logScale === 'boolean' ? options.logScale : undefined,
-          overrides: options,
-        })
+        let dataUrl: string
+        try {
+          dataUrl = await renderChartToPng({
+            type,
+            data: chartData,
+            title,
+            xAxisLabel: options?.xAxisLabel ? String(options.xAxisLabel) : undefined,
+            yAxisLabel: options?.yAxisLabel ? String(options.yAxisLabel) : undefined,
+            unit: options?.unit ? String(options.unit) : undefined,
+            colors: Array.isArray(options?.colors) ? options.colors.map(String) : undefined,
+            legend: typeof options?.legend === 'boolean' ? options.legend : undefined,
+            dataLabels: typeof options?.dataLabels === 'boolean' ? options.dataLabels : undefined,
+            gridLines: typeof options?.gridLines === 'boolean' ? options.gridLines : undefined,
+            stacked: typeof options?.stacked === 'boolean' ? options.stacked : undefined,
+            smooth: typeof options?.smooth === 'boolean' ? options.smooth : undefined,
+            logScale: typeof options?.logScale === 'boolean' ? options.logScale : undefined,
+            overrides: options,
+          })
+        } catch (renderError) {
+          console.error('[ChatView] Chart render failed:', renderError)
+          return {
+            success: false,
+            error: `Chart rendering failed: ${renderError instanceof Error ? renderError.message : String(renderError)}. Check data shape and try again.`,
+          }
+        }
         const save = await saveBase64Image(path, dataUrl, 'charts')
         if (!save.success) return { success: false, error: save.error }
         registerGeneratedImage(save.path, { title })
